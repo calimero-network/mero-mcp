@@ -1,8 +1,10 @@
 import express from 'express';
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp';
-import { Variables } from '@modelcontextprotocol/sdk/shared/uriTemplate';
 import { z } from 'zod';
 import logger from '../utils/logger';
+
+// Define our own type that's compatible with the SDK
+type VariablesMap = Record<string, string | string[]>;
 
 export class MCPExpressServer {
   private app: express.Application;
@@ -10,7 +12,10 @@ export class MCPExpressServer {
   private sseConnections: Set<express.Response>;
   private resources: Map<string, {
     templateString: string;
-    handler: (uri: URL, variables: Variables) => Promise<{
+    handler: (
+      uri: URL, 
+      variables: VariablesMap
+    ) => Promise<{
       contents: Array<{
         uri: string;
         text: string;
@@ -74,7 +79,7 @@ export class MCPExpressServer {
     this.app.get('/mcp/resource/:name', async (req, res) => {
       try {
         const name = req.params.name;
-        const variables: Variables = {};
+        const variables: VariablesMap = {};
         
         // Extract variables from query parameters
         Object.entries(req.query).forEach(([key, value]) => {
@@ -136,7 +141,10 @@ export class MCPExpressServer {
   public registerResource(
     name: string,
     uriTemplate: string,
-    handler: (uri: URL, variables: Variables) => Promise<{
+    handler: (
+      uri: URL, 
+      variables: VariablesMap
+    ) => Promise<{
       contents: Array<{
         uri: string;
         text: string;
@@ -145,7 +153,7 @@ export class MCPExpressServer {
   ) {
     const template = new ResourceTemplate(uriTemplate, { list: undefined });
     this.resources.set(name, { templateString: uriTemplate, handler });
-    this.server.resource(name, template, handler);
+    this.server.resource(name, template, handler as any);
   }
 
   public registerTool(
