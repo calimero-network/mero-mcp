@@ -1,6 +1,3 @@
-#!/usr/bin/env sh
-. "$(dirname -- "$0")/_/husky.sh"
-
 # Run prettier and eslint on staged files
 echo "Running pre-commit hook..."
 echo "Linting staged files..."
@@ -15,4 +12,4 @@ if [ -n "$FILES" ]; then
   git add $FILES
 else
   echo "No TypeScript files staged for commit."
-fi
+fi 

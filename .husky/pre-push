@@ -1,7 +1,4 @@
-#!/usr/bin/env sh
-. "$(dirname -- "$0")/_/husky.sh"
-
 # Run tests to ensure code quality before pushing
 echo "Running pre-push hook..."
 echo "Running tests..."
-PATH="/opt/homebrew/bin:$PATH" /opt/homebrew/bin/npm test
+PATH="/opt/homebrew/bin:$PATH" /opt/homebrew/bin/npm test 
