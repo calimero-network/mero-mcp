@@ -1,13 +1,13 @@
 /**
  * TypeScript type definitions for the MCP schema version 2025-03-26
- * 
+ *
  * Based on: https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/schema/2025-03-26/schema.ts
  */
 
 /**
  * Describes the role of a participant in a conversation.
  */
-export type Role = 'system' | 'user' | 'assistant' | 'tool';
+export type Role = "system" | "user" | "assistant" | "tool";
 
 /**
  * Optional annotations for the client. The client can use annotations to inform how objects are used or displayed
@@ -19,7 +19,7 @@ export interface Annotations {
    * It can include multiple entries to indicate content useful for multiple audiences (e.g., ["user", "assistant"]).
    */
   audience?: Role[];
-  
+
   /**
    * Describes how important this data is for operating the server.
    *
@@ -96,7 +96,7 @@ export interface ResourceContent {
    * The URI of the resource
    */
   uri: string;
-  
+
   /**
    * The text content of the resource
    */
@@ -110,7 +110,7 @@ export interface ToolAnnotations {
   /**
    * If true, this tool doesn't modify any state and is safe to call
    * repeatedly. If false, this tool may change external state.
-   * 
+   *
    * Default: false
    */
   readOnlyHint?: boolean;
@@ -119,19 +119,19 @@ export interface ToolAnnotations {
    * If true, this tool may modify state in a non-reversible way
    * (e.g., sending an email or making a payment). The agent should
    * be especially careful when calling destructive tools.
-   * 
+   *
    * (This property is meaningful only when `readOnlyHint == false`)
-   * 
+   *
    * Default: true
    */
   destructiveHint?: boolean;
 
   /**
-   * If true, calling the tool repeatedly with the same arguments 
+   * If true, calling the tool repeatedly with the same arguments
    * will have no additional effect on the its environment.
-   * 
+   *
    * (This property is meaningful only when `readOnlyHint == false`)
-   * 
+   *
    * Default: false
    */
   idempotentHint?: boolean;
@@ -141,7 +141,7 @@ export interface ToolAnnotations {
    * entities. If false, the tool's domain of interaction is closed.
    * For example, the world of a web search tool is open, whereas that
    * of a memory tool is not.
-   * 
+   *
    * Default: true
    */
   openWorldHint?: boolean;
@@ -159,7 +159,7 @@ export interface Tool {
   /**
    * A human-readable description of the tool.
    *
-   * This can be used by clients to improve the LLM's understanding of available tools. 
+   * This can be used by clients to improve the LLM's understanding of available tools.
    * It can be thought of like a "hint" to the model.
    */
   description?: string;
@@ -211,7 +211,7 @@ export interface ModelPreferences {
    * The name of a specific model to use, if available.
    */
   name?: string;
-  
+
   /**
    * Minimum requirements the model should meet.
    */
@@ -220,15 +220,15 @@ export interface ModelPreferences {
      * Minimum number of context tokens required.
      */
     minContextTokens?: number;
-    
+
     /**
      * Minimum generation tokens required.
      */
     minGenerationTokens?: number;
-    
+
     /**
      * Whether multimodal capabilities are required.
      */
     multimodal?: boolean;
   };
-} 
+}

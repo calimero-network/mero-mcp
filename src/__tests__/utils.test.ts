@@ -1,8 +1,8 @@
-import logger from '../utils/logger';
-import winston from 'winston';
+import logger from "../utils/logger";
+import winston from "winston";
 
 // Mock winston
-jest.mock('winston', () => {
+jest.mock("winston", () => {
   const mockFormat = {
     combine: jest.fn().mockReturnThis(),
     timestamp: jest.fn().mockReturnThis(),
@@ -26,35 +26,35 @@ jest.mock('winston', () => {
   };
 });
 
-describe('Logger', () => {
+describe("Logger", () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
-  it('should have the expected methods', () => {
+  it("should have the expected methods", () => {
     expect(logger.info).toBeDefined();
     expect(logger.error).toBeDefined();
     expect(logger.warn).toBeDefined();
     expect(logger.debug).toBeDefined();
   });
 
-  it('should log info messages', () => {
-    logger.info('Test info message', { data: 'test' });
+  it("should log info messages", () => {
+    logger.info("Test info message", { data: "test" });
     expect(jest.mocked(winston).createLogger().info).toHaveBeenCalled();
   });
 
-  it('should log error messages', () => {
-    logger.error('Test error message', { error: new Error('Test error') });
+  it("should log error messages", () => {
+    logger.error("Test error message", { error: new Error("Test error") });
     expect(jest.mocked(winston).createLogger().error).toHaveBeenCalled();
   });
 
-  it('should log warning messages', () => {
-    logger.warn('Test warning message');
+  it("should log warning messages", () => {
+    logger.warn("Test warning message");
     expect(jest.mocked(winston).createLogger().warn).toHaveBeenCalled();
   });
 
-  it('should log debug messages', () => {
-    logger.debug('Test debug message');
+  it("should log debug messages", () => {
+    logger.debug("Test debug message");
     expect(jest.mocked(winston).createLogger().debug).toHaveBeenCalled();
   });
-}); 
+});
