@@ -134,6 +134,9 @@ docker run -p 3000:3000 -e NODE_ENV=production mero-mcp
 For a more complete setup, you can use Docker Compose:
 
 ```bash
+# Fix any Docker build issues first
+./scripts/docker-fix.sh
+
 # Start the services
 docker-compose up -d
 

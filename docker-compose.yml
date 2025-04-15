@@ -1,9 +1,14 @@
+# This version ensures compatibility with most Docker Compose installations
+version: '3.8'
+
 services:
+  # Main MCP server service 
   mero-mcp:
-    container_name: mero-mcp
     build:
       context: .
       dockerfile: Dockerfile
+    image: mero-mcp:latest
+    container_name: mero-mcp
     ports:
       - "3000:3000"
     environment:
@@ -11,7 +16,7 @@ services:
       - PORT=3000
       - LOG_LEVEL=info
     volumes:
-      - ./data:/app/data:rw
+      - ./data:/app/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
@@ -19,13 +24,16 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+    networks:
+      - mero-net
 
-  # Uncomment to add a development service with hot reloading
+  # Uncomment this block to run a development server
   # mero-mcp-dev:
-  #   container_name: mero-mcp-dev
   #   build: 
   #     context: .
-  #     dockerfile: Dockerfile
+  #     dockerfile: Dockerfile.dev
+  #   image: mero-mcp:dev
+  #   container_name: mero-mcp-dev
   #   command: npm run dev
   #   ports:
   #     - "3001:3000"
@@ -36,8 +44,9 @@ services:
   #   volumes:
   #     - .:/app
   #     - /app/node_modules
-  #   restart: unless-stopped
+  #   networks:
+  #     - mero-net
 
 networks:
-  default:
-    name: mero-network 
+  mero-net:
+    driver: bridge 

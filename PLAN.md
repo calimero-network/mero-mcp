@@ -30,7 +30,7 @@ This plan outlines steps to improve the MCP Server project following open source
 1. **Create Standard Documentation Files** ✅
    - Update README.md with comprehensive project information ✅
    - Create CONTRIBUTING.md with contribution guidelines ✅
-   - Add CODE_OF_CONDUCT.md ✅
+   - Add CODE_OF_CONDUCT.md (TODO) ⏳
    - Move test information from TEST_*.md files to proper documentation ✅
 
 2. **API Documentation** ✅
@@ -47,9 +47,9 @@ This plan outlines steps to improve the MCP Server project following open source
    - Set up automatic documentation deployment ✅
    - Create user-friendly navigation ✅
 
-## Phase 3: MCP Specification Compliance
+## Phase 3: MCP Specification Compliance (NEXT PHASE) ⏳
 
-1. **Update SDK and Type Definitions**
+1. **Update SDK and Type Definitions** ⏳
    - Update `@modelcontextprotocol/sdk` to latest version
    - Implement type definitions for schema 2025-03-26
    - Create TypeScript interfaces aligned with latest schema
@@ -167,7 +167,16 @@ This plan outlines steps to improve the MCP Server project following open source
 4. **Review**: Self-review changes before committing
 5. **Integration Testing**: Test with actual Calimero nodes at key milestones
 
-## Next Steps
+## Day 1 Progress Summary ✅
+- ✅ Set up project structure and GitHub repository
+- ✅ Implemented basic MCP server with Express
+- ✅ Created CI/CD pipelines with GitHub Actions
+- ✅ Added Docker and Docker Compose support
+- ✅ Created comprehensive documentation structure
+- ✅ Set up linting, formatting, and testing infrastructure
+- ✅ Implemented basic CLI tool for common operations
+
+## Next Steps (Day 2)
 1. **MCP Schema Compliance**: Update types for 2025-03-26 schema
 2. **Basic Mock Resources**: Implement file-based resource provider
 3. **Mock Tools**: Create basic operation tools
