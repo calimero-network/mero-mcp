@@ -1,6 +1,9 @@
 #!/usr/bin/env sh
 . "$(dirname -- "$0")/_/husky.sh"
 
+# Add node to PATH
+export PATH="/opt/homebrew/bin:$PATH"
+
 # Get the project root directory
 PROJECT_ROOT="$(git rev-parse --show-toplevel)"
 # Path to CLI script
