@@ -19,6 +19,7 @@ A robust Express-based server implementation of the [Model Context Protocol (MCP
   - [Running in Development](#running-in-development)
   - [Building for Production](#building-for-production)
   - [Docker Deployment](#docker-deployment)
+  - [Docker Compose](#docker-compose)
 - [API Documentation](#api-documentation)
 - [Testing](#testing)
 - [CI/CD](#cicd)
@@ -123,9 +124,33 @@ npm start
 ### Docker Deployment
 
 ```bash
+# Build and run with Docker
 docker build -t mero-mcp .
 docker run -p 3000:3000 -e NODE_ENV=production mero-mcp
 ```
+
+### Docker Compose
+
+For a more complete setup, you can use Docker Compose:
+
+```bash
+# Start the services
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+
+# Stop the services
+docker-compose down
+```
+
+The provided `docker-compose.yml` includes:
+- Production-ready Mero MCP server
+- Proper volume mapping for data persistence
+- Health checks for container monitoring
+- A commented-out development service configuration
+
+To customize the Docker Compose setup, edit the `docker-compose.yml` file in the project root.
 
 ## API Documentation
 
@@ -153,6 +178,40 @@ npm test -- --coverage
 # or
 ./bin/mero-cli coverage
 ```
+
+### Docker Setup Testing
+
+To verify that your Docker setup is working correctly, you can use the provided script:
+
+```bash
+# Test Docker deployment
+./scripts/docker-test.sh
+
+# Optionally specify a custom container name
+./scripts/docker-test.sh my-custom-container-name
+```
+
+This script:
+1. Verifies that required dependencies are installed
+2. Checks if the Docker container is running
+3. Tests all API endpoints to ensure they're functioning correctly
+4. Cleans up any test artifacts created during testing
+
+### SSE Functionality Testing
+
+To test the Server-Sent Events (SSE) functionality, including the event broadcasting feature:
+
+```bash
+# Test SSE functionality
+./scripts/test-sse.sh
+```
+
+This script:
+1. Establishes an SSE connection to the server
+2. Attempts to trigger and receive broadcast events
+3. Verifies that the connection and event handling are working correctly
+
+Both test scripts provide detailed output and clear error messages to help diagnose any issues.
 
 ## CI/CD
 
