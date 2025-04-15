@@ -8,7 +8,7 @@ on:
       - 'package-lock.json'
       - 'tsconfig.json'
       - 'jest.config.js'
-      - '.eslintrc.js'
+      - '.eslintrc.cjs'
 
 jobs:
   validate-changes:
