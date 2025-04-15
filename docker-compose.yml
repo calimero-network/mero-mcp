@@ -11,7 +11,7 @@ services:
       - PORT=3000
       - LOG_LEVEL=info
     volumes:
-      - ./data:/app/data
+      - ./data:/app/data:rw
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
