@@ -31,7 +31,8 @@ cd "$PROJECT_ROOT"
 
 # Check if node-fetch is installed and install it if not
 if ! npm list node-fetch &> /dev/null; then
-    npm install --no-save node-fetch@3 # Using version 3 for ESM support
+    echo "📦 Installing node-fetch..."
+    npm install --no-save node-fetch@2 # Using version 2 for better compatibility
 fi
 
 # Check if Docker is running

@@ -1,0 +1,87 @@
+name: Docker SSE Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'Dockerfile'
+      - 'docker-compose.yml'
+      - 'scripts/test-docker-sse.sh'
+      - 'scripts/docker-test.js'
+      - 'scripts/docker-test.sh'
+      - '.github/workflows/docker-sse-test.yml'
+
+jobs:
+  docker-test:
+    name: Docker and SSE Testing
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+      
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm install -g node-fetch@2 eventsource
+      
+      - name: Install Docker Compose
+        run: |
+          sudo curl -L "https://github.com/docker/compose/releases/download/v2.23.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+          sudo chmod +x /usr/local/bin/docker-compose
+          docker-compose --version
+      
+      - name: Build and Start Docker container
+        run: |
+          docker-compose build
+          docker-compose up -d
+      
+      - name: Wait for container to be ready
+        run: |
+          # Wait for up to 30 seconds for the container to be healthy
+          timeout=30
+          elapsed=0
+          while [ $elapsed -lt $timeout ]; do
+            if docker-compose ps | grep -q "healthy"; then
+              echo "Container is healthy!"
+              break
+            fi
+            echo "Waiting for container to be healthy... ($elapsed/$timeout seconds)"
+            sleep 5
+            elapsed=$((elapsed + 5))
+          done
+          
+          if [ $elapsed -ge $timeout ]; then
+            echo "Container health check timed out"
+            docker-compose logs
+            exit 1
+          fi
+      
+      - name: Run Docker test
+        run: |
+          # Run the docker test script
+          ./scripts/docker-test.sh
+      
+      - name: Run SSE test
+        run: |
+          # Run the SSE test script
+          ./scripts/test-docker-sse.sh
+      
+      - name: Display logs on failure
+        if: ${{ failure() }}
+        run: |
+          docker-compose ps
+          docker-compose logs
+      
+      - name: Clean up
+        if: ${{ always() }}
+        run: |
+          docker-compose down 

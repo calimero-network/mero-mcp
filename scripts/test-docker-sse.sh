@@ -25,7 +25,7 @@ fi
 
 # Install required dependencies in container
 echo "📦 Installing required packages in container..."
-docker-compose exec mero-mcp npm install --no-save node-fetch@2 eventsource
+docker-compose exec -T mero-mcp npm install --no-save node-fetch@2 eventsource
 
 # Create test script
 echo "🔧 Creating test script..."
