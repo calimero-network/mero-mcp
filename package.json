@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "description": "Custom MCP server implementation using Express",
   "main": "dist/index.js",
-  "type": "module",
   "bin": {
     "mero-cli": "./bin/mero-cli"
   },

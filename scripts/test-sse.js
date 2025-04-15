@@ -10,7 +10,8 @@
  */
 
 import fetch from 'node-fetch';
-import EventSource from 'eventsource';
+import * as eventsource from 'eventsource';
+const { EventSource } = eventsource;
 import { setTimeout } from 'timers/promises';
 
 // Configuration
@@ -79,7 +80,7 @@ async function testSSEBroadcasting() {
   // Create a promise that will resolve when the test is complete
   return new Promise((resolve, reject) => {
     // Set a timeout to fail the test if it takes too long
-    const timeoutId = setTimeout(() => {
+    const timeoutId = global.setTimeout(() => {
       reject(new Error('SSE test timed out'));
     }, TEST_TIMEOUT_MS);
     
@@ -103,7 +104,7 @@ async function testSSEBroadcasting() {
           // Waited long enough, if we don't receive an event, the test will timeout
           console.log('⚠️ No events received yet, waiting...');
         } catch (error) {
-          clearTimeout(timeoutId);
+          global.clearTimeout(timeoutId);
           eventSource.close();
           reject(error);
         }
@@ -116,11 +117,11 @@ async function testSSEBroadcasting() {
           console.log(`✅ Received test event: ${JSON.stringify(data)}`);
           
           // Close the connection and resolve the promise
-          clearTimeout(timeoutId);
+          global.clearTimeout(timeoutId);
           eventSource.close();
           resolve();
         } catch (error) {
-          clearTimeout(timeoutId);
+          global.clearTimeout(timeoutId);
           eventSource.close();
           reject(error);
         }
@@ -134,12 +135,12 @@ async function testSSEBroadcasting() {
       // Handle errors
       eventSource.onerror = (error) => {
         console.error('❌ SSE connection error:', error);
-        clearTimeout(timeoutId);
+        global.clearTimeout(timeoutId);
         eventSource.close();
         reject(new Error('SSE connection error'));
       };
     } catch (error) {
-      clearTimeout(timeoutId);
+      global.clearTimeout(timeoutId);
       reject(error);
     }
   });
@@ -178,7 +179,7 @@ async function triggerTestBroadcast() {
   }
   
   // Wait a moment
-  await setTimeout(1000);
+  await new Promise(resolve => global.setTimeout(resolve, 1000));
   
   // Delete the file
   const deleteResponse = await fetch(`${BASE_URL}/mcp/tool/delete_file`, {

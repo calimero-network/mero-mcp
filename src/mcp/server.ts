@@ -1,5 +1,5 @@
 import express from 'express';
-import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp';
+import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import logger from '../utils/logger';
 import { FileSystemResourceProvider } from '../resources/fileSystemResource';
@@ -55,12 +55,12 @@ export class MCPExpressServer {
 
   private setupRoutes(): void {
     // Health check endpoint
-    this.app.get('/health', (req, res) => {
+    this.app.get('/health', (req, res): void => {
       res.json({ status: 'ok' });
     });
 
     // SSE endpoint for server-sent events
-    this.app.get('/mcp/sse', (req, res) => {
+    this.app.get('/mcp/sse', (req, res): void => {
       try {
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache');
@@ -83,14 +83,17 @@ export class MCPExpressServer {
           this.sseConnections.delete(res);
           res.end();
         });
+        
+        // For SSE connections that stay open, we don't return anything
       } catch (error) {
         logger.error('SSE setup error', { error });
         res.status(500).json({ error: 'Internal server error' });
+        // Don't return anything to match void return type
       }
     });
 
     // Resource endpoint
-    this.app.get('/mcp/resource/:name', async (req, res) => {
+    this.app.get('/mcp/resource/:name', async (req, res): Promise<void> => {
       try {
         const name = req.params.name;
         const variables: VariablesMap = {};
@@ -106,7 +109,8 @@ export class MCPExpressServer {
 
         const resourceHandler = this.resources.get(name);
         if (!resourceHandler) {
-          return res.status(404).json({ error: `Resource '${name}' not found` });
+          res.status(404).json({ error: `Resource '${name}' not found` });
+          return;
         }
 
         // Construct a URL using the template string
@@ -126,33 +130,33 @@ export class MCPExpressServer {
     });
 
     // Tool endpoint
-    this.app.post('/mcp/tool/:name', async (req, res) => {
+    this.app.post('/mcp/tool/:name', async (req, res): Promise<express.Response> => {
       try {
         const { name } = req.params;
         const { parameters } = req.body;
         const result = await this.server.tool(name, parameters);
-        res.json(result);
+        return res.json(result);
       } catch (error) {
         logger.error('Tool request error', { error });
-        res.status(500).json({ error: 'Internal server error' });
+        return res.status(500).json({ error: 'Internal server error' });
       }
     });
 
     // Prompt endpoint
-    this.app.post('/mcp/prompt/:name', async (req, res) => {
+    this.app.post('/mcp/prompt/:name', async (req, res): Promise<express.Response> => {
       try {
         const { name } = req.params;
         const { parameters } = req.body;
         const result = await this.server.prompt(name, parameters);
-        res.json(result);
+        return res.json(result);
       } catch (error) {
         logger.error('Prompt request error', { error });
-        res.status(500).json({ error: 'Internal server error' });
+        return res.status(500).json({ error: 'Internal server error' });
       }
     });
 
     // Logging endpoint
-    this.app.post('/mcp/logging/setLevel', (req, res) => {
+    this.app.post('/mcp/logging/setLevel', (req, res): express.Response => {
       try {
         const { level } = req.body.params;
         
@@ -166,10 +170,10 @@ export class MCPExpressServer {
         // Here you would actually set the logging level
         // This is a mock implementation
         
-        res.json({ result: true });
+        return res.json({ result: true });
       } catch (error) {
         logger.error('Logging level request error', { error });
-        res.status(500).json({ error: 'Internal server error' });
+        return res.status(500).json({ error: 'Internal server error' });
       }
     });
   }
@@ -204,7 +208,12 @@ export class MCPExpressServer {
         }
         
         // We need to type cast the handler to match the expected signature
-        const typedHandler = (args: Record<string, unknown>, extra: { signal: AbortSignal }) => {
+        const typedHandler = (args: Record<string, unknown>, extra: { signal: AbortSignal }): Promise<{
+          content: Array<{
+            type: "text";
+            text: string;
+          }>;
+        }> => {
           // The original handler expects specific args, but we're getting a generic Record
           // We'll just pass it through and let TypeScript handle it
           return handler(args as any, extra);
@@ -258,7 +267,7 @@ export class MCPExpressServer {
     paramsSchema: z.ZodRawShape,
     handler: (args: Record<string, unknown>, extra: { signal: AbortSignal }) => Promise<{
       content: Array<{
-        type: 'text';
+        type: "text";
         text: string;
       }>;
     }>
@@ -280,6 +289,52 @@ export class MCPExpressServer {
     }
   ): void {
     this.server.prompt(name, argsSchema, handler);
+  }
+
+  /**
+   * Sends an event to a specific SSE client
+   * @param connection The SSE connection to send to
+   * @param eventName The name of the event
+   * @param data The data to send with the event
+   * @returns true if successful, false if the connection is no longer valid
+   */
+  public sendEvent(connection: express.Response, eventName: string, data: any): boolean {
+    if (!this.sseConnections.has(connection)) {
+      return false;
+    }
+    
+    try {
+      const eventString = `event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`;
+      connection.write(eventString);
+      return true;
+    } catch (error) {
+      logger.error('Error sending event to SSE client', { error });
+      this.sseConnections.delete(connection);
+      return false;
+    }
+  }
+
+  /**
+   * Broadcasts an event to all connected SSE clients
+   * @param eventName The name of the event
+   * @param data The data to send with the event
+   */
+  public broadcastEvent(eventName: string, data: any): void {
+    const eventString = `event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`;
+    
+    logger.debug(`Broadcasting event to ${this.sseConnections.size} clients`, { 
+      eventName, 
+      clientsCount: this.sseConnections.size 
+    });
+    
+    this.sseConnections.forEach(connection => {
+      try {
+        connection.write(eventString);
+      } catch (error) {
+        logger.error('Error broadcasting to SSE client', { error });
+        this.sseConnections.delete(connection);
+      }
+    });
   }
 
   public start(port: number): void {

@@ -3,9 +3,15 @@ import request from 'supertest';
 import { URL } from 'url';
 import express from 'express';
 import { z } from 'zod';
-import { Variables } from '@modelcontextprotocol/sdk/shared/uriTemplate';
+import { Variables } from '@modelcontextprotocol/sdk/shared/uriTemplate.js';
 // Import logger for testing
 import logger from '../utils/logger';
+
+// Mock the file tools
+jest.mock('../tools/fileTools', () => ({
+  fileTools: [],
+  fileToolHandlers: {}
+}));
 
 // Mock the logger properly
 jest.mock('../utils/logger', () => ({
@@ -23,7 +29,13 @@ jest.mock('@modelcontextprotocol/sdk/server/mcp', () => {
   return {
     McpServer: jest.fn().mockImplementation(() => {
       return {
-        tool: jest.fn().mockImplementation((name, _parameters) => {
+        tool: jest.fn().mockImplementation((name, schema, handler) => {
+          // During initialization, just register the tool without throwing errors
+          if (handler) {
+            return;
+          }
+          
+          // When called from the tool endpoint
           if (name === 'test-tool') {
             return Promise.resolve({
               content: [{
@@ -35,7 +47,13 @@ jest.mock('@modelcontextprotocol/sdk/server/mcp', () => {
             return Promise.reject(new Error('Tool not found'));
           }
         }),
-        prompt: jest.fn().mockImplementation((name, _parameters) => {
+        prompt: jest.fn().mockImplementation((name, schema, handler) => {
+          // During initialization, just register the prompt without throwing errors
+          if (handler) {
+            return;
+          }
+          
+          // When called from the prompt endpoint
           if (name === 'test-prompt') {
             return Promise.resolve({
               messages: [{
@@ -122,28 +140,259 @@ describe('MCPExpressServer', () => {
   });
 
   describe('SSE Connection', () => {
-    // Use a simple test that doesn't rely on SSE connection establishment
+    let sseHandler: (req: express.Request, res: express.Response) => void;
+    
+    beforeEach(() => {
+      // Extract the SSE handler from the routes
+      const routes = app._router.stack.filter((layer: any) => 
+        layer.route && layer.route.path === '/mcp/sse' && layer.route.methods.get
+      );
+      sseHandler = routes[0].route.stack[0].handle;
+    });
+    
     it('should set correct headers for SSE connections', () => {
-      // Create a mock response object to check headers
+      // Create mock request and response
+      const req = { on: jest.fn() } as any;
       const res = {
         setHeader: jest.fn(),
         on: jest.fn(),
-        end: jest.fn()
-      };
-      const req = { on: jest.fn() };
+        end: jest.fn(),
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn()
+      } as any;
       
-      // Call the SSE endpoint directly
-      app._router.handle({ 
-        method: 'GET', 
-        url: '/mcp/sse',
-        headers: {},
-        on: req.on 
-      }, res);
+      // Call the handler directly
+      sseHandler(req, res);
       
       // Verify headers are set correctly
       expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'text/event-stream');
       expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'no-cache');
       expect(res.setHeader).toHaveBeenCalledWith('Connection', 'keep-alive');
+    });
+
+    it('should broadcast events to all SSE connections', () => {
+      // Create mock response objects to simulate SSE connections
+      const res1 = { write: jest.fn(), on: jest.fn() } as any;
+      const res2 = { write: jest.fn(), on: jest.fn() } as any;
+      
+      // Add the connections to the server's sseConnections Set
+      // We need to access the private property using type casting
+      const connections = (server as any).sseConnections;
+      connections.add(res1);
+      connections.add(res2);
+      
+      // Broadcast an event
+      server.broadcastEvent('test-event', { message: 'Hello World' });
+      
+      // Verify that write was called on both connections with the correct format
+      const expectedData = 'event: test-event\ndata: {"message":"Hello World"}\n\n';
+      expect(res1.write).toHaveBeenCalledWith(expectedData);
+      expect(res2.write).toHaveBeenCalledWith(expectedData);
+      
+      // Test sending to a specific connection
+      server.sendEvent(res1 as any, 'specific-event', { value: 42 });
+      
+      // Verify that only res1 received the specific event
+      const specificEventData = 'event: specific-event\ndata: {"value":42}\n\n';
+      expect(res1.write).toHaveBeenCalledWith(specificEventData);
+      expect(res2.write).not.toHaveBeenCalledWith(specificEventData);
+    });
+    
+    it('should handle connection cleanup on client disconnect', () => {
+      // Create mock request and response
+      const req = { on: jest.fn() } as any;
+      const res = {
+        setHeader: jest.fn(),
+        on: jest.fn(),
+        end: jest.fn(),
+        write: jest.fn(),
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn()
+      } as any;
+      
+      // Call the handler directly
+      sseHandler(req, res);
+      
+      // Get the 'close' handler from the request.on() call
+      const closeHandler = req.on.mock.calls.find((call: [string, Function]) => call[0] === 'close')[1];
+      
+      // Verify the connection was added
+      const connections = (server as any).sseConnections;
+      expect(connections.has(res)).toBe(true);
+      
+      // Simulate client disconnection
+      closeHandler();
+      
+      // Verify the connection was removed
+      expect(connections.has(res)).toBe(false);
+    });
+    
+    it('should handle request errors properly', () => {
+      // Create mock request and response
+      const req = { on: jest.fn() } as any;
+      const res = {
+        setHeader: jest.fn(),
+        on: jest.fn(),
+        end: jest.fn(),
+        write: jest.fn(),
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn()
+      } as any;
+      
+      // Call the handler directly
+      sseHandler(req, res);
+      
+      // Get the 'error' handler from the request.on() call
+      const errorHandler = req.on.mock.calls.find((call: [string, Function]) => call[0] === 'error')[1];
+      
+      // Verify the connection was added
+      const connections = (server as any).sseConnections;
+      expect(connections.has(res)).toBe(true);
+      
+      // Simulate an error
+      const testError = new Error('Test error');
+      errorHandler(testError);
+      
+      // Verify error was logged
+      expect(logger.error).toHaveBeenCalledWith('SSE connection error', expect.objectContaining({ error: testError }));
+      
+      // Verify the connection was removed and response ended
+      expect(connections.has(res)).toBe(false);
+      expect(res.end).toHaveBeenCalled();
+    });
+    
+    it('should handle response errors properly', () => {
+      // Create mock request and response
+      const req = { on: jest.fn() } as any;
+      const res = {
+        setHeader: jest.fn(),
+        on: jest.fn(),
+        end: jest.fn(),
+        write: jest.fn(),
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn()
+      } as any;
+      
+      // Call the handler directly
+      sseHandler(req, res);
+      
+      // Get the 'error' handler from the response.on() call
+      const errorHandler = res.on.mock.calls.find((call: [string, Function]) => call[0] === 'error')[1];
+      
+      // Verify the connection was added
+      const connections = (server as any).sseConnections;
+      expect(connections.has(res)).toBe(true);
+      
+      // Simulate an error
+      const testError = new Error('Test error');
+      errorHandler(testError);
+      
+      // Verify error was logged
+      expect(logger.error).toHaveBeenCalledWith('SSE response error', expect.objectContaining({ error: testError }));
+      
+      // Verify the connection was removed and response ended
+      expect(connections.has(res)).toBe(false);
+      expect(res.end).toHaveBeenCalled();
+    });
+    
+    it('should handle connection write errors during broadcast', () => {
+      // Create mock response objects - one that throws an error when write is called
+      const res1 = { 
+        write: jest.fn().mockImplementation(() => {
+          throw new Error('Write error');
+        }),
+        on: jest.fn()
+      } as any;
+      const res2 = { 
+        write: jest.fn(), 
+        on: jest.fn() 
+      } as any;
+      
+      // Add the connections to the server's sseConnections Set
+      const connections = (server as any).sseConnections;
+      connections.add(res1);
+      connections.add(res2);
+      
+      // Broadcast an event
+      server.broadcastEvent('test-event', { message: 'Hello World' });
+      
+      // Verify error was logged
+      expect(logger.error).toHaveBeenCalledWith('Error broadcasting to SSE client', expect.objectContaining({ 
+        error: expect.objectContaining({ message: 'Write error' }) 
+      }));
+      
+      // Verify the problematic connection was removed
+      expect(connections.has(res1)).toBe(false);
+      expect(connections.has(res2)).toBe(true);
+      
+      // Verify the working connection still received the event
+      const expectedData = 'event: test-event\ndata: {"message":"Hello World"}\n\n';
+      expect(res2.write).toHaveBeenCalledWith(expectedData);
+    });
+    
+    it('should handle invalid connections in sendEvent', () => {
+      // Create a valid response object
+      const res = { write: jest.fn(), on: jest.fn() } as any;
+      
+      // Add it to the connections
+      const connections = (server as any).sseConnections;
+      connections.add(res);
+      
+      // Create an invalid response object (not in the connections set)
+      const invalidRes = { write: jest.fn(), on: jest.fn() } as any;
+      
+      // Try sending to invalid connection
+      const result = server.sendEvent(invalidRes, 'test-event', { message: 'Hello' });
+      
+      // Verify it returns false and doesn't call write
+      expect(result).toBe(false);
+      expect(invalidRes.write).not.toHaveBeenCalled();
+    });
+    
+    it('should handle write errors in sendEvent', () => {
+      // Create a response that throws on write
+      const res = { 
+        write: jest.fn().mockImplementation(() => {
+          throw new Error('Write error');
+        }), 
+        on: jest.fn() 
+      } as any;
+      
+      // Add it to the connections
+      const connections = (server as any).sseConnections;
+      connections.add(res);
+      
+      // Try sending to the error-throwing connection
+      const result = server.sendEvent(res, 'test-event', { message: 'Hello' });
+      
+      // Verify it returns false, logs the error, and removes the connection
+      expect(result).toBe(false);
+      expect(logger.error).toHaveBeenCalledWith('Error sending event to SSE client', expect.objectContaining({ 
+        error: expect.objectContaining({ message: 'Write error' }) 
+      }));
+      expect(connections.has(res)).toBe(false);
+    });
+    
+    it('should handle errors during SSE setup', () => {
+      // Create mock request and response with a throwing setHeader
+      const req = { on: jest.fn() } as any;
+      const res = {
+        setHeader: jest.fn().mockImplementation(() => {
+          throw new Error('Setup error');
+        }),
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn()
+      } as any;
+      
+      // Call the handler directly
+      sseHandler(req, res);
+      
+      // Verify error handling
+      expect(logger.error).toHaveBeenCalledWith('SSE setup error', expect.objectContaining({
+        error: expect.objectContaining({ message: 'Setup error' })
+      }));
+      expect(res.status).toHaveBeenCalledWith(500);
+      expect(res.json).toHaveBeenCalledWith({ error: 'Internal server error' });
     });
   });
 
@@ -253,6 +502,38 @@ describe('MCPExpressServer', () => {
 
       // Verify the server was started on the correct port
       expect(mockListen).toHaveBeenCalledWith(3000, expect.any(Function));
+    });
+  });
+
+  describe('Logging Endpoint', () => {
+    it('should handle valid logging level requests', async () => {
+      const response = await request(app)
+        .post('/mcp/logging/setLevel')
+        .send({ params: { level: 'debug' } })
+        .expect(200);
+      
+      expect(response.body).toEqual({ result: true });
+      expect(logger.info).toHaveBeenCalledWith('Setting logging level', { level: 'debug' });
+    });
+    
+    it('should reject invalid logging level requests', async () => {
+      const response = await request(app)
+        .post('/mcp/logging/setLevel')
+        .send({ params: { level: 'invalid-level' } })
+        .expect(400);
+      
+      expect(response.body.error).toContain('Invalid logging level');
+    });
+    
+    it('should handle errors in logging endpoint', async () => {
+      // Create a request that will cause an error by sending malformed data
+      const response = await request(app)
+        .post('/mcp/logging/setLevel')
+        .send({ invalid: 'data' }) // Not using the expected params structure
+        .expect(500);
+      
+      expect(response.body.error).toBe('Internal server error');
+      expect(logger.error).toHaveBeenCalled();
     });
   });
 }); 
