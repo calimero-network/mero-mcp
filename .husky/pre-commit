@@ -1,6 +1,18 @@
 #!/usr/bin/env sh
 . "$(dirname -- "$0")/_/husky.sh"
 
-# Run lint-staged to check only staged files
+# Run prettier and eslint on staged files
 echo "Running pre-commit hook..."
-echo "Staged files will be linted."
+echo "Linting staged files..."
+
+# Check if any TypeScript files are staged
+FILES=$(git diff --cached --name-only --diff-filter=ACMR | grep "\.ts$" || true)
+
+if [ -n "$FILES" ]; then
+  echo "Running prettier and eslint on staged TypeScript files..."
+  PATH="/opt/homebrew/bin:$PATH" /opt/homebrew/bin/npm run format
+  PATH="/opt/homebrew/bin:$PATH" /opt/homebrew/bin/npm run lint
+  git add $FILES
+else
+  echo "No TypeScript files staged for commit."
+fi
