@@ -1,11 +1,23 @@
-import { app } from './app';
 import dotenv from 'dotenv';
+import { MCPExpressServer } from './mcp/server';
 import logger from './utils/logger';
 
 dotenv.config();
 
-const PORT = process.env.PORT || 3000;
+const PORT = parseInt(process.env.PORT || '3000', 10);
 
-app.listen(PORT, () => {
-  logger.info(`Server is running on port ${PORT}`);
-}); 
+const mcpServer = new MCPExpressServer();
+
+// Register example resources, tools, and prompts
+mcpServer.registerResource(
+  'test',
+  'test://{id}',
+  async (uri: URL, params: Record<string, string>) => ({
+    contents: [{
+      uri: uri.href,
+      text: `Test resource: ${params.id}`
+    }]
+  })
+);
+
+mcpServer.start(PORT); 
