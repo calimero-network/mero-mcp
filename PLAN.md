@@ -47,7 +47,45 @@ This plan outlines steps to improve the MCP Server project following open source
    - Set up automatic documentation deployment ✅
    - Create user-friendly navigation ✅
 
-## Phase 3: Calimero Integration (New)
+## Phase 3: MCP Specification Compliance
+
+1. **Update SDK and Type Definitions**
+   - Update `@modelcontextprotocol/sdk` to latest version
+   - Implement type definitions for schema 2025-03-26
+   - Create TypeScript interfaces aligned with latest schema
+   - Document breaking changes from previous MCP versions
+
+2. **Implement Mock Resources**
+   - Create file system resource provider
+   - Implement URI template handling per spec
+   - Add support for content types (text, image, audio)
+   - Implement resource annotations
+   - Add caching mechanisms
+
+3. **Implement Mock Tools**
+   - Create basic CRUD operation tools
+   - Implement tool annotations (readOnlyHint, destructiveHint, etc.)
+   - Add support for tool input/output validation 
+   - Create file manipulation tools
+   - Create search and query tools
+
+4. **Enhance Server Endpoints**
+   - Update resource endpoint to latest spec
+   - Update tool endpoint to latest spec
+   - Implement logging endpoint (logging/setLevel)
+   - Add support for notifications/message
+   - Implement sampling endpoint (sampling/createMessage)
+   - Add support for all content types (text, image, audio)
+
+5. **Create Spec Compliance Testing Suite**
+   - Implement automated schema validation tests
+   - Create endpoint behavior validation tests
+   - Add resource contract tests
+   - Add tool contract tests
+   - Add logging and sampling contract tests
+   - Setup continuous compliance testing in CI pipeline
+
+## Phase 4: Calimero Integration
 1. **Understanding Calimero Architecture**
    - Research Calimero Node API and capabilities
    - Document integration points
@@ -82,7 +120,7 @@ This plan outlines steps to improve the MCP Server project following open source
    - Support multi-tenant isolation
    - Add audit logging for security events
 
-## Phase 4: Testing Enhancements
+## Phase 5: Testing Enhancements
 1. **Reorganize Test Structure**
    - Standardize test file organization
    - Implement test helpers and fixtures
@@ -105,7 +143,7 @@ This plan outlines steps to improve the MCP Server project following open source
    - Address potential memory leaks in tests
    - Add performance benchmarks
 
-## Phase 5: Project Structure Improvements
+## Phase 6: Project Structure Improvements
 1. **Review Directory Organization**
    - Adopt standard Node.js/TypeScript project structure
    - Separate concerns in the codebase
@@ -130,7 +168,8 @@ This plan outlines steps to improve the MCP Server project following open source
 5. **Integration Testing**: Test with actual Calimero nodes at key milestones
 
 ## Next Steps
-1. **Research Calimero API**: Document available endpoints and capabilities
-2. **Design Integration Architecture**: Create detailed design document for the integration
-3. **Implement Basic Client**: Start with a simple client that can connect to Calimero
-4. **Create First Resource Adapter**: Implement an initial resource template for Calimero data 
+1. **MCP Schema Compliance**: Update types for 2025-03-26 schema
+2. **Basic Mock Resources**: Implement file-based resource provider
+3. **Mock Tools**: Create basic operation tools
+4. **Compliance Testing**: Set up schema validation tests 
+5. **Research Calimero API**: Document available endpoints and capabilities 
