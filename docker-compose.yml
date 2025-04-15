@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   mero-mcp:
     container_name: mero-mcp
