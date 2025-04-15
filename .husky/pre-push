@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+# Run tests to ensure code quality before pushing
+PATH="/opt/homebrew/bin:$PATH" /opt/homebrew/bin/npm test
