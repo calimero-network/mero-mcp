@@ -2,6 +2,9 @@ import express from 'express';
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp';
 import { z } from 'zod';
 import logger from '../utils/logger';
+import { FileSystemResourceProvider } from '../resources/fileSystemResource';
+import { fileTools, fileToolHandlers } from '../tools/fileTools';
+import path from 'path';
 
 // Define our own type that's compatible with the SDK
 type VariablesMap = Record<string, string | string[]>;
@@ -23,7 +26,11 @@ export class MCPExpressServer {
     }>;
   }>;
 
-  constructor() {
+  private fileResourceProvider: FileSystemResourceProvider;
+
+  constructor(options: { 
+    dataBasePath?: string 
+  } = {}) {
     this.app = express();
     this.server = new McpServer({
       name: 'mero-mcp',
@@ -31,8 +38,15 @@ export class MCPExpressServer {
     });
     this.sseConnections = new Set();
     this.resources = new Map();
+
+    // Create a file resource provider with the specified base path or default to ./data
+    const dataBasePath = options.dataBasePath || path.join(process.cwd(), 'data');
+    this.fileResourceProvider = new FileSystemResourceProvider(dataBasePath);
+
     this.setupMiddleware();
     this.setupRoutes();
+    this.registerDefaultTools();
+    this.registerDefaultResources();
   }
 
   private setupMiddleware(): void {
@@ -136,6 +150,89 @@ export class MCPExpressServer {
         res.status(500).json({ error: 'Internal server error' });
       }
     });
+
+    // Logging endpoint
+    this.app.post('/mcp/logging/setLevel', (req, res) => {
+      try {
+        const { level } = req.body.params;
+        
+        // Validate the logging level
+        const validLevels = ['debug', 'info', 'notice', 'warning', 'error', 'critical', 'alert', 'emergency'];
+        if (!validLevels.includes(level)) {
+          return res.status(400).json({ error: `Invalid logging level: ${level}` });
+        }
+        
+        logger.info('Setting logging level', { level });
+        // Here you would actually set the logging level
+        // This is a mock implementation
+        
+        res.json({ result: true });
+      } catch (error) {
+        logger.error('Logging level request error', { error });
+        res.status(500).json({ error: 'Internal server error' });
+      }
+    });
+  }
+
+  /**
+   * Register default file-based tools
+   */
+  private registerDefaultTools(): void {
+    // Register all file tools from the fileTools array
+    for (const tool of fileTools) {
+      const handler = fileToolHandlers[tool.name as keyof typeof fileToolHandlers];
+      if (handler) {
+        // Convert the properties to ZodRawShape by creating a schema for each property
+        const zodSchema: z.ZodRawShape = {};
+        if (tool.inputSchema.properties) {
+          Object.entries(tool.inputSchema.properties).forEach(([key, propSchema]) => {
+            // Need to type cast to access properties
+            const typedSchema = propSchema as { type?: string; description?: string };
+            
+            // Create basic zod schema based on the type
+            if (typedSchema.type === 'string') {
+              zodSchema[key] = z.string().describe(typedSchema.description || '');
+            } else if (typedSchema.type === 'number') {
+              zodSchema[key] = z.number().describe(typedSchema.description || '');
+            } else if (typedSchema.type === 'boolean') {
+              zodSchema[key] = z.boolean().describe(typedSchema.description || '');
+            } else {
+              // Default to string for unknown types
+              zodSchema[key] = z.string().describe(typedSchema.description || '');
+            }
+          });
+        }
+        
+        // We need to type cast the handler to match the expected signature
+        const typedHandler = (args: Record<string, unknown>, extra: { signal: AbortSignal }) => {
+          // The original handler expects specific args, but we're getting a generic Record
+          // We'll just pass it through and let TypeScript handle it
+          return handler(args as any, extra);
+        };
+        
+        this.registerTool(
+          tool.name,
+          zodSchema,
+          typedHandler
+        );
+        logger.info(`Registered tool: ${tool.name}`);
+      }
+    }
+  }
+
+  /**
+   * Register default file-based resources
+   */
+  private registerDefaultResources(): void {
+    // Register a file resource handler
+    this.registerResource(
+      'file',
+      'file:///{path}',
+      async (uri: URL, variables: VariablesMap) => {
+        return this.fileResourceProvider.handleResource(uri, variables);
+      }
+    );
+    logger.info('Registered file resource handler');
   }
 
   public registerResource(
@@ -153,7 +250,7 @@ export class MCPExpressServer {
   ): void {
     const template = new ResourceTemplate(uriTemplate, { list: undefined });
     this.resources.set(name, { templateString: uriTemplate, handler });
-    this.server.resource(name, template, handler as any);
+    this.server.resource(name, template, handler as any); // Keep as any to avoid complex type changes
   }
 
   public registerTool(
