@@ -24,18 +24,13 @@ const TEST_TIMEOUT_MS = 10000;  // 10 seconds max for test to complete
 async function runTests() {
   console.log(`🔍 Testing SSE functionality at ${BASE_URL}`);
   
-  try {
-    // Create a temporary webhook endpoint to trigger SSE broadcast
-    await createBroadcastWebhook();
-    
-    // Test SSE connection and broadcasting
-    await testSSEBroadcasting();
-    
-    console.log('\n✅ All SSE tests completed successfully!');
-  } finally {
-    // Clean up
-    await cleanupTests();
-  }
+  // Create a temporary webhook endpoint to trigger SSE broadcast
+  await createBroadcastWebhook();
+  
+  // Test SSE connection and broadcasting
+  await testSSEBroadcasting();
+  
+  console.log('\n✅ All SSE tests completed successfully!');
 }
 
 async function createBroadcastWebhook() {
@@ -187,28 +182,6 @@ async function triggerTestBroadcast() {
   } catch (error) {
     console.error(`Error making broadcast request: ${error.message}`);
     throw error;
-  }
-}
-
-async function cleanupTests() {
-  console.log('\n🧹 Cleaning up test resources...');
-  
-  try {
-    // Delete test files
-    const response = await fetch(`${BASE_URL}/mcp/tool/delete_file`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        parameters: {
-          filePath: 'sse-test.txt'
-        }
-      })
-    });
-    
-    // Ignore errors - file might already be deleted
-    console.log('✅ Cleanup completed');
-  } catch (error) {
-    console.warn('⚠️ Cleanup warning:', error.message);
   }
 }
 
