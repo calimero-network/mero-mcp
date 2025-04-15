@@ -31,7 +31,14 @@ cd "$PROJECT_ROOT"
 
 # Check if node-fetch is installed and install it if not
 if ! npm list node-fetch &> /dev/null; then
-    npm install --no-save node-fetch@2 # Version 2 for CommonJS support
+    npm install --no-save node-fetch@3 # Using version 3 for ESM support
+fi
+
+# Check if Docker is running
+echo "🔍 Checking if Docker is running..."
+if ! docker info &> /dev/null; then
+    echo "❌ Docker is not running. Please start Docker and try again."
+    exit 1
 fi
 
 # Check if container is running

@@ -5,10 +5,12 @@
  * 
  * This script tests that the MCP service in Docker is running correctly
  * by making requests to all API endpoints and validating responses.
+ * 
+ * Note: This is an ES module (uses import instead of require).
  */
 
-const fetch = require('node-fetch');
-const { setTimeout } = require('timers/promises');
+import fetch from 'node-fetch';
+import { setTimeout } from 'timers/promises';
 
 // Configuration
 const HOST = process.env.MCP_HOST || 'http://localhost';
