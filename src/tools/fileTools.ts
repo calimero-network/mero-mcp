@@ -227,6 +227,26 @@ export async function deleteFile(
  */
 export const fileTools: Tool[] = [
   {
+    name: "hello",
+    description: "A simple greeting tool that says hello",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          description: "The name to greet",
+        },
+      },
+      required: ["name"],
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  {
     name: "read_file",
     description: "Read the contents of a file from the server",
     inputSchema: {
@@ -333,6 +353,22 @@ export const fileTools: Tool[] = [
 ];
 
 /**
+ * Hello tool handler function
+ */
+async function hello(args: { name: string }, { signal }: { signal: AbortSignal }): Promise<{
+  content: Array<{ type: "text"; text: string }>;
+}> {
+  return {
+    content: [
+      {
+        type: "text",
+        text: `Hello, ${args.name}! 👋`,
+      },
+    ],
+  };
+}
+
+/**
  * Map of tool names to their implementation functions
  */
 export const fileToolHandlers = {
@@ -341,4 +377,5 @@ export const fileToolHandlers = {
   list_directory: listDirectory,
   write_file: writeFile,
   delete_file: deleteFile,
+  hello,
 };
