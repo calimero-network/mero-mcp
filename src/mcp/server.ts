@@ -357,7 +357,8 @@ export class MCPExpressServer {
       };
 
       try {
-        this.registerTool(tool.name, zodSchema, typedHandler);
+        // Register the tool directly with the server
+        this.server.tool(tool.name, zodSchema, typedHandler);
         // Mark as registered
         registeredTools.add(tool.name);
         logger.info(`Registered tool: ${tool.name}`);
@@ -423,14 +424,7 @@ export class MCPExpressServer {
       }>;
     }>,
   ): void {
-    try {
-      this.server.tool(name, paramsSchema, handler);
-    } catch (error) {
-      // If the tool is already registered, it might mean we're trying to
-      // register it again due to how the SDK works - just rethrow in this case
-      // so the calling code can handle it
-      throw error;
-    }
+    this.server.tool(name, paramsSchema, handler);
   }
 
   public registerPrompt(
