@@ -1,4 +1,13 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+# Get the project root directory
+PROJECT_ROOT="$(git rev-parse --show-toplevel)"
+# Path to CLI script
+CLI="$PROJECT_ROOT/bin/mero-cli"
+
 # Run tests to ensure code quality before pushing
 echo "Running pre-push hook..."
 echo "Running tests..."
-PATH="/opt/homebrew/bin:$PATH" /opt/homebrew/bin/npm test 
+# Use the CLI wrapper
+$CLI test 

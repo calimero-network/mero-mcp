@@ -1,3 +1,11 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+# Get the project root directory
+PROJECT_ROOT="$(git rev-parse --show-toplevel)"
+# Path to CLI script
+CLI="$PROJECT_ROOT/bin/mero-cli"
+
 # Run prettier and eslint on staged files
 echo "Running pre-commit hook..."
 echo "Linting staged files..."
@@ -7,9 +15,10 @@ FILES=$(git diff --cached --name-only --diff-filter=ACMR | grep "\.ts$" || true)
 
 if [ -n "$FILES" ]; then
   echo "Running prettier and eslint on staged TypeScript files..."
-  PATH="/opt/homebrew/bin:$PATH" /opt/homebrew/bin/npm run format
-  PATH="/opt/homebrew/bin:$PATH" /opt/homebrew/bin/npm run lint
+  # Use the CLI wrapper
+  $CLI format
+  $CLI lint
   git add $FILES
 else
   echo "No TypeScript files staged for commit."
-fi 
+fi

@@ -13,6 +13,7 @@ A robust Express-based server implementation of the [Model Context Protocol (MCP
   - [Installation](#installation)
   - [Environment Variables](#environment-variables)
 - [Usage](#usage)
+  - [CLI Tool](#cli-tool)
   - [Running in Development](#running-in-development)
   - [Building for Production](#building-for-production)
   - [Docker Deployment](#docker-deployment)
@@ -64,10 +65,44 @@ LOG_LEVEL=info
 
 ## Usage
 
+### CLI Tool
+
+The project includes a CLI tool for common operations. You can use it as follows:
+
+```bash
+# Show available commands
+./bin/mero-cli help
+
+# Start the server
+./bin/mero-cli start
+
+# Run in development mode
+./bin/mero-cli dev
+
+# Build the project
+./bin/mero-cli build
+
+# Run tests
+./bin/mero-cli test
+
+# Run linting
+./bin/mero-cli lint
+
+# Run formatting
+./bin/mero-cli format
+
+# Validate the codebase (build, lint, test, coverage)
+./bin/mero-cli validate
+```
+
+The CLI tool is designed to work consistently across environments without depending on system-wide Node.js installations.
+
 ### Running in Development
 
 ```bash
 npm run dev
+# or
+./bin/mero-cli dev
 ```
 
 This starts the server in development mode with hot reloading.
@@ -77,6 +112,9 @@ This starts the server in development mode with hot reloading.
 ```bash
 npm run build
 npm start
+# or
+./bin/mero-cli build
+./bin/mero-cli start
 ```
 
 ### Docker Deployment
@@ -104,9 +142,13 @@ The project includes comprehensive tests for all components:
 ```bash
 # Run tests
 npm test
+# or 
+./bin/mero-cli test
 
 # Check test coverage
 npm test -- --coverage
+# or
+./bin/mero-cli coverage
 ```
 
 ## Contributing
