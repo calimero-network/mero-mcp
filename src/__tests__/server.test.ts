@@ -96,6 +96,12 @@ describe("MCPExpressServer", () => {
   afterEach(() => {
     // Clean up any resources
     jest.clearAllMocks();
+    
+    // Clear any SSE heartbeat interval
+    if (app.locals.sseHeartbeatInterval) {
+      clearInterval(app.locals.sseHeartbeatInterval);
+      app.locals.sseHeartbeatInterval = null;
+    }
   });
 
   describe("Health Check", () => {
@@ -226,6 +232,7 @@ describe("MCPExpressServer", () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const res = {
         setHeader: jest.fn(),
+        flushHeaders: jest.fn(),
         on: jest.fn(),
         end: jest.fn(),
         write: jest.fn(),
@@ -236,10 +243,13 @@ describe("MCPExpressServer", () => {
       // Call the handler directly
       sseHandler(req, res);
 
-      // Get the 'close' handler from the request.on() call
+      // Verify the request.on was called with 'close' event
+      expect(req.on).toHaveBeenCalledWith('close', expect.any(Function));
+      
+      // Get the 'close' handler directly from the mock calls
       const closeHandler = req.on.mock.calls.find(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (call: [string, (error?: Error) => void]) => call[0] === "close",
+        (call: [string, (error?: Error) => void]) => call[0] === "close"
       )[1];
 
       // Verify the connection was added
@@ -261,6 +271,7 @@ describe("MCPExpressServer", () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const res = {
         setHeader: jest.fn(),
+        flushHeaders: jest.fn(),
         on: jest.fn(),
         end: jest.fn(),
         write: jest.fn(),
@@ -271,10 +282,13 @@ describe("MCPExpressServer", () => {
       // Call the handler directly
       sseHandler(req, res);
 
-      // Get the 'error' handler from the request.on() call
+      // Verify the request.on was called with 'error' event
+      expect(req.on).toHaveBeenCalledWith('error', expect.any(Function));
+      
+      // Get the 'error' handler directly from the mock calls
       const errorHandler = req.on.mock.calls.find(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (call: [string, (error: Error) => void]) => call[0] === "error",
+        (call: [string, (error: Error) => void]) => call[0] === "error"
       )[1];
 
       // Verify the connection was added
@@ -304,6 +318,7 @@ describe("MCPExpressServer", () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const res = {
         setHeader: jest.fn(),
+        flushHeaders: jest.fn(),
         on: jest.fn(),
         end: jest.fn(),
         write: jest.fn(),
@@ -314,10 +329,13 @@ describe("MCPExpressServer", () => {
       // Call the handler directly
       sseHandler(req, res);
 
-      // Get the 'error' handler from the response.on() call
+      // Verify the response.on was called with 'error' event
+      expect(res.on).toHaveBeenCalledWith('error', expect.any(Function));
+      
+      // Get the 'error' handler directly from the mock calls
       const errorHandler = res.on.mock.calls.find(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (call: [string, (error: Error) => void]) => call[0] === "error",
+        (call: [string, (error: Error) => void]) => call[0] === "error"
       )[1];
 
       // Verify the connection was added
@@ -460,6 +478,59 @@ describe("MCPExpressServer", () => {
       );
       expect(res.status).toHaveBeenCalledWith(500);
       expect(res.json).toHaveBeenCalledWith({ error: "Internal server error" });
+    });
+    
+    it("should start SSE heartbeat when server starts", () => {
+      // Mock the setInterval function
+      const originalSetInterval = global.setInterval;
+      const mockSetInterval = jest.fn().mockReturnValue(12345);
+      global.setInterval = mockSetInterval;
+      
+      // Mock the listen method
+      const mockListen = jest.fn().mockImplementation((port, callback) => {
+        callback();
+        return { on: jest.fn() };
+      });
+      
+      // Replace the app.listen method with our mock
+      app.listen = mockListen;
+      
+      try {
+        // Start the server which should trigger the heartbeat
+        server.start(3000);
+        
+        // Verify setInterval was called with the expected arguments
+        expect(mockSetInterval).toHaveBeenCalledWith(expect.any(Function), 30000);
+        
+        // Verify the interval ID was stored
+        expect(app.locals.sseHeartbeatInterval).toBe(12345);
+        
+        // Call the heartbeat function directly to verify it works
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const heartbeatFn = mockSetInterval.mock.calls[0][0];
+        
+        // Add a mock connection to test heartbeat broadcasting
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const res = { write: jest.fn(), on: jest.fn() } as any;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const connections = (server as any).sseConnections;
+        connections.add(res);
+        
+        // Spy on broadcastEvent
+        const broadcastSpy = jest.spyOn(server, 'broadcastEvent');
+        
+        // Run the heartbeat function
+        heartbeatFn();
+        
+        // Verify the heartbeat was broadcast
+        expect(broadcastSpy).toHaveBeenCalledWith('heartbeat', expect.objectContaining({
+          timestamp: expect.any(String)
+        }));
+        
+      } finally {
+        // Restore the original setInterval
+        global.setInterval = originalSetInterval;
+      }
     });
   });
 
