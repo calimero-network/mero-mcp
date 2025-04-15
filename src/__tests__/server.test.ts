@@ -7,6 +7,33 @@ import { Variables } from "@modelcontextprotocol/sdk/shared/uriTemplate.js";
 // Import logger for testing
 import logger from "../utils/logger";
 
+// Define types for our tests
+type MockRequest = {
+  on: jest.Mock;
+};
+
+type MockResponse = {
+  setHeader: jest.Mock;
+  flushHeaders?: jest.Mock;
+  on: jest.Mock;
+  end: jest.Mock;
+  write: jest.Mock;
+  status: jest.Mock;
+  json: jest.Mock;
+};
+
+type ExpressLayer = {
+  route?: {
+    path: string;
+    methods: Record<string, boolean>;
+    stack: Array<{
+      handle: (req: express.Request, res: express.Response) => void;
+    }>;
+  };
+};
+
+type CallWithCallback<T> = [string, (error?: T) => void];
+
 // Mock the file tools
 jest.mock("../tools/fileTools", () => ({
   fileTools: [],
@@ -159,8 +186,7 @@ describe("MCPExpressServer", () => {
     beforeEach(() => {
       // Extract the SSE handler from the routes
       const routes = app._router.stack.filter(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (layer: any) =>
+        (layer: ExpressLayer) =>
           layer.route &&
           layer.route.path === "/mcp/sse" &&
           layer.route.methods.get,
@@ -170,19 +196,18 @@ describe("MCPExpressServer", () => {
 
     it("should set correct headers for SSE connections", () => {
       // Create mock request and response
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const req = { on: jest.fn() } as any;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const res = {
+      const req: MockRequest = { on: jest.fn() };
+      const res: MockResponse = {
         setHeader: jest.fn(),
         on: jest.fn(),
         end: jest.fn(),
         status: jest.fn().mockReturnThis(),
         json: jest.fn(),
-      } as any;
+        write: jest.fn(),
+      };
 
       // Call the handler directly
-      sseHandler(req, res);
+      sseHandler(req as unknown as express.Request, res as unknown as express.Response);
 
       // Verify headers are set correctly
       expect(res.setHeader).toHaveBeenCalledWith(
@@ -195,17 +220,15 @@ describe("MCPExpressServer", () => {
 
     it("should broadcast events to all SSE connections", () => {
       // Create mock response objects to simulate SSE connections
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const res1 = { write: jest.fn(), on: jest.fn() } as any;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const res2 = { write: jest.fn(), on: jest.fn() } as any;
+      const res1: MockResponse = { write: jest.fn(), on: jest.fn(), setHeader: jest.fn(), end: jest.fn(), status: jest.fn(), json: jest.fn() };
+      const res2: MockResponse = { write: jest.fn(), on: jest.fn(), setHeader: jest.fn(), end: jest.fn(), status: jest.fn(), json: jest.fn() };
 
       // Add the connections to the server's sseConnections Set
       // We need to access the private property using type casting
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const connections = (server as any).sseConnections;
-      connections.add(res1);
-      connections.add(res2);
+      const serverWithPrivateAccess = server as unknown as { sseConnections: Set<express.Response> };
+      const connections = serverWithPrivateAccess.sseConnections;
+      connections.add(res1 as unknown as express.Response);
+      connections.add(res2 as unknown as express.Response);
 
       // Broadcast an event
       server.broadcastEvent("test-event", { message: "Hello World" });
@@ -217,7 +240,7 @@ describe("MCPExpressServer", () => {
       expect(res2.write).toHaveBeenCalledWith(expectedData);
 
       // Test sending to a specific connection
-      server.sendEvent(res1 as any, "specific-event", { value: 42 });
+      server.sendEvent(res1 as unknown as express.Response, "specific-event", { value: 42 });
 
       // Verify that only res1 received the specific event
       const specificEventData = 'event: specific-event\ndata: {"value":42}\n\n';
@@ -227,10 +250,8 @@ describe("MCPExpressServer", () => {
 
     it("should handle connection cleanup on client disconnect", () => {
       // Create mock request and response
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const req = { on: jest.fn() } as any;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const res = {
+      const req: MockRequest = { on: jest.fn() };
+      const res: MockResponse = {
         setHeader: jest.fn(),
         flushHeaders: jest.fn(),
         on: jest.fn(),
@@ -238,38 +259,35 @@ describe("MCPExpressServer", () => {
         write: jest.fn(),
         status: jest.fn().mockReturnThis(),
         json: jest.fn(),
-      } as any;
+      };
 
       // Call the handler directly
-      sseHandler(req, res);
+      sseHandler(req as unknown as express.Request, res as unknown as express.Response);
 
       // Verify the request.on was called with 'close' event
       expect(req.on).toHaveBeenCalledWith('close', expect.any(Function));
       
       // Get the 'close' handler directly from the mock calls
       const closeHandler = req.on.mock.calls.find(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (call: [string, (error?: Error) => void]) => call[0] === "close"
+        (call: CallWithCallback<void>) => call[0] === "close"
       )[1];
 
       // Verify the connection was added
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const connections = (server as any).sseConnections;
-      expect(connections.has(res)).toBe(true);
+      const serverWithPrivateAccess = server as unknown as { sseConnections: Set<express.Response> };
+      const connections = serverWithPrivateAccess.sseConnections;
+      expect(connections.has(res as unknown as express.Response)).toBe(true);
 
       // Simulate client disconnection
       closeHandler();
 
       // Verify the connection was removed
-      expect(connections.has(res)).toBe(false);
+      expect(connections.has(res as unknown as express.Response)).toBe(false);
     });
 
     it("should handle request errors properly", () => {
       // Create mock request and response
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const req = { on: jest.fn() } as any;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const res = {
+      const req: MockRequest = { on: jest.fn() };
+      const res: MockResponse = {
         setHeader: jest.fn(),
         flushHeaders: jest.fn(),
         on: jest.fn(),
@@ -277,24 +295,23 @@ describe("MCPExpressServer", () => {
         write: jest.fn(),
         status: jest.fn().mockReturnThis(),
         json: jest.fn(),
-      } as any;
+      };
 
       // Call the handler directly
-      sseHandler(req, res);
+      sseHandler(req as unknown as express.Request, res as unknown as express.Response);
 
       // Verify the request.on was called with 'error' event
       expect(req.on).toHaveBeenCalledWith('error', expect.any(Function));
       
       // Get the 'error' handler directly from the mock calls
       const errorHandler = req.on.mock.calls.find(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (call: [string, (error: Error) => void]) => call[0] === "error"
+        (call: CallWithCallback<Error>) => call[0] === "error"
       )[1];
 
       // Verify the connection was added
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const connections = (server as any).sseConnections;
-      expect(connections.has(res)).toBe(true);
+      const serverWithPrivateAccess = server as unknown as { sseConnections: Set<express.Response> };
+      const connections = serverWithPrivateAccess.sseConnections;
+      expect(connections.has(res as unknown as express.Response)).toBe(true);
 
       // Simulate an error
       const testError = new Error("Test error");
@@ -307,16 +324,14 @@ describe("MCPExpressServer", () => {
       );
 
       // Verify the connection was removed and response ended
-      expect(connections.has(res)).toBe(false);
+      expect(connections.has(res as unknown as express.Response)).toBe(false);
       expect(res.end).toHaveBeenCalled();
     });
 
     it("should handle response errors properly", () => {
       // Create mock request and response
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const req = { on: jest.fn() } as any;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const res = {
+      const req: MockRequest = { on: jest.fn() };
+      const res: MockResponse = {
         setHeader: jest.fn(),
         flushHeaders: jest.fn(),
         on: jest.fn(),
@@ -324,24 +339,23 @@ describe("MCPExpressServer", () => {
         write: jest.fn(),
         status: jest.fn().mockReturnThis(),
         json: jest.fn(),
-      } as any;
+      };
 
       // Call the handler directly
-      sseHandler(req, res);
+      sseHandler(req as unknown as express.Request, res as unknown as express.Response);
 
       // Verify the response.on was called with 'error' event
       expect(res.on).toHaveBeenCalledWith('error', expect.any(Function));
       
       // Get the 'error' handler directly from the mock calls
       const errorHandler = res.on.mock.calls.find(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (call: [string, (error: Error) => void]) => call[0] === "error"
+        (call: CallWithCallback<Error>) => call[0] === "error"
       )[1];
 
       // Verify the connection was added
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const connections = (server as any).sseConnections;
-      expect(connections.has(res)).toBe(true);
+      const serverWithPrivateAccess = server as unknown as { sseConnections: Set<express.Response> };
+      const connections = serverWithPrivateAccess.sseConnections;
+      expect(connections.has(res as unknown as express.Response)).toBe(true);
 
       // Simulate an error
       const testError = new Error("Test error");
@@ -354,30 +368,36 @@ describe("MCPExpressServer", () => {
       );
 
       // Verify the connection was removed and response ended
-      expect(connections.has(res)).toBe(false);
+      expect(connections.has(res as unknown as express.Response)).toBe(false);
       expect(res.end).toHaveBeenCalled();
     });
 
     it("should handle connection write errors during broadcast", () => {
       // Create mock response objects - one that throws an error when write is called
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const res1 = {
+      const res1: MockResponse = {
         write: jest.fn().mockImplementation(() => {
           throw new Error("Write error");
         }),
         on: jest.fn(),
-      } as any;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const res2 = {
+        setHeader: jest.fn(),
+        end: jest.fn(),
+        status: jest.fn(),
+        json: jest.fn(),
+      };
+      const res2: MockResponse = {
         write: jest.fn(),
         on: jest.fn(),
-      } as any;
+        setHeader: jest.fn(),
+        end: jest.fn(),
+        status: jest.fn(),
+        json: jest.fn(),
+      };
 
       // Add the connections to the server's sseConnections Set
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const connections = (server as any).sseConnections;
-      connections.add(res1);
-      connections.add(res2);
+      const serverWithPrivateAccess = server as unknown as { sseConnections: Set<express.Response> };
+      const connections = serverWithPrivateAccess.sseConnections;
+      connections.add(res1 as unknown as express.Response);
+      connections.add(res2 as unknown as express.Response);
 
       // Broadcast an event
       server.broadcastEvent("test-event", { message: "Hello World" });
@@ -391,8 +411,8 @@ describe("MCPExpressServer", () => {
       );
 
       // Verify the problematic connection was removed
-      expect(connections.has(res1)).toBe(false);
-      expect(connections.has(res2)).toBe(true);
+      expect(connections.has(res1 as unknown as express.Response)).toBe(false);
+      expect(connections.has(res2 as unknown as express.Response)).toBe(true);
 
       // Verify the working connection still received the event
       const expectedData =
@@ -402,20 +422,18 @@ describe("MCPExpressServer", () => {
 
     it("should handle invalid connections in sendEvent", () => {
       // Create a valid response object
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const res = { write: jest.fn(), on: jest.fn() } as any;
+      const res: MockResponse = { write: jest.fn(), on: jest.fn(), setHeader: jest.fn(), end: jest.fn(), status: jest.fn(), json: jest.fn() };
 
       // Add it to the connections
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const connections = (server as any).sseConnections;
-      connections.add(res);
+      const serverWithPrivateAccess = server as unknown as { sseConnections: Set<express.Response> };
+      const connections = serverWithPrivateAccess.sseConnections;
+      connections.add(res as unknown as express.Response);
 
       // Create an invalid response object (not in the connections set)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const invalidRes = { write: jest.fn(), on: jest.fn() } as any;
+      const invalidRes: MockResponse = { write: jest.fn(), on: jest.fn(), setHeader: jest.fn(), end: jest.fn(), status: jest.fn(), json: jest.fn() };
 
       // Try sending to invalid connection
-      const result = server.sendEvent(invalidRes, "test-event", {
+      const result = server.sendEvent(invalidRes as unknown as express.Response, "test-event", {
         message: "Hello",
       });
 
@@ -426,21 +444,24 @@ describe("MCPExpressServer", () => {
 
     it("should handle write errors in sendEvent", () => {
       // Create a response that throws on write
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const res = {
+      const res: MockResponse = {
         write: jest.fn().mockImplementation(() => {
           throw new Error("Write error");
         }),
         on: jest.fn(),
-      } as any;
+        setHeader: jest.fn(),
+        end: jest.fn(),
+        status: jest.fn(),
+        json: jest.fn(),
+      };
 
       // Add it to the connections
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const connections = (server as any).sseConnections;
-      connections.add(res);
+      const serverWithPrivateAccess = server as unknown as { sseConnections: Set<express.Response> };
+      const connections = serverWithPrivateAccess.sseConnections;
+      connections.add(res as unknown as express.Response);
 
       // Try sending to the error-throwing connection
-      const result = server.sendEvent(res, "test-event", { message: "Hello" });
+      const result = server.sendEvent(res as unknown as express.Response, "test-event", { message: "Hello" });
 
       // Verify it returns false, logs the error, and removes the connection
       expect(result).toBe(false);
@@ -450,24 +471,25 @@ describe("MCPExpressServer", () => {
           error: expect.objectContaining({ message: "Write error" }),
         }),
       );
-      expect(connections.has(res)).toBe(false);
+      expect(connections.has(res as unknown as express.Response)).toBe(false);
     });
 
     it("should handle errors during SSE setup", () => {
       // Create mock request and response with a throwing setHeader
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const req = { on: jest.fn() } as any;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const res = {
+      const req: MockRequest = { on: jest.fn() };
+      const res: MockResponse = {
         setHeader: jest.fn().mockImplementation(() => {
           throw new Error("Setup error");
         }),
         status: jest.fn().mockReturnThis(),
         json: jest.fn(),
-      } as any;
+        on: jest.fn(),
+        end: jest.fn(),
+        write: jest.fn(),
+      };
 
       // Call the handler directly
-      sseHandler(req, res);
+      sseHandler(req as unknown as express.Request, res as unknown as express.Response);
 
       // Verify error handling
       expect(logger.error).toHaveBeenCalledWith(
@@ -506,15 +528,13 @@ describe("MCPExpressServer", () => {
         expect(app.locals.sseHeartbeatInterval).toBe(12345);
         
         // Call the heartbeat function directly to verify it works
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const heartbeatFn = mockSetInterval.mock.calls[0][0];
+        const heartbeatFn = mockSetInterval.mock.calls[0][0] as () => void;
         
         // Add a mock connection to test heartbeat broadcasting
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const res = { write: jest.fn(), on: jest.fn() } as any;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const connections = (server as any).sseConnections;
-        connections.add(res);
+        const res: MockResponse = { write: jest.fn(), on: jest.fn(), setHeader: jest.fn(), end: jest.fn(), status: jest.fn(), json: jest.fn() };
+        const serverWithPrivateAccess = server as unknown as { sseConnections: Set<express.Response> };
+        const connections = serverWithPrivateAccess.sseConnections;
+        connections.add(res as unknown as express.Response);
         
         // Spy on broadcastEvent
         const broadcastSpy = jest.spyOn(server, 'broadcastEvent');
@@ -543,7 +563,6 @@ describe("MCPExpressServer", () => {
           input: z.string(),
         },
         async (
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           args: Record<string, unknown>,
           _extra: { signal: AbortSignal },
         ) => ({
@@ -593,7 +612,6 @@ describe("MCPExpressServer", () => {
           input: z.string(),
         },
         (
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           args: Record<string, string | undefined>,
           _extra: { signal: AbortSignal },
         ) => ({
