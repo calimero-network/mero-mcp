@@ -5,6 +5,8 @@ import logger from '../utils/logger';
 import { FileSystemResourceProvider } from '../resources/fileSystemResource';
 import { fileTools, fileToolHandlers } from '../tools/fileTools';
 import path from 'path';
+import cors from 'cors';
+import { setInterval } from 'timers';
 
 // Define our own type that's compatible with the SDK
 type VariablesMap = Record<string, string | string[]>;
@@ -50,6 +52,7 @@ export class MCPExpressServer {
   }
 
   private setupMiddleware(): void {
+    this.app.use(cors());
     this.app.use(express.json());
   }
 
@@ -62,10 +65,18 @@ export class MCPExpressServer {
     // SSE endpoint for server-sent events
     this.app.get('/mcp/sse', (req, res): void => {
       try {
+        // Required headers for SSE
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
-
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        
+        // Disable response buffering
+        res.flushHeaders();
+        
+        // Send an initial connection message to keep the connection alive
+        res.write('event: connected\ndata: {"status":"connected"}\n\n');
+        
         this.sseConnections.add(res);
 
         req.on('close', () => {
@@ -89,6 +100,32 @@ export class MCPExpressServer {
         logger.error('SSE setup error', { error });
         res.status(500).json({ error: 'Internal server error' });
         // Don't return anything to match void return type
+      }
+    });
+
+    // Broadcast endpoint - allows test scripts to trigger SSE broadcasts
+    this.app.post('/mcp/broadcast', (req, res): void => {
+      try {
+        const { eventName, data } = req.body;
+        
+        logger.info('Received broadcast request', { eventName, connectionCount: this.sseConnections.size });
+        
+        if (!eventName) {
+          logger.warn('Missing eventName in broadcast request');
+          res.status(400).json({ error: 'Event name is required' });
+          return;
+        }
+        
+        this.broadcastEvent(eventName, data || {});
+        res.json({ 
+          success: true, 
+          connectionsCount: this.sseConnections.size,
+          message: `Broadcast sent to ${this.sseConnections.size} clients`
+        });
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        logger.error('Broadcast request error', { error, message: errorMsg });
+        res.status(500).json({ error: 'Internal server error', message: errorMsg });
       }
     });
 
@@ -320,12 +357,17 @@ export class MCPExpressServer {
    * @param data The data to send with the event
    */
   public broadcastEvent(eventName: string, data: any): void {
+    // Format according to SSE spec: each field (event, data) on its own line, ending with double newline
     const eventString = `event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`;
     
     logger.debug(`Broadcasting event to ${this.sseConnections.size} clients`, { 
       eventName, 
       clientsCount: this.sseConnections.size 
     });
+    
+    if (this.sseConnections.size === 0) {
+      logger.warn('No SSE connections available for broadcast');
+    }
     
     this.sseConnections.forEach(connection => {
       try {
@@ -337,7 +379,24 @@ export class MCPExpressServer {
     });
   }
 
+  /**
+   * Start a heartbeat to keep SSE connections alive
+   * @private
+   */
+  private startSSEHeartbeat(): void {
+    // Send a heartbeat every 30 seconds to all SSE clients
+    setInterval(() => {
+      if (this.sseConnections.size > 0) {
+        logger.debug(`Sending heartbeat to ${this.sseConnections.size} SSE clients`);
+        this.broadcastEvent('heartbeat', { timestamp: new Date().toISOString() });
+      }
+    }, 30000);
+  }
+
   public start(port: number): void {
+    // Start the SSE heartbeat
+    this.startSSEHeartbeat();
+    
     this.app.listen(port, () => {
       logger.info(`Server is running on port ${port}`);
     });

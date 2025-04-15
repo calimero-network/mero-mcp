@@ -7,6 +7,10 @@ const PORT = parseInt(process.env.PORT || '3000', 10);
 
 const mcpServer = new MCPExpressServer();
 
+// Store the server instance in app.locals so it can be accessed by other parts of the application
+const app = mcpServer.getApp();
+app.locals.server = mcpServer;
+
 // Register example resources, tools, and prompts
 mcpServer.registerResource(
   'test',

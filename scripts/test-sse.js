@@ -86,31 +86,36 @@ async function testSSEBroadcasting() {
     
     try {
       // Connect to the SSE endpoint
+      console.log(`Connecting to SSE endpoint: ${BASE_URL}/mcp/sse`);
       const eventSource = new EventSource(`${BASE_URL}/mcp/sse`);
       
       // Listen for connection open
       eventSource.onopen = async () => {
         console.log('✅ SSE connection established');
+      };
+      
+      // Listen for the initial connected event
+      eventSource.addEventListener('connected', async (event) => {
+        console.log(`✅ Received connected event: ${event.data}`);
         
         // Now trigger a broadcast event
         try {
-          // Simulate a webhook call that broadcasts an event
-          // In a real test, you would use the webhook endpoint
           console.log('🔄 Triggering broadcast event...');
-          
-          // Since we can't directly call the server methods, we'll call our own endpoint
           await triggerTestBroadcast();
-          
-          // Waited long enough, if we don't receive an event, the test will timeout
-          console.log('⚠️ No events received yet, waiting...');
         } catch (error) {
+          console.error('❌ Error triggering broadcast:', error.message);
           global.clearTimeout(timeoutId);
           eventSource.close();
           reject(error);
         }
-      };
+      });
       
-      // Listen for events
+      // Listen for heartbeat events
+      eventSource.addEventListener('heartbeat', (event) => {
+        console.log(`💓 Received heartbeat: ${event.data}`);
+      });
+      
+      // Listen for test events
       eventSource.addEventListener('test-event', (event) => {
         try {
           const data = JSON.parse(event.data);
@@ -121,6 +126,7 @@ async function testSSEBroadcasting() {
           eventSource.close();
           resolve();
         } catch (error) {
+          console.error('❌ Error handling test event:', error.message);
           global.clearTimeout(timeoutId);
           eventSource.close();
           reject(error);
@@ -140,6 +146,7 @@ async function testSSEBroadcasting() {
         reject(new Error('SSE connection error'));
       };
     } catch (error) {
+      console.error('❌ Error setting up SSE connection:', error.message);
       global.clearTimeout(timeoutId);
       reject(error);
     }
@@ -147,53 +154,39 @@ async function testSSEBroadcasting() {
 }
 
 async function triggerTestBroadcast() {
-  // In a real test with the webhook set up, we'd call it like this:
-  // await fetch(`${BASE_URL}/webhook/broadcast`, {
-  //   method: 'POST',
-  //   headers: { 'Content-Type': 'application/json' },
-  //   body: JSON.stringify({
-  //     eventName: 'test-event',
-  //     data: { message: 'Test broadcast', timestamp: new Date().toISOString() }
-  //   })
-  // });
+  console.log('Calling the broadcast endpoint to trigger an SSE event...');
   
-  // For this demo, simulate the broadcast by doing something that should trigger 
-  // server activity, like creating and deleting a file
-  
-  console.log('   (simulating broadcast - in reality we would call the broadcast method directly)');
-  
-  // Create a file
-  const createResponse = await fetch(`${BASE_URL}/mcp/tool/write_file`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      parameters: {
-        filePath: 'sse-test.txt',
-        content: 'Testing SSE broadcast'
-      }
-    })
-  });
-  
-  if (!createResponse.ok) {
-    throw new Error(`Failed to create test file: ${await createResponse.text()}`);
-  }
-  
-  // Wait a moment
-  await new Promise(resolve => global.setTimeout(resolve, 1000));
-  
-  // Delete the file
-  const deleteResponse = await fetch(`${BASE_URL}/mcp/tool/delete_file`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      parameters: {
-        filePath: 'sse-test.txt'
-      }
-    })
-  });
-  
-  if (!deleteResponse.ok) {
-    console.warn(`Warning: Failed to delete test file: ${await deleteResponse.text()}`);
+  try {
+    // Use our new broadcast endpoint to trigger an event
+    const response = await fetch(`${BASE_URL}/mcp/broadcast`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        eventName: 'test-event',
+        data: { message: 'Test broadcast', timestamp: new Date().toISOString() }
+      })
+    });
+    
+    // Log the HTTP status
+    console.log(`Broadcast endpoint response status: ${response.status}`);
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`Broadcast endpoint error: ${errorText}`);
+      throw new Error(`Failed to broadcast event: ${errorText}`);
+    }
+    
+    // Parse and log the response
+    const result = await response.json();
+    console.log(`Broadcast sent successfully: ${JSON.stringify(result)}`);
+    console.log(`Broadcast sent to ${result.connectionsCount} connections`);
+    
+    if (result.connectionsCount === 0) {
+      console.warn("Warning: No active SSE connections found. The broadcast may not reach any clients.");
+    }
+  } catch (error) {
+    console.error(`Error making broadcast request: ${error.message}`);
+    throw error;
   }
 }
 
