@@ -1,4 +1,4 @@
-import { Tool, ToolAnnotations } from '../types/mcp/schema';
+import { Tool } from '../types/mcp/schema';
 import fs from 'fs/promises';
 import path from 'path';
 import logger from '../utils/logger';
@@ -16,7 +16,7 @@ const SAFE_BASE_PATH = './data';
  */
 function getSafePath(filePath: string): string {
   // Normalize the path to prevent directory traversal attacks
-  const normalizedPath = path.normalize(filePath).replace(/^(\.\.[\/\\])+/, '');
+  const normalizedPath = path.normalize(filePath).replace(/^(\.\.[\\])+/, '');
   return path.join(SAFE_BASE_PATH, normalizedPath);
 }
 

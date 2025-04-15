@@ -1,4 +1,4 @@
-import { Tool, ToolAnnotations, Content, ResourceContent } from '../types/mcp/schema';
+import { ToolAnnotations, ResourceContent } from '../types/mcp/schema';
 import { fileTools, readFile } from '../tools/fileTools';
 import { FileSystemResourceProvider } from '../resources/fileSystemResource';
 import path from 'path';

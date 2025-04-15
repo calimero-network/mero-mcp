@@ -23,6 +23,37 @@ Establishes a Server-Sent Events connection for real-time communication.
 - `Cache-Control: no-cache`
 - `Connection: keep-alive`
 
+**Event Format:**
+```
+event: [event-name]
+data: [JSON data]
+
+```
+
+**Common Events:**
+- Server broadcasts events to all connected clients
+- Events typically include a name and JSON-formatted data
+- Clients should handle events based on the event name
+
+**Server-Side Methods:**
+- `broadcastEvent(eventName, data)`: Sends an event to all connected clients
+- `sendEvent(connection, eventName, data)`: Sends an event to a specific client
+
+**Example Client Implementation:**
+```javascript
+const eventSource = new EventSource('/mcp/sse');
+
+eventSource.addEventListener('custom-event', (event) => {
+  const data = JSON.parse(event.data);
+  console.log('Received custom event:', data);
+});
+
+// Handle generic messages
+eventSource.onmessage = (event) => {
+  console.log('Received message:', JSON.parse(event.data));
+};
+```
+
 **Example:**
 ```bash
 curl -N http://localhost:3000/mcp/sse

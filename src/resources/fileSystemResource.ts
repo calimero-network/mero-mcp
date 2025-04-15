@@ -27,7 +27,7 @@ export class FileSystemResourceProvider {
   async readFile(filePath: string): Promise<string> {
     try {
       // Normalize the path to prevent directory traversal attacks
-      const normalizedPath = path.normalize(filePath).replace(/^(\.\.[\/\\])+/, '');
+      const normalizedPath = path.normalize(filePath).replace(/^(\.\.[/\\])+/, '');
       const fullPath = path.join(this.basePath, normalizedPath);
       
       // Check if file exists
@@ -51,7 +51,7 @@ export class FileSystemResourceProvider {
   async listDirectory(dirPath: string): Promise<string[]> {
     try {
       // Normalize the path to prevent directory traversal attacks
-      const normalizedPath = path.normalize(dirPath).replace(/^(\.\.[\/\\])+/, '');
+      const normalizedPath = path.normalize(dirPath).replace(/^(\.\.[\\])+/, '');
       const fullPath = path.join(this.basePath, normalizedPath);
       
       // Check if directory exists
