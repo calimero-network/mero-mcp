@@ -33,13 +33,13 @@ jobs:
           npm ci
           npm install -g node-fetch@2 eventsource
       
-      - name: Set up Docker Compose
+      - name: Set up Docker
         uses: docker/setup-buildx-action@v3
         
       - name: Build and Start Docker container
         run: |
-          docker-compose build
-          docker-compose up -d
+          docker compose build
+          docker compose up -d
       
       - name: Wait for container to be ready
         run: |
@@ -48,10 +48,10 @@ jobs:
           elapsed=0
           
           echo "Waiting for container to start..."
-          until docker-compose ps | grep -q "mero-mcp"; do
+          until docker compose ps | grep -q "mero-mcp"; do
             if [ $elapsed -ge $timeout ]; then
               echo "Container startup timed out"
-              docker-compose logs
+              docker compose logs
               exit 1
             fi
             
@@ -61,7 +61,7 @@ jobs:
           done
           
           echo "Container started, waiting for health check..."
-          until docker-compose ps | grep -q "healthy" || [ $elapsed -ge $timeout ]; do
+          until docker compose ps | grep -q "healthy" || [ $elapsed -ge $timeout ]; do
             sleep 5
             elapsed=$((elapsed + 5))
             echo "Waiting for container to be healthy... ($elapsed/$timeout seconds)"
@@ -69,8 +69,8 @@ jobs:
           
           if [ $elapsed -ge $timeout ]; then
             echo "Container health check timed out"
-            docker-compose ps
-            docker-compose logs
+            docker compose ps
+            docker compose logs
             exit 1
           fi
           
@@ -78,21 +78,25 @@ jobs:
       
       - name: Run Docker test
         run: |
-          # Run the docker test script
+          chmod +x ./scripts/docker-test.sh
+          # Update the script to use docker compose
+          sed -i 's/docker-compose/docker compose/g' ./scripts/docker-test.sh
           ./scripts/docker-test.sh
       
       - name: Run SSE test
         run: |
-          # Run the SSE test script
+          chmod +x ./scripts/test-docker-sse.sh
+          # Update the script to use docker compose
+          sed -i 's/docker-compose/docker compose/g' ./scripts/test-docker-sse.sh
           ./scripts/test-docker-sse.sh
       
       - name: Display logs on failure
         if: ${{ failure() }}
         run: |
-          docker-compose ps
-          docker-compose logs
+          docker compose ps
+          docker compose logs
       
       - name: Clean up
         if: ${{ always() }}
         run: |
-          docker-compose down 
+          docker compose down 

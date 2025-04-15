@@ -384,12 +384,15 @@ export class MCPExpressServer {
    */
   private startSSEHeartbeat(): void {
     // Send a heartbeat every 30 seconds to all SSE clients
-    setInterval(() => {
+    const intervalId = setInterval(() => {
       if (this.sseConnections.size > 0) {
         logger.debug(`Sending heartbeat to ${this.sseConnections.size} SSE clients`);
         this.broadcastEvent('heartbeat', { timestamp: new Date().toISOString() });
       }
     }, 30000);
+
+    // Store the interval ID for cleanup if needed
+    this.app.locals.sseHeartbeatInterval = intervalId;
   }
 
   public start(port: number): void {

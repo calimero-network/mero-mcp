@@ -48,9 +48,10 @@ echo "🔍 Checking if Docker container is running..."
 # Get the container name/ID if provided as an argument, otherwise use default
 CONTAINER_NAME=${1:-"mero-mcp"}
 
+# Check using docker command directly
 if ! docker ps | grep -q "$CONTAINER_NAME"; then
     echo "❌ Docker container '$CONTAINER_NAME' is not running."
-    echo "   Please start the container with: docker-compose up -d"
+    echo "   Please start the container with: docker compose up -d"
     exit 1
 fi
 
@@ -65,7 +66,7 @@ if [ $exit_code -eq 0 ]; then
     
     # Clean up test file
     echo "🧹 Cleaning up test files..."
-    curl -s -X POST http://localhost:3000/mcp/tool/delete_file \
+    docker exec -i mero-mcp curl -s -X POST http://localhost:3000/mcp/tool/delete_file \
         -H "Content-Type: application/json" \
         -d '{"parameters":{"filePath":"docker-test.txt"}}' > /dev/null
 else
