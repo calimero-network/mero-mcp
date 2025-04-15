@@ -6,7 +6,6 @@ import { FileSystemResourceProvider } from '../resources/fileSystemResource';
 import { fileTools, fileToolHandlers } from '../tools/fileTools';
 import path from 'path';
 import cors from 'cors';
-import { setInterval } from 'timers';
 
 // Define our own type that's compatible with the SDK
 type VariablesMap = Record<string, string | string[]>;

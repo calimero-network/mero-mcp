@@ -33,12 +33,9 @@ jobs:
           npm ci
           npm install -g node-fetch@2 eventsource
       
-      - name: Install Docker Compose
-        run: |
-          sudo curl -L "https://github.com/docker/compose/releases/download/v2.23.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-          sudo chmod +x /usr/local/bin/docker-compose
-          docker-compose --version
-      
+      - name: Set up Docker Compose
+        uses: docker/setup-buildx-action@v3
+        
       - name: Build and Start Docker container
         run: |
           docker-compose build
@@ -46,24 +43,38 @@ jobs:
       
       - name: Wait for container to be ready
         run: |
-          # Wait for up to 30 seconds for the container to be healthy
-          timeout=30
+          # Wait for up to 60 seconds for the container to be ready
+          timeout=60
           elapsed=0
-          while [ $elapsed -lt $timeout ]; do
-            if docker-compose ps | grep -q "healthy"; then
-              echo "Container is healthy!"
-              break
+          
+          echo "Waiting for container to start..."
+          until docker-compose ps | grep -q "mero-mcp"; do
+            if [ $elapsed -ge $timeout ]; then
+              echo "Container startup timed out"
+              docker-compose logs
+              exit 1
             fi
-            echo "Waiting for container to be healthy... ($elapsed/$timeout seconds)"
+            
             sleep 5
             elapsed=$((elapsed + 5))
+            echo "Still waiting for container to start... ($elapsed/$timeout seconds)"
+          done
+          
+          echo "Container started, waiting for health check..."
+          until docker-compose ps | grep -q "healthy" || [ $elapsed -ge $timeout ]; do
+            sleep 5
+            elapsed=$((elapsed + 5))
+            echo "Waiting for container to be healthy... ($elapsed/$timeout seconds)"
           done
           
           if [ $elapsed -ge $timeout ]; then
             echo "Container health check timed out"
+            docker-compose ps
             docker-compose logs
             exit 1
           fi
+          
+          echo "Container is healthy and ready for testing!"
       
       - name: Run Docker test
         run: |

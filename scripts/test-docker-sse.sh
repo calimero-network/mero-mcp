@@ -125,7 +125,7 @@ EOF
 # Copy and run test script in container
 echo "🚀 Running SSE test in container..."
 docker cp test-sse-docker.js mero-mcp:/app/
-docker-compose exec mero-mcp node /app/test-sse-docker.js
+docker-compose exec -T mero-mcp node /app/test-sse-docker.js
 
 # Clean up
 echo "🧹 Cleaning up..."
