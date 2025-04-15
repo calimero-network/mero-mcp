@@ -1,6 +1,7 @@
 # Mero MCP Server
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![CI](https://github.com/your-username/mero-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/your-username/mero-mcp/actions/workflows/ci.yml)
 
 A robust Express-based server implementation of the [Model Context Protocol (MCP)](https://modelcontextprotocol.ai/), designed to provide a standardized interface for AI model integrations.
 
@@ -19,6 +20,7 @@ A robust Express-based server implementation of the [Model Context Protocol (MCP
   - [Docker Deployment](#docker-deployment)
 - [API Documentation](#api-documentation)
 - [Testing](#testing)
+- [CI/CD](#cicd)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -149,6 +151,40 @@ npm test
 npm test -- --coverage
 # or
 ./bin/mero-cli coverage
+```
+
+## CI/CD
+
+The project uses GitHub Actions for continuous integration and delivery:
+
+### Workflows
+
+- **CI**: Runs on every push to main and pull request to validate the codebase
+  - Builds the project
+  - Runs linters
+  - Executes tests
+  - Reports test coverage
+
+- **Validate PR**: Targeted validation for changed files in pull requests
+  - Formats and lints only changed files
+  - Runs tests related to changed files
+  - Executes the full validation script
+
+- **Dependency Check**: Checks for outdated or vulnerable dependencies
+  - Runs on package.json changes and weekly schedule
+  - Generates dependency update reports
+  - Performs security audits
+
+- **Documentation**: Validates documentation quality
+  - Checks Markdown links
+  - Runs Markdown linting rules
+
+### Running Locally
+
+You can run the same checks locally using the CLI tool:
+
+```bash
+./bin/mero-cli validate
 ```
 
 ## Contributing

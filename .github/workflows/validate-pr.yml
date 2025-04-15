@@ -1,0 +1,61 @@
+name: Validate PR
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - 'jest.config.js'
+      - '.eslintrc.js'
+
+jobs:
+  validate-changes:
+    name: Validate Changed Files
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Fetch all history for file changes detection
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18.x'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@v40
+        with:
+          files: |
+            src/**/*.ts
+      
+      - name: Format and lint changed files
+        if: steps.changed-files.outputs.any_changed == 'true'
+        run: |
+          echo "Changed files:"
+          echo "${{ steps.changed-files.outputs.all_changed_files }}"
+          npx prettier --write ${{ steps.changed-files.outputs.all_changed_files }}
+          npx eslint --fix ${{ steps.changed-files.outputs.all_changed_files }}
+      
+      - name: Run tests related to changed files
+        run: |
+          CHANGED_DIRS=$(echo "${{ steps.changed-files.outputs.all_changed_files }}" | grep -o 'src/[^/]*' | sort -u)
+          if [ -n "$CHANGED_DIRS" ]; then
+            echo "Running tests for changed directories: $CHANGED_DIRS"
+            npm test -- --findRelatedTests ${{ steps.changed-files.outputs.all_changed_files }}
+          else
+            echo "No source files changed, skipping targeted tests"
+          fi
+      
+      - name: Validate using CLI tool
+        run: |
+          chmod +x ./bin/mero-cli
+          ./bin/mero-cli validate 
