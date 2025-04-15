@@ -12,22 +12,27 @@ CLI="$PROJECT_ROOT/bin/mero-cli"
 
 echo "🔍 Validating Mero MCP Server codebase..."
 
-# Step 1: Check for syntax errors
+# Step 1: Check for TypeScript type errors
+echo "⚙️  Running TypeScript type checking..."
+$CLI type-check || { echo "❌ TypeScript type checking failed!"; exit 1; }
+echo "✅ TypeScript type checking successful!"
+
+# Step 2: Check for syntax errors
 echo "⚙️  Checking TypeScript compilation..."
 $CLI build || { echo "❌ TypeScript compilation failed!"; exit 1; }
 echo "✅ TypeScript compilation successful!"
 
-# Step 2: Run linting
+# Step 3: Run linting
 echo "⚙️  Running ESLint..."
 $CLI lint || { echo "❌ Linting failed!"; exit 1; }
 echo "✅ Linting successful!"
 
-# Step 3: Run tests
+# Step 4: Run tests
 echo "⚙️  Running tests..."
 $CLI test || { echo "❌ Tests failed!"; exit 1; }
 echo "✅ All tests passed!"
 
-# Step 4: Check test coverage
+# Step 5: Check test coverage
 echo "⚙️  Checking test coverage..."
 $CLI coverage || { echo "❌ Coverage check failed!"; exit 1; }
 echo "✅ Test coverage requirements met!"

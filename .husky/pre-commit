@@ -18,6 +18,14 @@ if [ -n "$FILES" ]; then
   # Use the CLI wrapper
   $CLI format
   $CLI lint
+  
+  echo "Running TypeScript type check..."
+  # Run TypeScript compiler to check for type errors
+  npm run build:check || {
+    echo "TypeScript type check failed! Please fix the errors before committing."
+    exit 1
+  }
+  
   git add $FILES
 else
   echo "No TypeScript files staged for commit."

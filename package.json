@@ -22,7 +22,8 @@
   "lint-staged": {
     "*.ts": [
       "prettier --write",
-      "eslint --fix"
+      "eslint --fix",
+      "npm run build:check"
     ],
     "*.js": [
       "prettier --write",

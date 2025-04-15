@@ -8,6 +8,13 @@ CLI="$PROJECT_ROOT/bin/mero-cli"
 
 # Run tests to ensure code quality before pushing
 echo "Running pre-push hook..."
+
+echo "Running TypeScript type check..."
+npm run build:check || {
+  echo "TypeScript type check failed! Please fix the errors before pushing."
+  exit 1
+}
+
 echo "Running tests..."
 # Use the CLI wrapper
 $CLI test 

@@ -39,6 +39,7 @@ show_help() {
   echo "  start             Start the server in production mode"
   echo "  dev               Start the server in development mode"
   echo "  build             Build the project"
+  echo "  type-check        Run TypeScript type checking"
   echo "  test              Run tests"
   echo "  coverage          Run tests with coverage"
   echo "  lint              Run ESLint"
@@ -58,6 +59,9 @@ case "$1" in
     ;;
   build)
     run_command run build
+    ;;
+  type-check)
+    run_command run build:check
     ;;
   test)
     run_command test
