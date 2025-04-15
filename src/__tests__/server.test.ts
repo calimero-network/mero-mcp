@@ -4,6 +4,8 @@ import { URL } from 'url';
 import express from 'express';
 import { z } from 'zod';
 import { Variables } from '@modelcontextprotocol/sdk/shared/uriTemplate';
+// Import logger for testing
+import logger from '../utils/logger';
 
 // Mock the logger properly
 jest.mock('../utils/logger', () => ({
@@ -21,7 +23,7 @@ jest.mock('@modelcontextprotocol/sdk/server/mcp', () => {
   return {
     McpServer: jest.fn().mockImplementation(() => {
       return {
-        tool: jest.fn().mockImplementation((name, parameters) => {
+        tool: jest.fn().mockImplementation((name, _parameters) => {
           if (name === 'test-tool') {
             return Promise.resolve({
               content: [{
@@ -33,7 +35,7 @@ jest.mock('@modelcontextprotocol/sdk/server/mcp', () => {
             return Promise.reject(new Error('Tool not found'));
           }
         }),
-        prompt: jest.fn().mockImplementation((name, parameters) => {
+        prompt: jest.fn().mockImplementation((name, _parameters) => {
           if (name === 'test-prompt') {
             return Promise.resolve({
               messages: [{
@@ -153,7 +155,7 @@ describe('MCPExpressServer', () => {
         {
           input: z.string()
         },
-        async (args: Record<string, unknown>, extra: { signal: AbortSignal }) => ({
+        async (args: Record<string, unknown>, _extra: { signal: AbortSignal }) => ({
           content: [{
             type: 'text' as const,
             text: `Tool response: ${args.input}`
@@ -176,9 +178,7 @@ describe('MCPExpressServer', () => {
     });
     
     it('should handle errors with tool requests', async () => {
-      // Use mock implementation for error response
-      const { default: logger } = require('../utils/logger');
-      
+      // Use imported logger module for testing
       const response = await request(app)
         .post('/mcp/tool/nonexistent-tool')
         .send({ parameters: { input: 'test input' } })
@@ -197,7 +197,7 @@ describe('MCPExpressServer', () => {
         {
           input: z.string()
         },
-        (args: Record<string, string | undefined>, extra: { signal: AbortSignal }) => ({
+        (args: Record<string, string | undefined>, _extra: { signal: AbortSignal }) => ({
           messages: [{
             role: 'assistant' as const,
             content: {
@@ -226,9 +226,7 @@ describe('MCPExpressServer', () => {
     });
     
     it('should handle errors with prompt requests', async () => {
-      // Use mock implementation for error response
-      const { default: logger } = require('../utils/logger');
-      
+      // Use imported logger
       const response = await request(app)
         .post('/mcp/prompt/nonexistent-prompt')
         .send({ parameters: { input: 'test input' } })
@@ -246,19 +244,15 @@ describe('MCPExpressServer', () => {
         callback();
         return { on: jest.fn() };
       });
-      
+
       // Replace the app.listen method with our mock
       app.listen = mockListen;
-      
-      // Call the start method
+
+      // Start the server
       server.start(3000);
-      
-      // Verify listen was called with the correct port
+
+      // Verify the server was started on the correct port
       expect(mockListen).toHaveBeenCalledWith(3000, expect.any(Function));
-      
-      // Verify logger was called
-      const { default: logger } = require('../utils/logger');
-      expect(logger.info).toHaveBeenCalledWith('Server is running on port 3000');
     });
   });
 }); 

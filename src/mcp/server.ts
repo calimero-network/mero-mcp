@@ -35,11 +35,11 @@ export class MCPExpressServer {
     this.setupRoutes();
   }
 
-  private setupMiddleware() {
+  private setupMiddleware(): void {
     this.app.use(express.json());
   }
 
-  private setupRoutes() {
+  private setupRoutes(): void {
     // Health check endpoint
     this.app.get('/health', (req, res) => {
       res.json({ status: 'ok' });
@@ -150,7 +150,7 @@ export class MCPExpressServer {
         text: string;
       }>;
     }>
-  ) {
+  ): void {
     const template = new ResourceTemplate(uriTemplate, { list: undefined });
     this.resources.set(name, { templateString: uriTemplate, handler });
     this.server.resource(name, template, handler as any);
@@ -165,7 +165,7 @@ export class MCPExpressServer {
         text: string;
       }>;
     }>
-  ) {
+  ): void {
     this.server.tool(name, paramsSchema, handler);
   }
 
@@ -181,11 +181,11 @@ export class MCPExpressServer {
         };
       }>;
     }
-  ) {
+  ): void {
     this.server.prompt(name, argsSchema, handler);
   }
 
-  public start(port: number) {
+  public start(port: number): void {
     this.app.listen(port, () => {
       logger.info(`Server is running on port ${port}`);
     });

@@ -1,4 +1,5 @@
 import logger from '../utils/logger';
+import winston from 'winston';
 
 // Mock winston
 jest.mock('winston', () => {
@@ -39,21 +40,21 @@ describe('Logger', () => {
 
   it('should log info messages', () => {
     logger.info('Test info message', { data: 'test' });
-    expect(require('winston').createLogger().info).toHaveBeenCalled();
+    expect(jest.mocked(winston).createLogger().info).toHaveBeenCalled();
   });
 
   it('should log error messages', () => {
     logger.error('Test error message', { error: new Error('Test error') });
-    expect(require('winston').createLogger().error).toHaveBeenCalled();
+    expect(jest.mocked(winston).createLogger().error).toHaveBeenCalled();
   });
 
   it('should log warning messages', () => {
     logger.warn('Test warning message');
-    expect(require('winston').createLogger().warn).toHaveBeenCalled();
+    expect(jest.mocked(winston).createLogger().warn).toHaveBeenCalled();
   });
 
   it('should log debug messages', () => {
     logger.debug('Test debug message');
-    expect(require('winston').createLogger().debug).toHaveBeenCalled();
+    expect(jest.mocked(winston).createLogger().debug).toHaveBeenCalled();
   });
 }); 

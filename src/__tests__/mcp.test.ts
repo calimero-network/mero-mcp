@@ -1,5 +1,4 @@
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { Variables } from '@modelcontextprotocol/sdk/shared/uriTemplate.js';
 import express, { Request, Response } from 'express';
 import { z } from 'zod';
@@ -18,7 +17,7 @@ jest.mock('../utils/logger', () => ({
 // Mock SSE transport
 jest.mock('@modelcontextprotocol/sdk/server/sse.js', () => {
   return {
-    SSEServerTransport: jest.fn().mockImplementation((messagePath, res) => {
+    SSEServerTransport: jest.fn().mockImplementation((_messagePath, _res) => {
       // Return a simplified mock of SSEServerTransport
       return {
         sessionId: 'test-session-id',
@@ -48,7 +47,7 @@ describe('MCP Server', () => {
     });
 
     // Capture the handler function instead of setting up a route
-    sseHandlerFn = (req, res) => {
+    sseHandlerFn = (req, res): void => {
       // Set headers for SSE connection
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
@@ -136,7 +135,7 @@ describe('MCP Server', () => {
       server.tool(
         'test',
         { message: z.string() },
-        async (args: Record<string, unknown>, extra: { signal: AbortSignal }) => ({
+        async (args: Record<string, unknown>, _extra: { signal: AbortSignal }) => ({
           content: [{
             type: 'text' as const,
             text: `Test tool: ${args.message as string}`
@@ -160,7 +159,7 @@ describe('MCP Server', () => {
       server.prompt(
         'test',
         { message: z.string() },
-        (args: Record<string, string | undefined>, extra: { signal: AbortSignal }) => ({
+        (args: Record<string, string | undefined>, _extra: { signal: AbortSignal }) => ({
           messages: [{
             role: 'user' as const,
             content: {

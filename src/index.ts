@@ -1,6 +1,5 @@
 import dotenv from 'dotenv';
 import { MCPExpressServer } from './mcp/server';
-import logger from './utils/logger';
 
 dotenv.config();
 
