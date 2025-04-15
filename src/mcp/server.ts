@@ -192,11 +192,52 @@ export class MCPExpressServer {
         try {
           const { name } = req.params;
           const { parameters } = req.body;
-          const result = await this.server.tool(name, parameters);
-          return res.json(result);
+          
+          // Get the handler from our fileToolHandlers map
+          const handler = fileToolHandlers[name as keyof typeof fileToolHandlers];
+          
+          if (!handler) {
+            // If no direct handler found, try the SDK
+            try {
+              const result = await this.server.tool(name, parameters);
+              return res.json(result);
+            } catch (error) {
+              const errorMessage = error instanceof Error ? error.message : String(error);
+              if (errorMessage.includes("already registered")) {
+                // If it's just a registration issue, we can try a direct call
+                logger.warn(`Using direct tool handler for ${name} due to SDK registration issue`);
+              } else {
+                logger.error("Tool request SDK error", { error, message: errorMessage, tool: name });
+                throw error;
+              }
+            }
+          }
+          
+          // If we have a direct handler for this tool, use it
+          if (handler) {
+            // Create an abort controller for timeout
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+            
+            try {
+              const result = await handler(parameters, { signal: controller.signal });
+              clearTimeout(timeout);
+              return res.json(result);
+            } catch (error) {
+              clearTimeout(timeout);
+              const errorMessage = error instanceof Error ? error.message : String(error);
+              logger.error("Direct tool handler error", { error, message: errorMessage, tool: name });
+              throw error;
+            }
+          }
+          
+          // If we get here, we couldn't find a handler
+          return res.status(404).json({ error: `Tool ${name} not found` });
         } catch (error) {
-          logger.error("Tool request error", { error });
-          return res.status(500).json({ error: "Internal server error" });
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          const errorStack = error instanceof Error ? error.stack : '';
+          logger.error("Tool request error", { error, message: errorMessage, stack: errorStack, tool: req.params.name, parameters: req.body.parameters });
+          return res.status(500).json({ error: "Internal server error", message: errorMessage });
         }
       },
     );
@@ -255,60 +296,79 @@ export class MCPExpressServer {
    * Register default file-based tools
    */
   private registerDefaultTools(): void {
+    // Keep track of registered tools to avoid duplicates
+    const registeredTools = new Set<string>();
+
     // Register all file tools from the fileTools array
     for (const tool of fileTools) {
       const handler =
         fileToolHandlers[tool.name as keyof typeof fileToolHandlers];
-      if (handler) {
-        // Convert the properties to ZodRawShape by creating a schema for each property
-        const zodSchema: z.ZodRawShape = {};
-        if (tool.inputSchema.properties) {
-          Object.entries(tool.inputSchema.properties).forEach(
-            ([key, propSchema]) => {
-              // Need to type cast to access properties
-              const typedSchema = propSchema as {
-                type?: string;
-                description?: string;
-              };
+      
+      // Skip if already registered
+      if (registeredTools.has(tool.name) || !handler) {
+        continue;
+      }
 
-              // Create basic zod schema based on the type
-              if (typedSchema.type === "string") {
-                zodSchema[key] = z
-                  .string()
-                  .describe(typedSchema.description || "");
-              } else if (typedSchema.type === "number") {
-                zodSchema[key] = z
-                  .number()
-                  .describe(typedSchema.description || "");
-              } else if (typedSchema.type === "boolean") {
-                zodSchema[key] = z
-                  .boolean()
-                  .describe(typedSchema.description || "");
-              } else {
-                // Default to string for unknown types
-                zodSchema[key] = z
-                  .string()
-                  .describe(typedSchema.description || "");
-              }
-            },
-          );
-        }
+      // Convert the properties to ZodRawShape by creating a schema for each property
+      const zodSchema: z.ZodRawShape = {};
+      if (tool.inputSchema.properties) {
+        Object.entries(tool.inputSchema.properties).forEach(
+          ([key, propSchema]) => {
+            // Need to type cast to access properties
+            const typedSchema = propSchema as {
+              type?: string;
+              description?: string;
+            };
 
-        // We need to type cast the handler to match the expected signature
-        const typedHandler = (args: Record<string, unknown>, extra: { signal: AbortSignal }): Promise<{
-          content: Array<{
-            type: "text";
-            text: string;
-          }>;
-        }> => {
-          // The original handler expects specific args, but we're getting a generic Record
-          // We need to use 'any' here due to the complex types involved
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          return handler(args as any, extra);
-        };
+            // Create basic zod schema based on the type
+            if (typedSchema.type === "string") {
+              zodSchema[key] = z
+                .string()
+                .describe(typedSchema.description || "");
+            } else if (typedSchema.type === "number") {
+              zodSchema[key] = z
+                .number()
+                .describe(typedSchema.description || "");
+            } else if (typedSchema.type === "boolean") {
+              zodSchema[key] = z
+                .boolean()
+                .describe(typedSchema.description || "");
+            } else {
+              // Default to string for unknown types
+              zodSchema[key] = z
+                .string()
+                .describe(typedSchema.description || "");
+            }
+          },
+        );
+      }
 
+      // We need to type cast the handler to match the expected signature
+      const typedHandler = (args: Record<string, unknown>, extra: { signal: AbortSignal }): Promise<{
+        content: Array<{
+          type: "text";
+          text: string;
+        }>;
+      }> => {
+        // The original handler expects specific args, but we're getting a generic Record
+        // We need to use 'any' here due to the complex types involved
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return handler(args as any, extra);
+      };
+
+      try {
         this.registerTool(tool.name, zodSchema, typedHandler);
+        // Mark as registered
+        registeredTools.add(tool.name);
         logger.info(`Registered tool: ${tool.name}`);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        // If it's already registered, we can ignore
+        if (errorMessage.includes("already registered")) {
+          logger.info(`Tool ${tool.name} is already registered, skipping`);
+        } else {
+          logger.error(`Error registering tool ${tool.name}`, { error, message: errorMessage });
+        }
       }
     }
   }
@@ -363,7 +423,14 @@ export class MCPExpressServer {
       }>;
     }>,
   ): void {
-    this.server.tool(name, paramsSchema, handler);
+    try {
+      this.server.tool(name, paramsSchema, handler);
+    } catch (error) {
+      // If the tool is already registered, it might mean we're trying to
+      // register it again due to how the SDK works - just rethrow in this case
+      // so the calling code can handle it
+      throw error;
+    }
   }
 
   public registerPrompt(
