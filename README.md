@@ -1,8 +1,8 @@
 # Mero MCP Server
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![CI](https://github.com/your-username/mero-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/your-username/mero-mcp/actions/workflows/ci.yml)
-[![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://xilosada.github.io/mero-mcp/)
+[![CI](https://github.com/calimero-network/mero-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/calimero-network/mero-mcp/actions/workflows/ci.yml)
+[![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://calimero-network.github.io/mero-mcp/)
 
 A robust Express-based server implementation of the [Model Context Protocol (MCP)](https://modelcontextprotocol.ai/), designed to provide a standardized interface for AI model integrations.
 
@@ -51,7 +51,7 @@ The Mero MCP Server implements the Model Context Protocol, which defines a stand
 Clone the repository and install dependencies:
 
 ```bash
-git clone https://github.com/your-username/mero-mcp.git
+git clone https://github.com/calimero-network/mero-mcp.git
 cd mero-mcp
 npm install
 ```
@@ -136,7 +136,7 @@ The server exposes the following MCP endpoints:
 - POST `/mcp/tool/:name` - Executes registered tools
 - POST `/mcp/prompt/:name` - Processes registered prompts
 
-For detailed API documentation, see our [documentation site](https://xilosada.github.io/mero-mcp/) or the [API.md](docs/API.md) file directly.
+For detailed API documentation, see our [documentation site](https://calimero-network.github.io/mero-mcp/) or the [API.md](docs/API.md) file directly.
 
 ## Testing
 

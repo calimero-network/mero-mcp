@@ -79,7 +79,7 @@ jobs:
             <script>
               window.\$docsify = {
                 name: 'Mero MCP Server',
-                repo: 'https://github.com/xilosada/mero-mcp',
+                repo: 'https://github.com/calimero-network/mero-mcp',
                 loadSidebar: true,
                 subMaxLevel: 3,
                 auto2top: true,
