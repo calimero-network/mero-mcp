@@ -178,6 +178,23 @@ export class MCPExpressServer {
 
         // Call the handler
         const result = await resourceHandler.handler(url, variables);
+        
+        // Validate the response format according to MCP specification
+        if (!result || !Array.isArray(result.contents)) {
+          logger.error("Invalid resource response format", { resource: name });
+          res.status(500).json({ error: "Resource returned invalid format" });
+          return;
+        }
+        
+        // Verify each content item has the required fields
+        for (const item of result.contents) {
+          if (!item.uri || typeof item.text !== 'string') {
+            logger.error("Invalid resource content item", { resource: name });
+            res.status(500).json({ error: "Resource returned invalid content item" });
+            return;
+          }
+        }
+        
         res.json(result);
       } catch (error) {
         logger.error("Resource request error", { error });
@@ -222,7 +239,24 @@ export class MCPExpressServer {
             try {
               const result = await handler(parameters, { signal: controller.signal });
               clearTimeout(timeout);
-              return res.json(result);
+              // Ensure the response format matches the MCP specification:
+              // The response must have a "content" field with an array of content items
+              if (result && Array.isArray(result.content)) {
+                // Make sure all content items have a "type" field
+                const validContent = result.content.every(item => 
+                  item && typeof item === 'object' && 'type' in item && 'text' in item
+                );
+                
+                if (validContent) {
+                  return res.json(result);
+                } else {
+                  logger.error("Invalid tool response format", { tool: name });
+                  throw new Error("Tool response format is invalid");
+                }
+              } else {
+                logger.error("Missing content array in tool response", { tool: name });
+                throw new Error("Tool response must contain a content array");
+              }
             } catch (error) {
               clearTimeout(timeout);
               const errorMessage = error instanceof Error ? error.message : String(error);
@@ -304,7 +338,7 @@ export class MCPExpressServer {
       const handler =
         fileToolHandlers[tool.name as keyof typeof fileToolHandlers];
       
-      // Skip if already registered
+      // Skip if already registered or no handler exists
       if (registeredTools.has(tool.name) || !handler) {
         continue;
       }
@@ -333,6 +367,16 @@ export class MCPExpressServer {
               zodSchema[key] = z
                 .boolean()
                 .describe(typedSchema.description || "");
+            } else if (typedSchema.type === "array") {
+              // Add support for array type
+              zodSchema[key] = z
+                .array(z.any())
+                .describe(typedSchema.description || "");
+            } else if (typedSchema.type === "object") {
+              // Add support for object type
+              zodSchema[key] = z
+                .record(z.any())
+                .describe(typedSchema.description || "");
             } else {
               // Default to string for unknown types
               zodSchema[key] = z
@@ -343,22 +387,59 @@ export class MCPExpressServer {
         );
       }
 
-      // We need to type cast the handler to match the expected signature
-      const typedHandler = (args: Record<string, unknown>, extra: { signal: AbortSignal }): Promise<{
+      // Make specific properties required if specified in the tool schema
+      if (tool.inputSchema.required && tool.inputSchema.required.length > 0) {
+        for (const requiredProp of tool.inputSchema.required) {
+          if (zodSchema[requiredProp]) {
+            zodSchema[requiredProp] = zodSchema[requiredProp].refine(
+              (val) => val !== undefined && val !== null,
+              { message: `${requiredProp} is required` }
+            );
+          }
+        }
+      }
+
+      // Ensure the handler returns the proper format according to MCP specification
+      const wrappedHandler = async (args: Record<string, unknown>, extra: { signal: AbortSignal }): Promise<{
         content: Array<{
           type: "text";
           text: string;
         }>;
       }> => {
-        // The original handler expects specific args, but we're getting a generic Record
-        // We need to use 'any' here due to the complex types involved
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        return handler(args as any, extra);
+        try {
+          // Call the original handler
+          // We need to use `any` here due to the complex types involved with multiple tool handlers
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const result = await handler(args as any, extra);
+          
+          // Validate and ensure the response format is correct
+          if (!result || !Array.isArray(result.content)) {
+            throw new Error(`Tool ${tool.name} did not return a valid response format`);
+          }
+          
+          // Ensure all content items have type and text
+          for (const item of result.content) {
+            if (!item.type || !item.text) {
+              throw new Error(`Tool ${tool.name} returned invalid content item`);
+            }
+          }
+          
+          return result;
+        } catch (error) {
+          logger.error(`Error executing tool ${tool.name}`, { error });
+          // Return a properly formatted error response
+          return {
+            content: [{
+              type: "text",
+              text: `Error executing tool ${tool.name}: ${error instanceof Error ? error.message : String(error)}`
+            }]
+          };
+        }
       };
 
       try {
         // Register the tool directly with the server
-        this.server.tool(tool.name, zodSchema, typedHandler);
+        this.server.tool(tool.name, zodSchema, wrappedHandler);
         // Mark as registered
         registeredTools.add(tool.name);
         logger.info(`Registered tool: ${tool.name}`);
@@ -405,10 +486,46 @@ export class MCPExpressServer {
     const template = new ResourceTemplate(uriTemplate, { list: undefined });
     this.resources.set(name, { templateString: uriTemplate, handler });
     
-    // We need to use 'any' here because the SDK expects a slightly different 
-    // handler signature than what we're providing
+    // Create a wrapper handler that ensures the response format is compliant with MCP spec
+    const wrappedHandler = async (uri: URL, variables: Record<string, unknown>): Promise<{
+      contents: Array<{
+        uri: string;
+        text: string;
+      }>;
+    }> => {
+      try {
+        // Call the original handler with the typed variables
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const result = await handler(uri, variables as any);
+        
+        // Validate the response format
+        if (!result || !Array.isArray(result.contents)) {
+          throw new Error(`Resource ${name} did not return a valid response format`);
+        }
+        
+        // Validate each content item
+        for (const item of result.contents) {
+          if (!item.uri || typeof item.text !== 'string') {
+            throw new Error(`Resource ${name} returned invalid content item`);
+          }
+        }
+        
+        return result;
+      } catch (error) {
+        logger.error(`Error in resource handler for ${name}`, { error });
+        // Return a properly formatted error response
+        return {
+          contents: [{
+            uri: uri.toString(),
+            text: `Error retrieving resource: ${error instanceof Error ? error.message : String(error)}`
+          }]
+        };
+      }
+    };
+    
+    // Register with the MCP server using the wrapped handler
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    this.server.resource(name, template, handler as any);
+    this.server.resource(name, template, wrappedHandler as any);
   }
 
   public registerTool(

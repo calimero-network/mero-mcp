@@ -355,7 +355,7 @@ export const fileTools: Tool[] = [
 /**
  * Hello tool handler function
  */
-async function hello(args: { name: string }, { signal }: { signal: AbortSignal }): Promise<{
+async function hello(args: { name: string }, { signal: _signal }: { signal: AbortSignal }): Promise<{
   content: Array<{ type: "text"; text: string }>;
 }> {
   return {
