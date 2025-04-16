@@ -75,6 +75,13 @@ export class MCPExpressServer {
     // SSE endpoint for server-sent events
     this.app.get("/mcp/sse", (req, res): void => {
       try {
+        // Log detailed request info for debugging
+        logger.info("SSE connection attempt", { 
+          headers: req.headers,
+          ip: req.ip,
+          userAgent: req.headers['user-agent']
+        });
+
         // Required headers for SSE
         res.setHeader("Content-Type", "text/event-stream");
         res.setHeader("Cache-Control", "no-cache");
@@ -97,26 +104,46 @@ export class MCPExpressServer {
         logger.info("Sent tools.available event to new SSE client", { toolsCount: toolsInfo.length });
 
         this.sseConnections.add(res);
+        logger.info(`SSE connection established, total connections: ${this.sseConnections.size}`);
 
         req.on("close", () => {
           this.sseConnections.delete(res);
+          logger.info(`SSE connection closed, remaining connections: ${this.sseConnections.size}`);
         });
 
         req.on("error", (error) => {
-          logger.error("SSE connection error", { error });
+          // Cast to any to access non-standard Error properties
+          // Node.js errors often include a 'code' property that's not in the standard Error type
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const errorObj = error as any;
+          logger.error("SSE connection error", { 
+            error, 
+            message: error.message,
+            code: errorObj.code 
+          });
           this.sseConnections.delete(res);
           res.end();
         });
 
         res.on("error", (error) => {
-          logger.error("SSE response error", { error });
+          // Cast to any to access non-standard Error properties
+          // Node.js errors often include a 'code' property that's not in the standard Error type
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const errorObj = error as any;
+          logger.error("SSE response error", { 
+            error, 
+            message: error.message,
+            code: errorObj.code 
+          });
           this.sseConnections.delete(res);
           res.end();
         });
 
         // For SSE connections that stay open, we don't return anything
       } catch (error) {
-        logger.error("SSE setup error", { error });
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorStack = error instanceof Error ? error.stack : undefined;
+        logger.error("SSE setup error", { error, message: errorMessage, stack: errorStack });
         res.status(500).json({ error: "Internal server error" });
         // Don't return anything to match void return type
       }
