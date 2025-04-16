@@ -9,6 +9,7 @@ import { FileSystemResourceProvider } from "../resources/fileSystemResource";
 import { fileTools, fileToolHandlers } from "../tools/fileTools";
 import path from "path";
 import cors from "cors";
+import routes from "../routes";
 
 // Define our own type that's compatible with the SDK
 type VariablesMap = Record<string, string | string[]>;
@@ -62,6 +63,7 @@ export class MCPExpressServer {
   private setupMiddleware(): void {
     this.app.use(cors());
     this.app.use(express.json());
+    this.app.use("/mcp", routes); // Mount all API routes under /mcp path
   }
 
   private setupRoutes(): void {
@@ -84,6 +86,15 @@ export class MCPExpressServer {
 
         // Send an initial connection message to keep the connection alive
         res.write('event: connected\ndata: {"status":"connected"}\n\n');
+
+        // Send available tools information to the client
+        const toolsInfo = fileTools.map(tool => ({
+          name: tool.name,
+          description: tool.description || "",
+          annotations: tool.annotations || {}
+        }));
+        res.write(`event: tools.available\ndata: ${JSON.stringify({ tools: toolsInfo })}\n\n`);
+        logger.info("Sent tools.available event to new SSE client", { toolsCount: toolsInfo.length });
 
         this.sseConnections.add(res);
 
