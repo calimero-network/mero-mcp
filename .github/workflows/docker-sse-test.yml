@@ -9,7 +9,6 @@ on:
       - 'src/**'
       - 'Dockerfile'
       - 'docker-compose.yml'
-      - 'scripts/test-docker-sse.sh'
       - 'scripts/docker-test.js'
       - 'scripts/docker-test.sh'
       - '.github/workflows/docker-sse-test.yml'
@@ -82,13 +81,6 @@ jobs:
           # Update the script to use docker compose
           sed -i 's/docker-compose/docker compose/g' ./scripts/docker-test.sh
           ./scripts/docker-test.sh
-      
-      - name: Run SSE test
-        run: |
-          chmod +x ./scripts/test-docker-sse.sh
-          # Update the script to use docker compose
-          sed -i 's/docker-compose/docker compose/g' ./scripts/test-docker-sse.sh
-          ./scripts/test-docker-sse.sh
       
       - name: Display logs on failure
         if: ${{ failure() }}

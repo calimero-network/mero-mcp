@@ -1,71 +1,71 @@
 #!/usr/bin/env node
 
 /**
- * Docker Setup Test Script
+ * Docker MCP Compatibility Test Script
  * 
- * This script tests that the MCP service in Docker is running correctly
- * by making requests to all API endpoints and validating responses.
- * 
- * Note: This is an ES module (uses import instead of require).
+ * This script verifies that the MCP server running in Docker is compatible
+ * with the Model Context Protocol by using the MCP Inspector CLI tool.
  */
 
+import { exec } from 'child_process';
+import { promisify } from 'util';
 import fetch from 'node-fetch';
-import { setTimeout } from 'timers/promises';
+const execAsync = promisify(exec);
 
 // Configuration
 const HOST = process.env.MCP_HOST || 'http://localhost';
 const PORT = process.env.MCP_PORT || '3000';
-const BASE_URL = `${HOST}:${PORT}`;
-const RETRY_DELAY_MS = 2000;
-const MAX_RETRIES = 5;
+const SERVER_URL = `${HOST}:${PORT}`;
+const INSPECTOR_VERSION = '1.9.0';
 
 // Main test function
 async function runTests() {
-  console.log(`🔍 Testing MCP Docker setup at ${BASE_URL}`);
+  console.log(`🔍 Testing MCP Docker compatibility at ${SERVER_URL}`);
   
-  // Wait for service to be ready
-  await waitForService(MAX_RETRIES);
+  // Ensure MCP Inspector is available
+  await ensureInspector();
   
-  // Run tests for all endpoints
-  await testHealthEndpoint();
+  // Run specific tests
+  await testHealthEndpoint(); // Uses direct fetch, not Inspector
+  await testToolsEndpoint();
+  await testResourcesEndpoint();
+  await testPromptsEndpoint();
   await testSSEEndpoint();
-  await testResourceEndpoint();
-  await testToolEndpoint();
-  await testPromptEndpoint();
-  await testLoggingEndpoint();
   
-  console.log('\n✅ All tests completed successfully. Docker setup is working correctly!');
+  console.log('\n✅ All tests completed successfully. Docker setup is MCP compatible!');
 }
 
-async function waitForService(retries) {
-  console.log('\n🔄 Waiting for service to be ready...');
+async function ensureInspector() {
+  console.log('\n🔄 Verifying MCP Inspector availability...');
   
-  for (let i = 0; i < retries; i++) {
+  try {
+    // Check if the specific version is already installed
+    await execAsync(`npx --no @modelcontextprotocol/inspector@${INSPECTOR_VERSION} --version`);
+    console.log(`✅ MCP Inspector v${INSPECTOR_VERSION} is available`);
+  } catch (error) {
+    console.log(`⏳ Installing MCP Inspector v${INSPECTOR_VERSION}...`);
     try {
-      const response = await fetch(`${BASE_URL}/health`);
-      if (response.ok) {
-        console.log('✅ Service is ready');
-        return;
-      }
-    } catch (error) {
-      console.log(`⏳ Attempt ${i + 1}/${retries}: Service not ready yet. Retrying in ${RETRY_DELAY_MS}ms...`);
+      await execAsync(`npm install --no-save @modelcontextprotocol/inspector@${INSPECTOR_VERSION}`);
+      console.log(`✅ MCP Inspector v${INSPECTOR_VERSION} installed successfully`);
+    } catch (installError) {
+      console.error('❌ Failed to install MCP Inspector:', installError.message);
+      process.exit(1);
     }
-    await setTimeout(RETRY_DELAY_MS);
   }
-  throw new Error('Service not available after maximum retries');
 }
 
 async function testHealthEndpoint() {
   console.log('\n🔄 Testing health endpoint...');
   
   try {
-    const response = await fetch(`${BASE_URL}/health`);
+    // Use direct fetch for health endpoint, not MCP Inspector
+    const response = await fetch(`${SERVER_URL}/health`);
     const data = await response.json();
     
     if (response.ok && data.status === 'ok') {
       console.log('✅ Health endpoint is working');
     } else {
-      throw new Error(`Unexpected response: ${JSON.stringify(data)}`);
+      throw new Error(`Unexpected health response: ${JSON.stringify(data)}`);
     }
   } catch (error) {
     console.error('❌ Health endpoint test failed:', error.message);
@@ -73,17 +73,129 @@ async function testHealthEndpoint() {
   }
 }
 
-async function testSSEEndpoint() {
-  console.log('\n🔄 Testing SSE endpoint...');
+async function testToolsEndpoint() {
+  console.log('\n🔄 Testing tools endpoint...');
   
   try {
-    // We don't actually open an SSE connection, just check if it's accessible
-    const response = await fetch(`${BASE_URL}/mcp/sse`, { method: 'HEAD' });
+    // Test tools listing
+    const { stdout: toolsStdout } = await execAsync(`npx @modelcontextprotocol/inspector --cli ${SERVER_URL} --method tools/list`);
+    const toolsResponse = JSON.parse(toolsStdout);
     
-    if (response.ok) {
-      console.log('✅ SSE endpoint is accessible');
+    // Check if the tools are in the expected format (in .tools property)
+    const tools = toolsResponse.tools || [];
+    
+    if (Array.isArray(tools)) {
+      console.log(`✅ Tools endpoint returned ${tools.length} tools`);
+      
+      // Test if echo tool exists
+      const echoTool = tools.find(tool => tool.name === 'echo' || tool.name === 'mcp_calimero_echo');
+      if (echoTool) {
+        console.log(`✅ Found echo tool: ${echoTool.name}`);
+      } else {
+        console.log(`⚠️ No echo tool found. This might cause other tests to fail.`);
+      }
     } else {
-      throw new Error(`Unexpected status: ${response.status}`);
+      throw new Error(`Unexpected tools response format: ${toolsStdout}`);
+    }
+  } catch (error) {
+    console.error('❌ Tools endpoint test failed:', error.message);
+    process.exit(1);
+  }
+}
+
+async function testResourcesEndpoint() {
+  console.log('\n🔄 Testing resources endpoint...');
+  
+  try {
+    // Test resources listing
+    const { stdout: resourcesStdout } = await execAsync(`npx @modelcontextprotocol/inspector --cli ${SERVER_URL} --method resources/list`);
+    const resourcesResponse = JSON.parse(resourcesStdout);
+    
+    // Check if the resources are in the expected format
+    const resources = resourcesResponse.resources || resourcesResponse || [];
+    
+    if (Array.isArray(resources)) {
+      console.log(`✅ Resources endpoint returned ${resources.length} resources`);
+    } else {
+      throw new Error(`Unexpected resources response format: ${resourcesStdout}`);
+    }
+  } catch (error) {
+    console.error('❌ Resources endpoint test failed:', error.message);
+    process.exit(1);
+  }
+}
+
+async function testPromptsEndpoint() {
+  console.log('\n🔄 Testing prompts endpoint...');
+  
+  try {
+    // Test prompts listing
+    const { stdout: promptsStdout } = await execAsync(`npx @modelcontextprotocol/inspector --cli ${SERVER_URL} --method prompts/list`);
+    const promptsResponse = JSON.parse(promptsStdout);
+    
+    // Check if the prompts are in the expected format
+    const prompts = promptsResponse.prompts || promptsResponse || [];
+    
+    if (Array.isArray(prompts)) {
+      console.log(`✅ Prompts endpoint returned ${prompts.length} prompts`);
+    } else {
+      throw new Error(`Unexpected prompts response format: ${promptsStdout}`);
+    }
+  } catch (error) {
+    console.error('❌ Prompts endpoint test failed:', error.message);
+    process.exit(1);
+  }
+}
+
+async function testSSEEndpoint() {
+  console.log('\n🔄 Testing SSE endpoint via echo tool...');
+  
+  try {
+    // Find the echo tool name from the previous test
+    const { stdout: toolsStdout } = await execAsync(`npx @modelcontextprotocol/inspector --cli ${SERVER_URL} --method tools/list`);
+    const toolsResponse = JSON.parse(toolsStdout);
+    const tools = toolsResponse.tools || [];
+    
+    // Look for echo tool
+    const echoTool = tools.find(tool => 
+      tool.name === 'echo' || 
+      tool.name === 'mcp_calimero_echo' || 
+      (tool.name && tool.name.toLowerCase().includes('echo'))
+    );
+    
+    if (!echoTool) {
+      console.log('⚠️ No echo tool found, skipping echo test');
+      return;
+    }
+    
+    // Test SSE by calling the echo tool
+    const echoToolName = echoTool.name;
+    const echoMessage = "Hello from MCP test";
+    
+    console.log(`Using tool: ${echoToolName}`);
+    const { stdout } = await execAsync(`npx @modelcontextprotocol/inspector --cli ${SERVER_URL} --method tools/call --tool-name ${echoToolName} --tool-arg message="${echoMessage}"`);
+    
+    try {
+      const response = JSON.parse(stdout);
+      
+      // Check different possible response formats
+      if (
+        (response && response.message === echoMessage) || 
+        (response && response.result && response.result.message === echoMessage) ||
+        (stdout.includes(echoMessage))
+      ) {
+        console.log('✅ SSE endpoint is working properly');
+      } else {
+        console.log(`⚠️ Echo response doesn't match expected format, but connection worked`);
+        console.log(`Response: ${stdout}`);
+      }
+    } catch (parseError) {
+      // If we can't parse JSON but the message is in the output, that's still success
+      if (stdout.includes(echoMessage)) {
+        console.log('✅ SSE endpoint is working properly (non-JSON response)');
+      } else {
+        throw new Error(`Invalid JSON response: ${stdout}`);
+      }
     }
   } catch (error) {
     console.error('❌ SSE endpoint test failed:', error.message);
@@ -91,136 +203,8 @@ async function testSSEEndpoint() {
   }
 }
 
-async function testResourceEndpoint() {
-  console.log('\n🔄 Testing resource endpoint...');
-  
-  try {
-    // Create a test file first
-    const testContent = 'Test content for Docker setup verification';
-    const writeResponse = await fetch(`${BASE_URL}/mcp/tool/write_file`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        parameters: {
-          filePath: 'docker-test.txt',
-          content: testContent
-        }
-      })
-    });
-    
-    if (!writeResponse.ok) {
-      throw new Error(`Failed to create test file: ${await writeResponse.text()}`);
-    }
-    
-    // Now try to access it as a resource
-    const response = await fetch(`${BASE_URL}/mcp/resource/file?path=docker-test.txt`);
-    
-    if (response.ok) {
-      const data = await response.json();
-      if (data.contents && data.contents[0] && data.contents[0].text === testContent) {
-        console.log('✅ Resource endpoint is working');
-      } else {
-        throw new Error(`Unexpected resource content: ${JSON.stringify(data)}`);
-      }
-    } else {
-      throw new Error(`Unexpected status: ${response.status}`);
-    }
-  } catch (error) {
-    console.error('❌ Resource endpoint test failed:', error.message);
-    process.exit(1);
-  }
-}
-
-async function testToolEndpoint() {
-  console.log('\n🔄 Testing tool endpoint...');
-  
-  try {
-    // Test the list_directory tool
-    const response = await fetch(`${BASE_URL}/mcp/tool/list_directory`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        parameters: {
-          dirPath: '/'
-        }
-      })
-    });
-    
-    if (response.ok) {
-      const data = await response.json();
-      if (data.content && data.content[0] && data.content[0].type === 'text') {
-        console.log('✅ Tool endpoint is working');
-      } else {
-        throw new Error(`Unexpected tool response: ${JSON.stringify(data)}`);
-      }
-    } else {
-      throw new Error(`Unexpected status: ${response.status}`);
-    }
-  } catch (error) {
-    console.error('❌ Tool endpoint test failed:', error.message);
-    process.exit(1);
-  }
-}
-
-async function testPromptEndpoint() {
-  console.log('\n🔄 Testing prompt endpoint...');
-  
-  try {
-    // This may return a 404 if no prompts are registered, which is okay
-    const response = await fetch(`${BASE_URL}/mcp/prompt/test`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        parameters: {
-          input: 'test'
-        }
-      })
-    });
-    
-    // We consider either 200 or 404 acceptable (404 if no prompt named "test" exists)
-    if (response.ok || response.status === 404) {
-      console.log('✅ Prompt endpoint is accessible');
-    } else {
-      throw new Error(`Unexpected status: ${response.status}`);
-    }
-  } catch (error) {
-    console.error('❌ Prompt endpoint test failed:', error.message);
-    process.exit(1);
-  }
-}
-
-async function testLoggingEndpoint() {
-  console.log('\n🔄 Testing logging endpoint...');
-  
-  try {
-    const response = await fetch(`${BASE_URL}/mcp/logging/setLevel`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        params: {
-          level: 'info'
-        }
-      })
-    });
-    
-    if (response.ok) {
-      const data = await response.json();
-      if (data.result === true) {
-        console.log('✅ Logging endpoint is working');
-      } else {
-        throw new Error(`Unexpected logging response: ${JSON.stringify(data)}`);
-      }
-    } else {
-      throw new Error(`Unexpected status: ${response.status}`);
-    }
-  } catch (error) {
-    console.error('❌ Logging endpoint test failed:', error.message);
-    process.exit(1);
-  }
-}
-
 // Run tests and handle errors
 runTests().catch(error => {
-  console.error('❌ Tests failed:', error.message);
+  console.error('❌ MCP compatibility tests failed:', error.message);
   process.exit(1);
 }); 

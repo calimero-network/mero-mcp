@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# Docker Setup Test Script
+# Docker MCP Compatibility Test Script
 # 
-# This script ensures dependencies are installed and then runs the Node.js
-# test script to verify that all MCP endpoints are working in Docker.
+# This script verifies that the MCP server running in Docker is compatible
+# with the Model Context Protocol by using the MCP Inspector CLI tool.
 
 set -e  # Exit on error
 
@@ -11,7 +11,7 @@ set -e  # Exit on error
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
-echo "🔧 Setting up Docker test environment..."
+echo "🔧 Setting up MCP compatibility test environment..."
 
 # Check if node is installed
 if ! command -v node &> /dev/null; then
@@ -23,16 +23,6 @@ fi
 if ! command -v npm &> /dev/null; then
     echo "❌ npm is not installed. Please install npm to run this test."
     exit 1
-fi
-
-# Install required Node.js packages
-echo "📦 Installing required packages..."
-cd "$PROJECT_ROOT"
-
-# Check if node-fetch is installed and install it if not
-if ! npm list node-fetch &> /dev/null; then
-    echo "📦 Installing node-fetch..."
-    npm install --no-save node-fetch@2 # Using version 2 for better compatibility
 fi
 
 # Check if Docker is running
@@ -56,21 +46,17 @@ if ! docker ps | grep -q "$CONTAINER_NAME"; then
 fi
 
 # Run the test script
-echo "🚀 Running Docker tests..."
+echo "🚀 Running MCP compatibility tests..."
+cd "$PROJECT_ROOT"
 node "$SCRIPT_DIR/docker-test.js"
 
 exit_code=$?
 
 if [ $exit_code -eq 0 ]; then
-    echo "🎉 Docker setup verification completed successfully!"
-    
-    # Clean up test file
-    echo "🧹 Cleaning up test files..."
-    docker exec -i mero-mcp curl -s -X POST http://localhost:3000/mcp/tool/delete_file \
-        -H "Content-Type: application/json" \
-        -d '{"parameters":{"filePath":"docker-test.txt"}}' > /dev/null
+    echo "🎉 MCP compatibility verification completed successfully!"
 else
-    echo "❌ Docker setup verification failed."
+    echo "❌ MCP compatibility verification failed."
+    echo "   Please check that your server implements the Model Context Protocol correctly."
 fi
 
 exit $exit_code 
