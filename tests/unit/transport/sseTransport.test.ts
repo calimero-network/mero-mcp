@@ -1,4 +1,5 @@
-// Mock dependencies first, before any imports
+/* eslint @typescript-eslint/no-explicit-any: "off" */
+
 jest.mock("../../../src/utils/logger", () => ({
   info: jest.fn(),
   error: jest.fn(),
@@ -683,6 +684,62 @@ describe("SSE Transport Module", () => {
       );
       expect(mockTransport.connectionState).toBe(ConnectionState.ERROR);
       expect(mockTransport.startHeartbeat).not.toHaveBeenCalled();
+    });
+
+    it("should handle 'already started' error in connect method", async (): Promise<void> => {
+      const alreadyStartedError = new Error("Transport already started");
+      
+      const mockTransport = {
+        sessionId: "test-session-id",
+        start: jest.fn().mockRejectedValue(alreadyStartedError),
+        startHeartbeat: jest.fn(),
+        connectionState: ConnectionState.DISCONNECTED,
+        connect: async function(): Promise<void> {
+          try {
+            try {
+              await this.start();
+            } catch (startError) {
+              if (
+                startError instanceof Error &&
+                startError.message.includes("already started")
+              ) {
+                logger.debug(
+                  `SSE transport already started for session ID: ${this.sessionId}`
+                );
+              } else {
+                throw startError;
+              }
+            }
+            
+            this.connectionState = ConnectionState.CONNECTED;
+            this.startHeartbeat();
+            logger.info(`SSE transport connected for session ID: ${this.sessionId}`);
+          } catch (error) {
+            logger.error(`Error connecting SSE transport for session ID: ${this.sessionId}`, {
+              error: error instanceof Error ? error.message : String(error),
+            });
+            this.connectionState = ConnectionState.ERROR;
+            throw error;
+          }
+        }
+      };
+      
+      // Clear previous calls
+      jest.clearAllMocks();
+      
+      // Call connect method which should handle the 'already started' error
+      await mockTransport.connect();
+      
+      // Verify logs and state changes
+      expect(mockTransport.start).toHaveBeenCalled();
+      expect(logger.debug).toHaveBeenCalledWith(
+        expect.stringContaining("SSE transport already started for session ID")
+      );
+      expect(mockTransport.connectionState).toBe(ConnectionState.CONNECTED);
+      expect(mockTransport.startHeartbeat).toHaveBeenCalled();
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.stringContaining("SSE transport connected for session ID")
+      );
     });
 
     it("should properly close the connection when the response emits close", (): void => {

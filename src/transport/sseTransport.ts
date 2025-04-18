@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
-import logger from "../utils/logger";
+import defaultLogger from "../utils/logger";
 
 /**
  * Connection state of a transport
@@ -19,15 +19,65 @@ interface SSEEvent {
 }
 
 /**
+ * Interface for logger dependency
+ */
+export interface ILogger {
+  info(message: string, meta?: Record<string, unknown>): void;
+  error(message: string, meta?: Record<string, unknown>): void;
+  warn(message: string, meta?: Record<string, unknown>): void;
+  debug(message: string, meta?: Record<string, unknown>): void;
+}
+
+/**
+ * Interface for timer functions
+ */
+export interface ITimerProvider {
+  setInterval(callback: () => void, ms: number): NodeJS.Timeout;
+  clearInterval(intervalId: NodeJS.Timeout): void;
+  getCurrentTime(): number;
+}
+
+/**
+ * Default timer implementation
+ */
+export class DefaultTimerProvider implements ITimerProvider {
+  setInterval(callback: () => void, ms: number): NodeJS.Timeout {
+    return global.setInterval(callback, ms);
+  }
+
+  clearInterval(intervalId: NodeJS.Timeout): void {
+    global.clearInterval(intervalId);
+  }
+
+  getCurrentTime(): number {
+    return Date.now();
+  }
+}
+
+/**
+ * Enhanced SSE transport configuration options
+ */
+export interface EnhancedSSETransportOptions {
+  heartbeatSeconds?: number;
+  maxReconnectAttempts?: number;
+  logger?: ILogger;
+  timerProvider?: ITimerProvider;
+}
+
+/**
  * Enhanced SSE transport wrapper that adds logging, error handling, and connection management
  */
 export class EnhancedSSETransport extends SSEServerTransport {
   private connectionState: ConnectionState = ConnectionState.CONNECTED;
   private heartbeatInterval: NodeJS.Timeout | null = null;
   private heartbeatSeconds = 30;
-  private lastActivityTime: number = Date.now();
+  private lastActivityTime: number;
   private reconnectAttempts = 0;
   private readonly maxReconnectAttempts: number = 5;
+
+  // Dependencies
+  protected readonly logger: ILogger;
+  protected readonly timerProvider: ITimerProvider;
 
   /**
    * Create a new enhanced SSE transport instance
@@ -38,19 +88,22 @@ export class EnhancedSSETransport extends SSEServerTransport {
   constructor(
     path: string,
     res: Response,
-    options: {
-      heartbeatSeconds?: number;
-      maxReconnectAttempts?: number;
-    } = {},
+    options: EnhancedSSETransportOptions = {},
   ) {
     super(path, res);
     this.heartbeatSeconds = options.heartbeatSeconds ?? 30;
     this.maxReconnectAttempts = options.maxReconnectAttempts ?? 5;
+    this.logger = options.logger ?? defaultLogger;
+    this.timerProvider = options.timerProvider ?? new DefaultTimerProvider();
+    this.lastActivityTime = this.timerProvider.getCurrentTime();
 
-    logger.info(`SSE transport created with session ID: ${this.sessionId}`, {
-      heartbeatSeconds: this.heartbeatSeconds,
-      maxReconnectAttempts: this.maxReconnectAttempts,
-    });
+    this.logger.info(
+      `SSE transport created with session ID: ${this.sessionId}`,
+      {
+        heartbeatSeconds: this.heartbeatSeconds,
+        maxReconnectAttempts: this.maxReconnectAttempts,
+      },
+    );
 
     // Add connection handlers
     this.setupConnectionHandlers(res);
@@ -72,7 +125,7 @@ export class EnhancedSSETransport extends SSEServerTransport {
           startError instanceof Error &&
           startError.message.includes("already started")
         ) {
-          logger.debug(
+          this.logger.debug(
             `SSE transport already started for session ID: ${this.sessionId}`,
           );
         } else {
@@ -84,9 +137,11 @@ export class EnhancedSSETransport extends SSEServerTransport {
       // Start heartbeat after connection is established
       this.startHeartbeat();
 
-      logger.info(`SSE transport connected for session ID: ${this.sessionId}`);
+      this.logger.info(
+        `SSE transport connected for session ID: ${this.sessionId}`,
+      );
     } catch (error) {
-      logger.error(
+      this.logger.error(
         `Error connecting SSE transport for session ID: ${this.sessionId}`,
         {
           error: error instanceof Error ? error.message : String(error),
@@ -101,32 +156,37 @@ export class EnhancedSSETransport extends SSEServerTransport {
    * Set up connection event handlers
    * @param res Express response object
    */
-  private setupConnectionHandlers(res: Response): void {
+  protected setupConnectionHandlers(res: Response): void {
     // Handle connection close
     res.on("close", () => {
       this.connectionState = ConnectionState.DISCONNECTED;
       this.stopHeartbeat();
-      logger.info(`SSE connection closed for session ID: ${this.sessionId}`);
+      this.logger.info(
+        `SSE connection closed for session ID: ${this.sessionId}`,
+      );
     });
 
     // Handle connection errors
     res.on("error", (error) => {
       this.connectionState = ConnectionState.ERROR;
       this.stopHeartbeat();
-      logger.error(`SSE connection error for session ID: ${this.sessionId}`, {
-        error: error instanceof Error ? error.message : String(error),
-      });
+      this.logger.error(
+        `SSE connection error for session ID: ${this.sessionId}`,
+        {
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
     });
   }
 
   /**
    * Start the heartbeat mechanism to keep the connection alive
    */
-  private startHeartbeat(): void {
-    this.heartbeatInterval = setInterval(() => {
+  protected startHeartbeat(): void {
+    this.heartbeatInterval = this.timerProvider.setInterval(() => {
       try {
         // Check if it's been too long since the last activity
-        const now = Date.now();
+        const now = this.timerProvider.getCurrentTime();
         const timeSinceLastActivity = now - this.lastActivityTime;
 
         // If too much time has passed without activity, send a heartbeat
@@ -135,9 +195,12 @@ export class EnhancedSSETransport extends SSEServerTransport {
           this.lastActivityTime = now;
         }
       } catch (error) {
-        logger.error(`Error in heartbeat for session ID: ${this.sessionId}`, {
-          error: error instanceof Error ? error.message : String(error),
-        });
+        this.logger.error(
+          `Error in heartbeat for session ID: ${this.sessionId}`,
+          {
+            error: error instanceof Error ? error.message : String(error),
+          },
+        );
       }
     }, this.heartbeatSeconds * 1000);
   }
@@ -145,9 +208,9 @@ export class EnhancedSSETransport extends SSEServerTransport {
   /**
    * Stop the heartbeat mechanism
    */
-  private stopHeartbeat(): void {
+  protected stopHeartbeat(): void {
     if (this.heartbeatInterval) {
-      clearInterval(this.heartbeatInterval);
+      this.timerProvider.clearInterval(this.heartbeatInterval);
       this.heartbeatInterval = null;
     }
   }
@@ -155,21 +218,23 @@ export class EnhancedSSETransport extends SSEServerTransport {
   /**
    * Send a heartbeat message to check if connection is still alive
    */
-  private sendHeartbeat(): void {
+  protected sendHeartbeat(): void {
     try {
       // This is a comment event that won't affect the client but keeps the connection alive
       const event: SSEEvent = {
         event: "heartbeat",
-        data: JSON.stringify({ timestamp: Date.now() }),
+        data: JSON.stringify({
+          timestamp: this.timerProvider.getCurrentTime(),
+        }),
       };
 
       // Use the internal method from SSEServerTransport to send the event
       // @ts-expect-error - We're using the internal send method which may not match the expected type
       this.send(event);
 
-      logger.debug(`Sent heartbeat for session ID: ${this.sessionId}`);
+      this.logger.debug(`Sent heartbeat for session ID: ${this.sessionId}`);
     } catch (error) {
-      logger.error(
+      this.logger.error(
         `Failed to send heartbeat for session ID: ${this.sessionId}`,
         {
           error: error instanceof Error ? error.message : String(error),
@@ -184,7 +249,7 @@ export class EnhancedSSETransport extends SSEServerTransport {
   /**
    * Handle a connection failure by attempting to reconnect
    */
-  private handleConnectionFailure(): void {
+  protected handleConnectionFailure(): void {
     if (this.connectionState === ConnectionState.RECONNECTING) {
       return; // Already trying to reconnect
     }
@@ -192,13 +257,13 @@ export class EnhancedSSETransport extends SSEServerTransport {
     this.connectionState = ConnectionState.RECONNECTING;
     this.reconnectAttempts++;
 
-    logger.info(
+    this.logger.info(
       `Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts}) for session ID: ${this.sessionId}`,
     );
 
     if (this.reconnectAttempts > this.maxReconnectAttempts) {
       this.connectionState = ConnectionState.ERROR;
-      logger.error(
+      this.logger.error(
         `Max reconnect attempts reached for session ID: ${this.sessionId}`,
       );
       return;
@@ -215,7 +280,7 @@ export class EnhancedSSETransport extends SSEServerTransport {
    */
   async handlePostMessage(req: Request, res: Response): Promise<void> {
     // Update activity timestamp
-    this.lastActivityTime = Date.now();
+    this.lastActivityTime = this.timerProvider.getCurrentTime();
 
     try {
       // Check connection state
@@ -228,7 +293,7 @@ export class EnhancedSSETransport extends SSEServerTransport {
         );
       }
 
-      logger.info(`Handling message for session ID: ${this.sessionId}`, {
+      this.logger.info(`Handling message for session ID: ${this.sessionId}`, {
         method: req.method,
         path: req.path,
         body: req.body,
@@ -238,16 +303,19 @@ export class EnhancedSSETransport extends SSEServerTransport {
       if (this.connectionState === ConnectionState.RECONNECTING) {
         this.connectionState = ConnectionState.CONNECTED;
         this.reconnectAttempts = 0;
-        logger.info(
+        this.logger.info(
           `Reconnected successfully for session ID: ${this.sessionId}`,
         );
       }
       await super.handlePostMessage(req, res);
     } catch (error) {
-      logger.error(`Error handling message for session ID: ${this.sessionId}`, {
-        error: error instanceof Error ? error.message : String(error),
-        state: this.connectionState,
-      });
+      this.logger.error(
+        `Error handling message for session ID: ${this.sessionId}`,
+        {
+          error: error instanceof Error ? error.message : String(error),
+          state: this.connectionState,
+        },
+      );
 
       if (!res.headersSent) {
         res.status(500).json({
@@ -270,7 +338,7 @@ export class EnhancedSSETransport extends SSEServerTransport {
   }
 
   /**
-   * Check if the transport is in a connected state
+   * Check if the transport is currently connected (includes RECONNECTING state)
    */
   isConnected(): boolean {
     return (
@@ -280,39 +348,45 @@ export class EnhancedSSETransport extends SSEServerTransport {
   }
 
   /**
-   * Clean up resources when transport is no longer needed
+   * Clean up all resources used by this transport
    */
   public cleanup(): void {
     this.stopHeartbeat();
-    logger.info(
+    this.logger.info(
       `Cleaned up transport resources for session ID: ${this.sessionId}`,
+      {
+        state: this.connectionState,
+      },
     );
   }
 }
 
-/**
- * Store of active transports by session ID
- */
+// Store all active transports
 export const transports: { [sessionId: string]: EnhancedSSETransport } = {};
 
 /**
- * Get an existing transport by session ID or create a new one
- * @param sessionId The session ID
- * @param path The SSE path
- * @param res The Express response object
+ * Get an existing transport or create a new one
+ * @param sessionId Unique session identifier
+ * @param path The base path for SSE events
+ * @param res Express response object
  * @param options Configuration options
- * @returns The transport instance
+ * @returns The transport instance or null if sessionId is undefined
  */
 export function getOrCreateTransport(
   sessionId: string | undefined,
   path: string,
   res: Response,
-  options: {
-    heartbeatSeconds?: number;
-    maxReconnectAttempts?: number;
-  } = {},
+  options: EnhancedSSETransportOptions = {},
 ): EnhancedSSETransport | null {
-  if (sessionId && transports[sessionId]) {
+  const logger = options.logger ?? defaultLogger;
+
+  if (!sessionId) {
+    logger.error("Cannot create transport without sessionId");
+    return null;
+  }
+
+  // Check if a transport already exists for this session
+  if (transports[sessionId]) {
     const existingTransport = transports[sessionId];
 
     // Check if the transport is still in a usable state
@@ -320,58 +394,41 @@ export function getOrCreateTransport(
       logger.info(`Reusing transport for session ID: ${sessionId}`);
       return existingTransport;
     } else {
-      // Transport exists but is in an unusable state, clean it up
+      // Clean up the old transport if it's not in a usable state
       existingTransport.cleanup();
       delete transports[sessionId];
-      logger.info(`Removed stale transport for session ID: ${sessionId}`);
+      logger.info(`Cleaned up stale transport for session ID: ${sessionId}`);
     }
   }
 
-  if (!sessionId) {
-    // Create a new transport
-    const newTransport = new EnhancedSSETransport(path, res, options);
-    transports[newTransport.sessionId] = newTransport;
-
-    // Clean up transport when connection closes
-    res.on("close", () => {
-      const transportToCleanup = transports[newTransport.sessionId];
-      if (transportToCleanup) {
-        transportToCleanup.cleanup();
-        delete transports[newTransport.sessionId];
-      }
-    });
-
-    return newTransport;
-  }
-
-  return null;
+  // Create a new transport
+  const transport = new EnhancedSSETransport(path, res, options);
+  transports[sessionId] = transport;
+  return transport;
 }
 
 /**
- * Clean up stale transports that haven't been active for a while
- * @param maxAgeSeconds Maximum age in seconds for a transport to be considered active
+ * Clean up stale transports that haven't had activity for a while
+ * @param maxAgeSeconds Maximum age in seconds before a transport is considered stale
  */
 export function cleanupStaleTransports(maxAgeSeconds = 3600): void {
   const now = Date.now();
-  const staleThreshold = now - maxAgeSeconds * 1000;
-
-  let cleaned = 0;
+  let cleanedCount = 0;
 
   Object.entries(transports).forEach(([sessionId, transport]) => {
-    // Type assertion is safe here since we're checking the lastActivityTime property
-    // which we know exists on our EnhancedSSETransport instances
-    if (
-      transport &&
-      (transport as unknown as { lastActivityTime: number }).lastActivityTime <
-        staleThreshold
-    ) {
+    // If the transport has a lastActivityTime property (which it should)
+    // @ts-expect-error - We're accessing a private property, but it's safe in this context
+    const lastActivity: number = transport.lastActivityTime || 0;
+    const age = now - lastActivity;
+
+    if (age > maxAgeSeconds * 1000) {
       transport.cleanup();
       delete transports[sessionId];
-      cleaned++;
+      cleanedCount++;
     }
   });
 
-  if (cleaned > 0) {
-    logger.info(`Cleaned up ${cleaned} stale transports`);
+  if (cleanedCount > 0) {
+    defaultLogger.info(`Cleaned up ${cleanedCount} stale transports`);
   }
 }

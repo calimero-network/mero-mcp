@@ -4,7 +4,7 @@
     "module": "commonjs",
     "lib": ["ES2020"],
     "outDir": "./dist",
-    "rootDir": "./src",
+    "rootDir": ".",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -14,8 +14,12 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"]
-    }
+    },
+    "typeRoots": ["./node_modules/@types", "./tests/types", "./@types"]
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "tests"]
+  "typeAcquisition": {
+    "disableFilenameBasedTypeAcquisition": true
+  },
+  "include": ["src/**/*", "tests/**/*", "@types/**/*"],
+  "exclude": ["node_modules", "dist"]
 } 

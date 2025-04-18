@@ -55,4 +55,5 @@ export const mockLogger = {
   error: jest.fn(),
   warn: jest.fn(),
   debug: jest.fn(),
+  clear: jest.fn(),
 }; 

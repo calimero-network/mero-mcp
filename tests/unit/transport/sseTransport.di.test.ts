@@ -1,4 +1,4 @@
-// Import dependencies
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { 
   EnhancedSSETransport, 
   ConnectionState, 
@@ -696,7 +696,7 @@ describe("Enhanced SSE Transport with Dependency Injection", () => {
       mockTransportInstance.lastActivityTime = mockTimerProvider.getCurrentTime() - 1000;
       
       // Create a local callback that simulates what the real callback would do
-      const localHeartbeatFn = () => {
+      const localHeartbeatFn = (): void => {
         const now = mockTimerProvider.getCurrentTime();
         const timeSinceLastActivity = now - mockTransportInstance.lastActivityTime;
         if (timeSinceLastActivity > (options.heartbeatSeconds as number * 1000) / 2) {
@@ -719,7 +719,7 @@ describe("Enhanced SSE Transport with Dependency Injection", () => {
       mockTransportInstance.sendHeartbeat = jest.fn();
       
       // Create a test implementation of the heartbeat callback
-      const testCallback = () => {
+      const testCallback = (): void => {
         // This directly simulates what the actual implementation does in startHeartbeat
         const now = mockTimerProvider.getCurrentTime();
         const timeSinceLastActivity = now - mockTransportInstance.lastActivityTime;
@@ -731,7 +731,7 @@ describe("Enhanced SSE Transport with Dependency Injection", () => {
       };
       
       // Override setInterval implementation 
-      mockTimerProvider.setInterval = jest.fn().mockImplementation((callback, ms) => {
+      mockTimerProvider.setInterval = jest.fn().mockImplementation((_callback, _ms) => {
         // Just store the ID and don't actually call the callback
         return 12345;
       });
