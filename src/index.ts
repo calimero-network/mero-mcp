@@ -13,10 +13,10 @@ const app = express();
 
 // to support multiple simultaneous connections we have a lookup object from
 // sessionId to transport
-const transports: {[sessionId: string]: EnhancedSSETransport} = {};
+const transports: { [sessionId: string]: EnhancedSSETransport } = {};
 
 app.get("/sse", async (_: Request, res: Response) => {
-  const transport = new EnhancedSSETransport('/messages', res);
+  const transport = new EnhancedSSETransport("/messages", res);
   transports[transport.sessionId] = transport;
   res.on("close", () => {
     delete transports[transport.sessionId];
@@ -30,7 +30,7 @@ app.post("/messages", async (req: Request, res: Response) => {
   if (transport) {
     await transport.handlePostMessage(req, res);
   } else {
-    res.status(400).send('No transport found for sessionId');
+    res.status(400).send("No transport found for sessionId");
   }
 });
 

@@ -176,7 +176,7 @@ describe("SSE Transport Module", () => {
       jest.advanceTimersByTime(5000);
 
       // Check if send was called with heartbeat
-      // @ts-ignore - We're accessing private methods for testing
+      // @ts-expect-error - We're accessing private methods for testing
       expect(transport.send).toHaveBeenCalled();
       expect(logger.debug).toHaveBeenCalledWith(
         "Sent heartbeat for session ID: test-session-id"
@@ -507,7 +507,7 @@ describe("SSE Transport Module", () => {
 
     it("should remove transport from store when connection closes", () => {
       const mockRes = createTestResponse();
-      const result = getOrCreateTransport(undefined, "/messages", mockRes);
+      getOrCreateTransport(undefined, "/messages", mockRes);
 
       expect(transports["test-session-id"]).toBeDefined();
 
@@ -531,12 +531,12 @@ describe("SSE Transport Module", () => {
       const mockRes = createTestResponse();
       
       const transport1 = new EnhancedSSETransport("/messages", mockRes);
-      // @ts-ignore - Directly accessing private property for testing
+      // @ts-expect-error - Directly accessing private property for testing
       transport1.lastActivityTime = Date.now() - (2 * 3600 * 1000); // 2 hours old
       transport1.cleanup = jest.fn();
       
       const transport2 = new EnhancedSSETransport("/messages", mockRes);
-      // @ts-ignore - Directly accessing private property for testing
+      // @ts-expect-error - Directly accessing private property for testing
       transport2.lastActivityTime = Date.now(); // Fresh
       transport2.cleanup = jest.fn();
       

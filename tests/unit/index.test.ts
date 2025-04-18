@@ -67,7 +67,6 @@ jest.mock("../../src/utils/logger", () => ({
 }));
 
 // Import after mocking
-import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { mcpServer } from "../../src/server/mcpServer";
 import { registerEchoResource } from "../../src/resources/echo";
 import { registerEchoTool } from "../../src/tools/echo";
@@ -81,9 +80,9 @@ const intervals = new Set<NodeJS.Timeout>();
 
 // Mock setInterval and clearInterval
 global.setInterval = function(
-  callback: (...args: any[]) => void, 
+  callback: (...args: unknown[]) => void, 
   ms?: number, 
-  ...args: any[]
+  ...args: unknown[]
 ): NodeJS.Timeout {
   const id = originalSetInterval(callback, ms, ...args);
   intervals.add(id);
