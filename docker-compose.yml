@@ -1,6 +1,3 @@
-# This version ensures compatibility with most Docker Compose installations
-version: '3.8'
-
 services:
   # Main MCP server service 
   mero-mcp:
