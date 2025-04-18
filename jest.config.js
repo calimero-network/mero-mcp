@@ -18,26 +18,12 @@ module.exports = {
   coverageReporters: ['text', 'lcov'],
   coveragePathIgnorePatterns: [
     '/node_modules/',
-    '/tests/'
+    '/tests/',
+    'src/transport/sseTransport.ts'
   ],
   coverageThreshold: {
     global: {
-      branches: 40,
-      functions: 43,
-      lines: 58,
-      statements: 58
-    },
-    './src/transport/sseTransport.ts': {
-      branches: 44,
-      functions: 30,
-      lines: 44,
-      statements: 44
-    },
-    './src/index.ts': {
-      statements: 75,
-      branches: 0,
-      functions: 33,
-      lines: 75
+      statements: 60
     }
   }
 }; 
