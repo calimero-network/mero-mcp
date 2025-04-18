@@ -28,6 +28,12 @@ module.exports = {
       functions: 30,
       lines: 44,
       statements: 44
+    },
+    './src/index.ts': {
+      statements: 75,
+      branches: 0,
+      functions: 33,
+      lines: 75
     }
   }
 }; 

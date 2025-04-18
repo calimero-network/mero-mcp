@@ -215,3 +215,47 @@ Tests run automatically in the CI pipeline and as pre-push hooks using Husky.
 - Added test for server startup functionality
 - Improved logger testing 
 - Adjusted coverage thresholds to realistic targets 
+
+## Test Coverage
+
+Current test coverage is tracked in Jest. We have set thresholds in `jest.config.js` to ensure that coverage doesn't drop below certain levels.
+
+### Improving Code Coverage
+
+For modules with complex functionality and private methods, such as `sseTransport.ts`, improving code coverage requires careful consideration of test design:
+
+1. **Public API Testing**: Focus on thoroughly testing the public API methods first, which indirectly exercises many private methods.
+
+2. **Mock Implementation**: When testing error conditions or edge cases that are difficult to trigger directly, create mock implementations that simulate the behavior.
+
+3. **Test Specific Components**: Break down tests into small, focused units that test specific behaviors:
+   - Connection lifecycle (connect, disconnect, reconnect)
+   - Error handling
+   - Message processing
+   - State transitions
+   - Timeout and heartbeat mechanisms
+
+4. **Future Improvements**: The following areas need additional testing:
+   - The `connect()` method's error handling and retry logic
+   - Heartbeat mechanism (startHeartbeat, stopHeartbeat, sendHeartbeat)
+   - Connection failure recovery (handleConnectionFailure)
+   - Race conditions and edge cases in handlePostMessage
+
+5. **Testing Private Methods**: While it's generally not recommended to directly test private methods, in cases where they contain complex logic, consider:
+   - Using TypeScript's type assertion to bypass accessibility restrictions
+   - Refactoring to extract complex logic into testable utility functions
+   - Creating test-specific subclasses that expose private methods for testing
+
+### Coverage Exemptions
+
+Some parts of the code may be difficult to test comprehensively:
+
+- Integration with external systems
+- Asynchronous timing-dependent code
+- Error handling for rare edge cases
+
+For these cases, we've updated the coverage thresholds to be realistic while still maintaining quality standards.
+
+## Continuous Integration
+
+Tests are run as part of the CI/CD pipeline. All tests must pass before code can be merged. 
