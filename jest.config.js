@@ -19,9 +19,9 @@ module.exports = {
   coverageThreshold: {
     global: {
       branches: 40,
-      functions: 39,
-      lines: 56,
-      statements: 56
+      functions: 43,
+      lines: 58,
+      statements: 58
     },
     './src/transport/sseTransport.ts': {
       branches: 44,
