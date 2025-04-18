@@ -1,60 +1,110 @@
-import dotenv from "dotenv";
-import { MCPExpressServer } from "./mcp/server";
+import express, { Request, Response, NextFunction } from "express";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { mcpServer } from "./server/mcpServer";
+import { transports } from "./transport/sseTransport";
+import { registerEchoResource } from "./resources/echo";
+import { registerEchoTool } from "./tools/echo";
+import { registerEchoPrompt } from "./prompts/echo";
+import logger from "./utils/logger";
 
-// Load environment variables
-dotenv.config();
+// Register MCP resources, tools, and prompts
+registerEchoResource();
+registerEchoTool();
+registerEchoPrompt();
 
-// Validate environment variables
-function validateEnv(): void {
-  const requiredVars: string[] = [];
-  const missingVars = requiredVars.filter(v => !process.env[v]);
-  
-  if (missingVars.length > 0) {
-    throw new Error(`Missing required environment variables: ${missingVars.join(', ')}`);
+// Initialize Express app
+const app = express();
+app.use(express.json());
+
+// Request logging middleware
+app.use((req: Request, _res: Response, next: NextFunction) => {
+  logger.info(`[REQUEST] ${req.method} ${req.path}`, {
+    sessionId: req.query.sessionId as string | undefined,
+    headers: req.headers,
+  });
+  next();
+});
+
+// SSE endpoint for establishing connections
+app.get("/sse", async (_: Request, res: Response) => {
+  try {
+    const transport = new SSEServerTransport("/messages", res);
+    transports[transport.sessionId] = transport;
+
+    res.on("close", () => {
+      delete transports[transport.sessionId];
+      logger.info(`Connection closed for session ${transport.sessionId}`);
+    });
+
+    await mcpServer.connect(transport);
+    logger.info(
+      `SSE connection established for session ${transport.sessionId}`,
+    );
+  } catch (error) {
+    logger.error("Error establishing SSE connection", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+
+    if (!res.headersSent) {
+      res.status(500).send("Internal Server Error");
+    }
   }
-  
-  // Validate PORT is numeric
-  if (process.env.PORT && isNaN(parseInt(process.env.PORT, 10))) {
-    throw new Error('PORT must be a valid number');
+});
+
+// Message handling endpoint
+app.post("/messages", async (req: Request, res: Response) => {
+  const sessionId = req.query.sessionId as string;
+
+  if (!sessionId) {
+    logger.warn("Missing sessionId in request");
+    return res.status(400).send("Missing sessionId parameter");
   }
-  
-  // Validate LOG_LEVEL if present
-  const validLogLevels = ['error', 'warn', 'info', 'http', 'verbose', 'debug', 'silly'];
-  if (process.env.LOG_LEVEL && !validLogLevels.includes(process.env.LOG_LEVEL.toLowerCase())) {
-    throw new Error(`LOG_LEVEL must be one of: ${validLogLevels.join(', ')}`);
+
+  const transport = transports[sessionId];
+
+  if (transport) {
+    try {
+      await transport.handlePostMessage(req, res);
+    } catch (error) {
+      logger.error(`Error handling message for session ${sessionId}`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+
+      if (!res.headersSent) {
+        res.status(500).send("Internal Server Error");
+      }
+    }
+  } else {
+    logger.warn(`No transport found for sessionId: ${sessionId}`);
+    res.status(400).send("No transport found for sessionId");
   }
-}
+});
 
-// Run validation
-try {
-  validateEnv();
-} catch (error) {
-  // Using console.error is acceptable for startup errors before logger is initialized
-  // eslint-disable-next-line no-console
-  console.error(`Environment validation failed: ${error instanceof Error ? error.message : String(error)}`);
-  process.exit(1);
-}
+// Catch-all for unhandled routes
+app.use((req: Request, res: Response) => {
+  logger.warn(`Unhandled route: ${req.method} ${req.path}`);
+  res.status(404).send("Not Found");
+});
 
-const PORT = parseInt(process.env.PORT || "3000", 10);
+// Error handling middleware
+app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
+  logger.error("Unhandled error", {
+    error: err.message,
+    stack: err.stack,
+    path: req.path,
+    method: req.method,
+  });
 
-const mcpServer = new MCPExpressServer();
+  if (!res.headersSent) {
+    res.status(500).send("Internal Server Error");
+  }
 
-// Store the server instance in app.locals so it can be accessed by other parts of the application
-const app = mcpServer.getApp();
-app.locals.server = mcpServer;
+  next(err);
+});
 
-// Register example resources, tools, and prompts
-mcpServer.registerResource(
-  "test",
-  "test://{id}",
-  async (uri: URL, params: Record<string, string | string[]>) => ({
-    contents: [
-      {
-        uri: uri.href,
-        text: `Test resource: ${Array.isArray(params.id) ? params.id.join(",") : params.id}`,
-      },
-    ],
-  }),
-);
+// Start the server
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
-mcpServer.start(PORT);
+app.listen(PORT, () => {
+  logger.info(`Server listening on port ${PORT}`);
+});
