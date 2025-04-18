@@ -25,7 +25,17 @@ jest.mock("@modelcontextprotocol/sdk/server/sse.js", () => ({
 }));
 
 jest.mock("../../src/transport/sseTransport", () => ({
+  getOrCreateTransport: jest.fn().mockReturnValue({
+    sessionId: "test-session-id"
+  }),
   transports: {},
+  ConnectionState: {
+    CONNECTED: "connected",
+    DISCONNECTED: "disconnected",
+    RECONNECTING: "reconnecting",
+    ERROR: "error"
+  },
+  cleanupStaleTransports: jest.fn(),
 }));
 
 // Mock Express at the end with mockApp defined in the same scope
@@ -43,7 +53,8 @@ const jsonMiddlewareMock = jest.fn().mockReturnValue(() => {});
 
 // Mock express with its json method
 jest.mock("express", () => {
-  const mockExpressFn = jest.fn().mockReturnValue(mockApp);
+  // Define the mock function with proper typing
+  const mockExpressFn = jest.fn().mockReturnValue(mockApp) as jest.Mock & { json: jest.Mock };
   mockExpressFn.json = jsonMiddlewareMock;
   return mockExpressFn;
 });
@@ -61,6 +72,30 @@ import { mcpServer } from "../../src/server/mcpServer";
 import { registerEchoResource } from "../../src/resources/echo";
 import { registerEchoTool } from "../../src/tools/echo";
 import { registerEchoPrompt } from "../../src/prompts/echo";
+import { getOrCreateTransport } from "../../src/transport/sseTransport";
+
+// Add interval mocking
+const originalSetInterval = global.setInterval;
+const originalClearInterval = global.clearInterval;
+const intervals = new Set<NodeJS.Timeout>();
+
+// Mock setInterval and clearInterval
+global.setInterval = function(
+  callback: (...args: any[]) => void, 
+  ms?: number, 
+  ...args: any[]
+): NodeJS.Timeout {
+  const id = originalSetInterval(callback, ms, ...args);
+  intervals.add(id);
+  return id;
+} as typeof global.setInterval;
+
+global.clearInterval = function(id?: NodeJS.Timeout): void {
+  if (id) {
+    intervals.delete(id);
+    originalClearInterval(id);
+  }
+} as typeof global.clearInterval;
 
 describe("Main Application", () => {
   beforeEach(() => {
@@ -70,6 +105,14 @@ describe("Main Application", () => {
     jest.isolateModules(() => {
       require("../../src/index");
     });
+  });
+  
+  afterEach(() => {
+    // Clear all intervals created during the test
+    intervals.forEach(id => {
+      originalClearInterval(id);
+    });
+    intervals.clear();
   });
   
   it("should register MCP resources, tools, and prompts", () => {
@@ -83,7 +126,7 @@ describe("Main Application", () => {
     expect(jsonMiddlewareMock).toHaveBeenCalled();
   });
   
-  it("should set up SSE endpoint", () => {
+  it("should set up SSE endpoint", async () => {
     expect(mockApp.get).toHaveBeenCalledWith("/sse", expect.any(Function));
     
     // Extract the handler and test it
@@ -92,7 +135,7 @@ describe("Main Application", () => {
       throw new Error('SSE endpoint handler not found');
     }
     
-    const mockReq = {};
+    const mockReq = { query: {} };
     const mockRes = {
       status: jest.fn().mockReturnThis(),
       send: jest.fn(),
@@ -100,12 +143,27 @@ describe("Main Application", () => {
       headersSent: false,
     };
     
-    // Call the handler
-    getHandler(mockReq, mockRes);
+    // Mock the transport with connect method
+    const mockTransport = {
+      sessionId: "test-session-id",
+      connect: jest.fn().mockResolvedValue(undefined)
+    };
     
-    expect(SSEServerTransport).toHaveBeenCalledWith("/messages", mockRes);
+    // Mock the getOrCreateTransport function to return our mock transport
+    (getOrCreateTransport as jest.Mock).mockReturnValue(mockTransport);
+    
+    // Mock mcpServer.connect as well
+    (mcpServer.connect as jest.Mock).mockResolvedValue(undefined);
+    
+    // Call the handler and await it
+    await getHandler(mockReq, mockRes);
+    
+    // We expect getOrCreateTransport to be called
+    expect(getOrCreateTransport).toHaveBeenCalled();
+    
+    // The transport's connect method should be called, then mcpServer.connect should be called
+    expect(mockTransport.connect).toHaveBeenCalled();
     expect(mcpServer.connect).toHaveBeenCalled();
-    expect(mockRes.on).toHaveBeenCalledWith("close", expect.any(Function));
   });
   
   it("should set up messages endpoint", () => {

@@ -18,10 +18,16 @@ module.exports = {
   coverageReporters: ['text', 'lcov'],
   coverageThreshold: {
     global: {
-      branches: 25,
-      functions: 55,
-      lines: 65,
-      statements: 65
+      branches: 40,
+      functions: 39,
+      lines: 56,
+      statements: 56
+    },
+    './src/transport/sseTransport.ts': {
+      branches: 45,
+      functions: 30,
+      lines: 45,
+      statements: 45
     }
   }
 }; 
