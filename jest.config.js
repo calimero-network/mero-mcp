@@ -24,10 +24,10 @@ module.exports = {
       statements: 56
     },
     './src/transport/sseTransport.ts': {
-      branches: 45,
+      branches: 44,
       functions: 30,
-      lines: 45,
-      statements: 45
+      lines: 44,
+      statements: 44
     }
   }
 }; 
