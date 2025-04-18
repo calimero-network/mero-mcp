@@ -60,7 +60,7 @@ jest.mock("../../../src/transport/sseTransport", () => {
         lastActivityTime: Date.now(),
         reconnectAttempts: 0,
         start: jest.fn().mockResolvedValue(undefined),
-        send: jest.fn().mockImplementation((message) => {
+        send: jest.fn().mockImplementation((_message) => {
           // Just a mock implementation that does nothing
           return Promise.resolve();
         }),
@@ -261,7 +261,7 @@ class MockTimerProvider implements ITimerProvider {
   private intervals: Map<number, any> = new Map();
   private currentId: number = 0;
   
-  setInterval: jest.Mock = jest.fn().mockImplementation((callback, ms) => {
+  setInterval: jest.Mock = jest.fn().mockImplementation((callback, _ms) => {
     const id = this.currentId++;
     this.intervals.set(id, callback);
     return id;
@@ -291,7 +291,7 @@ class MockTimerProvider implements ITimerProvider {
   }
   
   executeAllIntervals(): void {
-    for (const [id, callback] of this.intervals.entries()) {
+    for (const callback of this.intervals.values()) {
       callback();
     }
   }
@@ -444,6 +444,7 @@ describe("Enhanced SSE Transport with Dependency Injection", () => {
   let mockTimerProvider: MockTimerProvider;
   let options: EnhancedSSETransportOptions;
   let mockRes: Response;
+  let transport: TestableTransport;
   
   beforeEach(() => {
     mockLogger = new MockLogger();
@@ -461,11 +462,12 @@ describe("Enhanced SSE Transport with Dependency Injection", () => {
       heartbeatSeconds: 30,
       maxReconnectAttempts: 3
     };
+    transport = new TestableTransport("/messages", mockRes, options);
+
   });
   
   describe("Constructor and Initialization", () => {
     it("should log transport creation with session ID", () => {
-      const transport = new TestableTransport("/messages", mockRes, options);
       
       expect(mockLogger.hasLoggedMessage('info', 'SSE transport created with session ID')).toBe(true);
       expect(mockLogger.logs[0].meta).toMatchObject({
@@ -474,9 +476,7 @@ describe("Enhanced SSE Transport with Dependency Injection", () => {
       });
     });
     
-    it("should set up event handlers on the response", () => {
-      const transport = new TestableTransport("/messages", mockRes, options);
-      
+    it("should set up event handlers on the response", () => {      
       // Verify that response.on was called for close and error events
       expect(mockRes.on).toHaveBeenCalledWith('close', expect.any(Function));
       expect(mockRes.on).toHaveBeenCalledWith('error', expect.any(Function));
@@ -485,9 +485,6 @@ describe("Enhanced SSE Transport with Dependency Injection", () => {
   
   describe("Connection Management", () => {
     it("should handle connection close event", () => {
-      // Create transport and get the mock instance
-      const transport = new EnhancedSSETransport("/messages", mockRes, options);
-      
       // Update the mock directly instead of relying on events
       mockTransportInstance.connectionState = ConnectionState.DISCONNECTED;
       mockTransportInstance.getConnectionState = jest.fn().mockReturnValue(ConnectionState.DISCONNECTED);
@@ -506,9 +503,6 @@ describe("Enhanced SSE Transport with Dependency Injection", () => {
     });
     
     it("should handle connection error event", () => {
-      // Create transport and get the mock instance
-      const transport = new EnhancedSSETransport("/messages", mockRes, options);
-      
       // Update the mock directly instead of relying on events
       mockTransportInstance.connectionState = ConnectionState.ERROR;
       mockTransportInstance.getConnectionState = jest.fn().mockReturnValue(ConnectionState.ERROR);
@@ -527,8 +521,6 @@ describe("Enhanced SSE Transport with Dependency Injection", () => {
     });
     
     it("should successfully connect and start heartbeat", async () => {
-      const transport = new TestableTransport("/messages", mockRes, options);
-      
       await transport.connect();
       
       // Check logs
@@ -539,9 +531,6 @@ describe("Enhanced SSE Transport with Dependency Injection", () => {
     });
     
     it("should handle connection error during connect", async () => {
-      // Create transport and get the mock instance
-      const transport = new EnhancedSSETransport("/messages", mockRes, options);
-      
       // Mock the connect method to throw an error and update mock state
       const errorMessage = "Connection refused";
       mockTransportInstance.connect = jest.fn().mockRejectedValue(new Error(errorMessage));
@@ -624,14 +613,6 @@ describe("Enhanced SSE Transport with Dependency Injection", () => {
   
   describe("Heartbeat Mechanism", () => {
     it("should send a heartbeat when the interval is triggered", () => {
-      // Create transport and get the mock instance
-      const transport = new EnhancedSSETransport("/test", mockRes, {
-        logger: mockLogger,
-        timerProvider: mockTimerProvider,
-        heartbeatSeconds: 30,
-        maxReconnectAttempts: 5
-      });
-      
       // Make sure send is a mock function that can be checked
       mockTransportInstance.send = jest.fn();
       
@@ -649,14 +630,6 @@ describe("Enhanced SSE Transport with Dependency Injection", () => {
     });
 
     it("should handle errors in the heartbeat interval callback", () => {
-      // Create transport and get the mock instance
-      const transport = new EnhancedSSETransport("/test", mockRes, {
-        logger: mockLogger,
-        timerProvider: mockTimerProvider,
-        heartbeatSeconds: 30,
-        maxReconnectAttempts: 5
-      });
-      
       // Create a spy for the handleConnectionFailure method
       mockTransportInstance.handleConnectionFailure = jest.fn();
       
@@ -682,8 +655,6 @@ describe("Enhanced SSE Transport with Dependency Injection", () => {
     });
     
     it("should stop heartbeat interval on stopHeartbeat", () => {
-      // Create transport and get the mock instance
-      const transport = new EnhancedSSETransport("/messages", mockRes, options);
       
       // Set up heartbeatInterval in the mock
       mockTransportInstance.heartbeatInterval = 123;
@@ -699,8 +670,6 @@ describe("Enhanced SSE Transport with Dependency Injection", () => {
     });
     
     it("should handle errors in sendHeartbeat", () => {
-      const transport = new EnhancedSSETransport("/messages", mockRes, options);
-      
       // Setup the mocks
       mockTransportInstance.send = jest.fn().mockImplementation(() => {
         throw new Error('Connection lost');
@@ -720,10 +689,11 @@ describe("Enhanced SSE Transport with Dependency Injection", () => {
     });
     
     it("should not send heartbeat if insufficient time has passed", () => {
-      const transport = new EnhancedSSETransport("/messages", mockRes, options);
-      
       // Setup the mock methods we need
       mockTransportInstance.send = jest.fn();
+      
+      // Cast setInterval to jest.Mock to access mock.calls safely
+      const setIntervalMock = mockTimerProvider.setInterval as jest.Mock;
       
       // Set last activity to a time in the recent past
       mockTransportInstance.lastActivityTime = mockTimerProvider.getCurrentTime() - 1000;
@@ -731,17 +701,49 @@ describe("Enhanced SSE Transport with Dependency Injection", () => {
       // Trigger the heartbeat callback
       if (mockHeartbeatCallback) {
         mockHeartbeatCallback();
+      } else {
+        // If mockHeartbeatCallback is not set, get it from the mock calls
+        const callback = setIntervalMock.mock.calls[0][0];
+        if (callback) callback();
       }
       
       // Verify send was not called
       expect(mockTransportInstance.send).not.toHaveBeenCalled();
     });
+
+    it("should trigger the heartbeat callback when interval is executed", () => {
+      // Verify heartbeat interval was set up
+      expect(mockTimerProvider.setInterval).toHaveBeenCalled();
+      
+      // Cast setInterval to jest.Mock to access mock.calls safely
+      const setIntervalMock = mockTimerProvider.setInterval as jest.Mock;
+      
+      // Get the heartbeat callback
+      const heartbeatCallback = setIntervalMock.mock.calls[0][0];
+      
+      // Store the callback for other tests to use
+      mockHeartbeatCallback = heartbeatCallback;
+      
+      // Setup the mocks for verification
+      mockTransportInstance.sendHeartbeat = jest.fn();
+      
+      // Set the last activity time to be old enough to trigger a heartbeat
+      mockTransportInstance.lastActivityTime = mockTimerProvider.getCurrentTime() - (options.heartbeatSeconds as number) * 1000;
+      
+      // Manually execute the heartbeat callback
+      heartbeatCallback();
+      
+      // Verify sendHeartbeat was called
+      expect(mockTransportInstance.sendHeartbeat).toHaveBeenCalled();
+    });
   });
   
   describe("Connection Failure Handling", () => {
+    beforeEach(() => {
+        mockLogger.clear();
+    });
+
     it("should handle connection failure with reconnect attempts", () => {
-      const transport = new EnhancedSSETransport("/messages", mockRes, options);
-      
       // Setup mock state
       mockTransportInstance.connectionState = ConnectionState.CONNECTED;
       mockTransportInstance.reconnectAttempts = 1;
@@ -766,9 +768,7 @@ describe("Enhanced SSE Transport with Dependency Injection", () => {
       expect(mockTransportInstance.sendHeartbeat).toHaveBeenCalled();
     });
     
-    it("should not attempt to reconnect if already reconnecting", () => {
-      const transport = new EnhancedSSETransport("/messages", mockRes, options);
-      
+    it("should not attempt to reconnect if already reconnecting", () => {      
       // Set initial state to RECONNECTING
       mockTransportInstance.connectionState = ConnectionState.RECONNECTING;
       mockTransportInstance.sendHeartbeat = jest.fn();
@@ -787,8 +787,6 @@ describe("Enhanced SSE Transport with Dependency Injection", () => {
     });
     
     it("should transition to ERROR state when max reconnect attempts reached", () => {
-      const transport = new EnhancedSSETransport("/messages", mockRes, options);
-      
       // Set reconnect attempts to max
       mockTransportInstance.connectionState = ConnectionState.CONNECTED;
       mockTransportInstance.reconnectAttempts = options.maxReconnectAttempts as number;
@@ -813,7 +811,6 @@ describe("Enhanced SSE Transport with Dependency Injection", () => {
   
   describe("Message Handling", () => {
     it("should handle post messages and update activity time", async () => {
-      const transport = new EnhancedSSETransport("/messages", mockRes, options);
       const mockReq = createMockRequest({ method: "test_method" });
       
       // Set initial state and activity time
@@ -846,7 +843,6 @@ describe("Enhanced SSE Transport with Dependency Injection", () => {
     });
     
     it("should handle reconnection state during message processing", async () => {
-      const transport = new EnhancedSSETransport("/messages", mockRes, options);
       const mockReq = createMockRequest();
       
       // Set initial state to RECONNECTING
@@ -897,7 +893,6 @@ describe("Enhanced SSE Transport with Dependency Injection", () => {
     });
     
     it("should reject messages when in error state", async () => {
-      const transport = new EnhancedSSETransport("/messages", mockRes, options);
       const mockReq = createMockRequest();
       
       // Set state to ERROR
@@ -953,9 +948,7 @@ describe("Enhanced SSE Transport with Dependency Injection", () => {
   });
   
   describe("Utility Methods", () => {
-    it("should report connection state correctly", () => {
-      const transport = new EnhancedSSETransport("/messages", mockRes, options);
-      
+    it("should report connection state correctly", () => {      
       // Test all states
       const states = [
         { state: ConnectionState.CONNECTED, expected: true },
@@ -983,9 +976,6 @@ describe("Enhanced SSE Transport with Dependency Injection", () => {
     });
     
     it("should clean up resources", () => {
-      const transport = new EnhancedSSETransport("/messages", mockRes, options);
-      
-      // Setup mock state
       mockTransportInstance.heartbeatInterval = 123;
       
       // Clear logs
@@ -1026,7 +1016,7 @@ describe("Enhanced SSE Transport with Dependency Injection", () => {
         };
         
         // Mock the returned value for this test
-        getOrCreateTransportSpy.mockImplementationOnce((sessionId, path, res, options) => {
+        getOrCreateTransportSpy.mockImplementationOnce((_sessionId, _path, _res, _options) => {
           return mockTransport as unknown as EnhancedSSETransport;
         });
         
@@ -1052,7 +1042,7 @@ describe("Enhanced SSE Transport with Dependency Injection", () => {
         };
         
         // Mock the implementation to simulate reuse
-        getOrCreateTransportSpy.mockImplementationOnce((sessionId, path, res, options) => {
+        getOrCreateTransportSpy.mockImplementationOnce((sessionId, _path, _res, _options) => {
           mockLogger.info(`Reusing transport for session ID: ${sessionId}`);
           return existingTransport as unknown as EnhancedSSETransport;
         });
@@ -1080,7 +1070,7 @@ describe("Enhanced SSE Transport with Dependency Injection", () => {
         };
         
         // Mock the implementation to simulate cleanup and creation
-        getOrCreateTransportSpy.mockImplementationOnce((sessionId, path, res, options) => {
+        getOrCreateTransportSpy.mockImplementationOnce((sessionId, _path, _res, _options) => {
           mockLogger.info(`Cleaned up stale transport for session ID: ${sessionId}`);
           return newTransport as unknown as EnhancedSSETransport;
         });
@@ -1104,7 +1094,7 @@ describe("Enhanced SSE Transport with Dependency Injection", () => {
         const mockLogger = new MockLogger();
         
         // Set up a mock implementation
-        cleanupStaleTransportsSpy.mockImplementation((maxAgeSeconds = 3600) => {
+        cleanupStaleTransportsSpy.mockImplementation((_maxAgeSeconds = 3600) => {
           mockLogger.info(`Cleaned up 1 stale transports`);
         });
         
