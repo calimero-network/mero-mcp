@@ -1,75 +1,83 @@
-# MCP Server Implementation Plan
+# Calimero MCP Integration
 
 ## Overview
-This plan outlines steps to clean up and reorganize our MCP Server implementation. The current codebase has remnants of an old approach, with the main functionality now concentrated in `src/index.ts`. We'll focus on proper code organization, documentation, testing, and ensuring the MCP tooling works correctly with the new SSE-based transport implementation.
+This plan outlines steps to clean up and reorganize our MCP server architecture to easily integrate calimero contexts
 
-## Phase 1: Code Cleanup and Reorganization [COMPLETED] ✅
+## Goals
+1. Provide access to a Calimero context using MCP tools
+2. Initially provide a predefined application and context
+3. Run the Calimero node with docker-compose setting up the app with arguments
+4. Document everything clearly for external users and contributors
 
-1. **Remove Obsolete Files** ✅
-   - Identified and removed obsolete files (TEST_*.md, old examples) ✅
-   - Cleaned up old documentation ✅
+## Integration Plan
 
-2. **Reorganize Code Structure** ✅
-   - Created dedicated directories for different concerns ✅
-     - `/src/server` - Server setup and configuration ✅
-     - `/src/transport` - SSE transport implementation ✅
-     - `/src/resources` - MCP resource implementations ✅
-     - `/src/tools` - MCP tool implementations ✅
-     - `/src/prompts` - MCP prompt implementations ✅
-   - Moved code from index.ts into appropriate modules ✅
-   - Created proper exports from each module ✅
+### 1. Calimero Context Implementation
+- Create a `CalimeroContext` class to handle interaction with Calimero
+- Implement interface for predefined applications and contexts
+- Add configuration options for Calimero node connection
 
-3. **Create Test Suite** ✅
-   - Set up test structure with Jest ✅
-   - Created unit tests for all modules ✅
-   - Implemented proper mocking strategies ✅
-   - Created test utilities for common test operations ✅
-   - Disabled integration tests due to ESM module issues (to be addressed later) ✅
+### 2. MCP Server Enhancements
+- Update `mcpServer.ts` to support Calimero context registration
+- Create a Calimero context provider/manager
+- Add context switching capabilities for MCP tools
 
-4. **Update Build Configuration** ✅
-   - Verified tsconfig.json is properly configured for the new structure ✅
-   - Confirmed build scripts in package.json work with the new structure ✅
-   - Verified CLI scripts are compatible with the new modular architecture ✅
+### 3. Calimero MCP Tools
+- Extend current `calimeroEcho` tool to use Calimero context
+- Create additional tools to demonstrate Calimero capabilities
+- Implement proper error handling for Calimero-specific issues
 
-## Phase 3: Documentation [COMPLETED] ✅
+### 4. Docker Integration
+- Add Calimero node service to `docker-compose.yml`
+- Configure volume mounting for Calimero applications
+- Define environment variables for Calimero context settings
+- Set up networking between MCP server and Calimero node
 
-1. **Update Documentation** ✅
-   - Update README.md with setup and usage instructions ✅
-   - Add API documentation for public interfaces ✅
-   - Create examples for common use cases ✅
-   - Document the MCP protocol implementation details ✅
+### 5. Testing
+- Create unit tests for Calimero context integration
+- Add integration tests for end-to-end MCP-Calimero workflow
+- Set up CI/CD pipeline to verify Calimero integration
 
-2. **Create Developer Tools** ✅
-   - Document the MCP Inspector CLI for testing MCP endpoints ✅
-   - Document the MCP Inspector Web UI for interactive testing ✅
-   - Document the MCP Inspector Proxy for debugging ✅
+### 6. Documentation
+- Create detailed README for Calimero integration
+- Add technical documentation with architecture diagrams
+- Write user guides for setting up and using Calimero with MCP
+- Document API endpoints and tool usage with examples
+- Provide contribution guidelines for external developers
 
-## Phase 4: Deployment and CI/CD [COMPLETED] ✅
+## Implementation Tasks
 
-1. **Containerization** ✅
-   - Create a Dockerfile for the application ✅
-   - Set up Docker Compose for local development ✅
-   - Add container health checks ✅
+1. **Create Core Calimero Context Module**
+   - Implement `src/calimero/context.ts` with context management
+   - Define interfaces for Calimero applications and contexts
+   - Add configuration handlers
 
-2. **CI/CD Pipeline** ✅
-   - Set up GitHub Actions for CI ✅
-   - Configure automated testing ✅
-   - Add linting and code quality checks ✅
-   - Implement automated deployment ✅
+2. **Update MCP Server for Calimero Integration**
+   - Enhance `mcpServer.ts` with Calimero context support
+   - Add context initialization during server startup
+   - Implement context switching middleware
 
-3. **Monitoring and Logging** ✅
-   - Add structured logging ✅
-   - Implement performance monitoring ✅
-   - Create health check endpoints ✅
+3. **Develop Calimero MCP Tools**
+   - Expand `calimeroEcho.ts` to demonstrate context usage
+   - Create additional example tools leveraging Calimero
+   - Add tool registration system for Calimero tools
 
-## Phase 5: MCP Tooling Implementation [FUTURE]
+4. **Docker Compose Configuration**
+   - Update `docker-compose.yml` with Calimero node service
+   - Configure networking and volume mounts
+   - Set up proper environment variables
 
-Implementation details to be determined in the next stage.
+5. **Create Comprehensive Testing Suite**
+   - Add unit tests for all new Calimero modules
+   - Implement integration tests for the complete workflow
+   - Create test utilities for Calimero context mocking
 
-## Current Status
+6. **Documentation and Examples**
+   - Write detailed README with setup instructions
+   - Create example applications showing Calimero usage
+   - Document all new APIs and tools
+   - Add troubleshooting guide for common issues
 
-We have successfully completed Stage 2 of our plan, which included Phase 1 (Code Cleanup and Reorganization), Phase 3 (Documentation), and Phase 4 (Deployment and CI/CD). The codebase has been reorganized with proper modularity and separation of concerns, comprehensive documentation has been created, and deployment infrastructure is in place.
-
-### Next Steps
-
-We will reassess and discuss the specific requirements for Phase 5 (MCP Tooling Implementation) in the next stage of the project. 
+## Timeline
+- Week 1: Core implementation (tasks 1-2)
+- Week 2: Tools and docker integration (tasks 3-4)
+- Week 3: Testing and documentation (tasks 5-6)
