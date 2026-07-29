@@ -26,6 +26,8 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx --test 'src/**/*.test.ts'",
     "build": "tsc -p tsconfig.build.json",
+    "e2e": "npm run build && node scripts/e2e.mjs",
+    "e2e:cycle": "npm run build && node scripts/e2e-cycle.mjs",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {

@@ -102,3 +102,29 @@ Anywhere an application is named you can pass its id, its full package name, or 
 
 Once `select_app` has run, one more tool appears per ABI method for as long as this server process stays up.
 Those tools are named `<app>_<method>`, or `<app>_<service>_<method>` for a multi-service application, where `<app>` is that same trailing package segment: `com.calimero.kv-store` yields `kv_store_get`.
+
+## Verifying it works
+
+Two harnesses drive the built server over real MCP stdio against a real node.
+Both boot their own `merod` on port 2571 in a temp home and tear it down on the way out, so neither touches `~/.calimero` or your real state directory.
+
+```bash
+npm run e2e          # 14 assertions: the protocol, the ABI-derived tools, and a round trip verified out of band
+npm run e2e:cycle    # 7 assertions: admin login -> client key -> agent.json handoff, with zero credentials in the environment
+```
+
+`MEROD_BINARY` selects the binary to boot, and defaults to core's `target/debug/merod`.
+Until a core release carries `GET /admin-api/applications/:id/abi`, that binary has to come from core master:
+
+```bash
+cd <core> && cargo build -p merod
+MEROD_BINARY=<core>/target/debug/merod npm run e2e
+```
+
+To reproduce a problem against a node you already have running, point the harness at it:
+
+```bash
+npm run e2e -- --node http://localhost:2528 --app my-app
+```
+
+In that mode it provisions nothing and tears nothing down; it attaches to what is there and prints `SKIP` for each assertion that needs a node it controls.
