@@ -10,12 +10,15 @@ Paste this into any AI harness (Claude Code, Cursor, Codex CLI, Claude Desktop, 
 ```text
 Set up the mero-mcp MCP server for me.
 
-It is on npm as @calimero-network/mero-mcp and runs over stdio. Find where
-your own harness keeps its MCP server config (for Claude Code that's
-.mcp.json in the project or ~/.claude.json for a user-wide server; for
-Claude Desktop it's claude_desktop_config.json; for Cursor/Windsurf it's
-.cursor/mcp.json; for Codex CLI it's ~/.codex/config.toml) and register a
+It is on npm as @calimero-network/mero-mcp and runs over stdio. Register a
 server named "calimero" that runs `npx -y @calimero-network/mero-mcp`.
+
+In Claude Code that is one command:
+  claude mcp add -s local calimero -- npx -y @calimero-network/mero-mcp
+
+Otherwise find where your own harness keeps its MCP server config - Claude
+Desktop uses claude_desktop_config.json, Cursor/Windsurf use .cursor/mcp.json,
+Codex CLI uses ~/.codex/config.toml (same fields, TOML syntax).
 (If I tell you I'm running this from a local clone instead of the published
 package, use `node /abs/path/to/dist/index.js` as the command instead, with
 no args.)
