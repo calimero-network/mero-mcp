@@ -22,9 +22,13 @@ import {
   fatal,
   requireBuild,
   resolveMerod,
+  sleep,
 } from './e2e-lib.mjs';
 
-const PLANNED = 7;
+const PLANNED = 8;
+
+/** Client keys are filed under the `sub` of the tokens they mint. */
+const clientIdOf = (accessToken) => JSON.parse(Buffer.from(accessToken.split('.')[1], 'base64url')).sub;
 
 // Everything the server could authenticate or locate a node with. It must succeed on the handoff alone.
 const CREDENTIAL_ENV = [
@@ -68,6 +72,7 @@ async function main() {
     const stateDir = mkdtempSync(join(tmpdir(), 'mero-mcp-state-'));
     const handoffPath = join(stateDir, HANDOFF);
 
+    let firstKey;
     await checks.check('the desktop app mints the agent its own client key', async () => {
       // Core's /admin/client-key takes permissions only - it has no client_name field.
       const key = await admin.clientKey(['admin']);
@@ -75,6 +80,7 @@ async function main() {
       assert(key.access_token !== admin.token, 'the client key is the admin bearer, not a key of its own');
 
       writeFileSync(handoffPath, JSON.stringify({ nodeUrl: node.url, accessToken: key.access_token, refreshToken: key.refresh_token }));
+      firstKey = key;
       return `${handoffPath} written with a distinct access/refresh pair`;
     });
 
@@ -132,9 +138,38 @@ async function main() {
       assertEqual(second.status.authMode, 'handoff', 'the second run did not authenticate');
       const seen = await admin.execute(contextId, 'get', { key: second.key });
       assertEqual(seen, 'written-second', 'the second run reached the node but wrote nothing');
-      // The store now holds tokens, so node.ts skips re-injection: this run ran on its own persisted pair.
+      // The handoff is no newer than what the store holds, so this run reused its own persisted pair.
       assertEqual(handoffDigest(), handoffBefore, 'the second run rewrote the handoff file');
       return `${second.key} = ${seen}, on the tokens the first run persisted`;
+    });
+
+    // The bug this guards: the store being non-empty is not the same as the store being current.
+    // Clicking "Connect AI agent" again mints a replacement and revokes the old key, and the
+    // agent's cached copy of that key keeps its unexpired `exp` - so it looks valid and 401s.
+    await checks.check('a re-connect that revokes the old key does not lock the agent out', async () => {
+      // Core derives a client id from the second the key was minted, so a same-second
+      // re-connect overwrites that key instead of adding one. Cross the boundary to get
+      // a second key the first can actually be revoked independently of.
+      await sleep(1100);
+      const replacement = await admin.clientKey(['admin']);
+      assert(
+        clientIdOf(replacement.access_token) !== clientIdOf(firstKey.access_token),
+        'the node re-issued the same client id, so there is no previous key to revoke',
+      );
+      // Write before revoking, exactly as the desktop app does.
+      writeFileSync(handoffPath, JSON.stringify({ nodeUrl: node.url, accessToken: replacement.access_token, refreshToken: replacement.refresh_token }));
+      await admin.revokeClientKey(clientIdOf(firstKey.access_token));
+
+      // Without this pair the run could pass having exercised nothing: the whole point is that
+      // what the store cached is dead and only the file the desktop app rewrote still works.
+      assertEqual(await admin.accepts(firstKey.access_token), false, 'the revoked key still authenticates, so the run tests nothing');
+      assertEqual(await admin.accepts(replacement.access_token), true, 'the replacement credential does not authenticate');
+
+      const third = await drive('third');
+      assertEqual(third.status.authMode, 'handoff', 'the run after the re-connect did not authenticate');
+      const seen = await admin.execute(contextId, 'get', { key: third.key });
+      assertEqual(seen, 'written-third', 'the run after the re-connect never reached the node');
+      return `${third.key} = ${seen}, on the replacement credential rather than the revoked cached one`;
     });
   } finally {
     node.stop();

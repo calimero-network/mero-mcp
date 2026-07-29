@@ -32,7 +32,7 @@ const BUILD_MEROD =
 /** Fails with an operator-readable message, never a stack trace. */
 export class E2eError extends Error {}
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export function resolveMerod() {
   const path = process.env.MEROD_BINARY?.trim() || DEFAULT_MEROD;
@@ -107,6 +107,24 @@ export class NodeApi {
   /** The exact call the desktop app's "Connect AI agent" makes. Core has no `client_name` field on this route. */
   async clientKey(permissions = ['admin']) {
     return (await this.#post('/admin/client-key', { permissions })).data;
+  }
+
+  /**
+   * The cleanup half of a re-connect: the desktop app revokes the key the previous
+   * connect minted, so the agent's cached copy of it dies server-side.
+   * `root_key_id` comes from the listing - core rejects a delete filed under any other root.
+   */
+  async revokeClientKey(clientId) {
+    const clients = (await this.#json('/admin/keys/clients')).data ?? [];
+    const entry = clients.find((c) => c.client_id === clientId);
+    if (!entry) throw new E2eError(`the node lists no client key ${clientId} to revoke`);
+    await this.#json(`/admin/keys/${entry.root_key_id}/clients/${clientId}`, { method: 'DELETE' });
+  }
+
+  /** Whether the node still honours `token`, asked out of band so a credential's fate is not inferred from the server's behaviour. */
+  async accepts(token) {
+    const res = await fetch(`${this.url}/admin-api/applications`, { headers: { Authorization: `Bearer ${token}` } });
+    return res.ok;
   }
 
   async installBundle(mpkPath) {

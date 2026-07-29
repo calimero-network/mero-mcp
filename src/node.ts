@@ -58,6 +58,31 @@ export class FileTokenStore implements TokenStore {
   }
 }
 
+/** JWT `iat` in seconds, or null when the token carries no readable one. */
+function issuedAt(token: string): number | null {
+  const payload = token.split('.')[1];
+  if (!payload) return null;
+  try {
+    const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { iat?: unknown };
+    return typeof claims.iat === 'number' ? claims.iat : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether an injected credential is newer than the one the store holds. Revocation is
+ * server-side state a JWT cannot carry, so an unexpired stored token proves nothing - only
+ * a later `iat` decides. Undecidable keeps the store, since dropping rotations this process
+ * performed would replay a consumed refresh token and revoke the whole family.
+ */
+export function isNewerCredential(injected: string, stored: TokenData | null): boolean {
+  if (!stored) return true;
+  const fresh = issuedAt(injected);
+  const held = issuedAt(stored.access_token);
+  return fresh !== null && held !== null && fresh > held;
+}
+
 export function pickAuthMode(cfg: Config, handoff: Handoff | null): AuthMode {
   if (handoff?.accessToken) return 'handoff';
   if (cfg.authToken) return 'token';
@@ -77,15 +102,12 @@ export async function createSession(cfg: Config): Promise<NodeSession> {
     ...(authMode === 'credentials' ? { credentials: { username: cfg.username!, password: cfg.password! } } : {}),
   });
 
-  // Adopt an injected pair only when the store has nothing newer: the store holds
-  // rotations this process already performed, and replaying a consumed refresh
-  // token trips the server's family revocation.
-  if (!store.getTokens()) {
-    if (authMode === 'handoff') {
-      mero.setTokenData({ access_token: handoff!.accessToken, refresh_token: handoff!.refreshToken ?? '', expires_at: 0 });
-    } else if (authMode === 'token') {
-      mero.setTokenData({ access_token: cfg.authToken!, refresh_token: cfg.refreshToken ?? '', expires_at: 0 });
-    }
+  const injected =
+    authMode === 'handoff' ? { access_token: handoff!.accessToken, refresh_token: handoff!.refreshToken ?? '' }
+    : authMode === 'token' ? { access_token: cfg.authToken!, refresh_token: cfg.refreshToken ?? '' }
+    : null;
+  if (injected && isNewerCredential(injected.access_token, store.getTokens())) {
+    mero.setTokenData({ ...injected, expires_at: 0 });
   }
   if (authMode === 'credentials' && !mero.isAuthenticated()) await mero.authenticate();
 

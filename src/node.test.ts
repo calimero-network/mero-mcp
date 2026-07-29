@@ -3,8 +3,12 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, statSync, existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { FileTokenStore, pickAuthMode } from './node.ts';
+import { FileTokenStore, createSession, isNewerCredential, pickAuthMode } from './node.ts';
 import { loadConfig, readHandoff } from './config.ts';
+
+/** A token shaped like the node's: only the payload is ever read. */
+const jwt = (claims: Record<string, unknown>) => `h.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.s`;
+const at = (iat: number) => jwt({ sub: 'client', iat, exp: iat + 3600 });
 
 const withDir = (fn: (dir: string) => void) => {
   const dir = mkdtempSync(join(tmpdir(), 'mcp-tok-'));
@@ -113,4 +117,61 @@ test('pickAuthMode falls back to credentials, then none', () => {
   const creds = loadConfig({ HOME: '/x', CALIMERO_USERNAME: 'u', CALIMERO_PASSWORD: 'p' } as NodeJS.ProcessEnv);
   assert.equal(pickAuthMode(creds, null), 'credentials');
   assert.equal(pickAuthMode(loadConfig({ HOME: '/x' } as NodeJS.ProcessEnv), null), 'none');
+});
+
+const stored = (access: string) => ({ access_token: access, refresh_token: 'r', expires_at: 0 });
+
+test('isNewerCredential adopts an injected token issued after the stored one', () => {
+  assert.equal(isNewerCredential(at(2000), stored(at(1000))), true);
+});
+
+test('isNewerCredential keeps a store this process rotated past the injected token', () => {
+  assert.equal(isNewerCredential(at(1000), stored(at(2000))), false);
+});
+
+test('isNewerCredential keeps the store when both were issued in the same second', () => {
+  assert.equal(isNewerCredential(at(1000), stored(at(1000))), false);
+});
+
+test('isNewerCredential adopts whenever the store is empty', () => {
+  assert.equal(isNewerCredential(at(1000), null), true);
+  assert.equal(isNewerCredential('opaque', null), true);
+});
+
+test('isNewerCredential keeps the store when either side has no readable iat', () => {
+  // Undecidable must not adopt: a replayed refresh token revokes the whole family.
+  assert.equal(isNewerCredential('opaque', stored(at(1000))), false);
+  assert.equal(isNewerCredential(at(2000), stored('opaque')), false);
+  assert.equal(isNewerCredential(jwt({ sub: 'c' }), stored(at(1000))), false);
+  assert.equal(isNewerCredential(at(2000), stored(jwt({ iat: '2000' }))), false);
+  assert.equal(isNewerCredential(at(2000), stored('h.!!!not-base64!!!.s')), false);
+});
+
+const sessionCfg = (dir: string) =>
+  loadConfig({ HOME: '/x', CALIMERO_MCP_STATE_DIR: dir, CALIMERO_NODE_URL: 'http://localhost:2528' } as NodeJS.ProcessEnv);
+
+test('createSession adopts a handoff minted after the cached token', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mcp-tok-'));
+  try {
+    const store = new FileTokenStore(dir, 'http://localhost:2528');
+    store.setTokens(stored(at(1000)));
+    writeFileSync(join(dir, 'agent.json'), JSON.stringify({ accessToken: at(2000), refreshToken: 'fresh' }));
+    await createSession(sessionCfg(dir));
+    assert.deepEqual(store.getTokens()?.refresh_token, 'fresh');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('createSession keeps a cached token rotated past the handoff', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mcp-tok-'));
+  try {
+    const store = new FileTokenStore(dir, 'http://localhost:2528');
+    store.setTokens(stored(at(2000)));
+    writeFileSync(join(dir, 'agent.json'), JSON.stringify({ accessToken: at(1000), refreshToken: 'consumed' }));
+    await createSession(sessionCfg(dir));
+    assert.deepEqual(store.getTokens(), stored(at(2000)));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
