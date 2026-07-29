@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, writeFileSync, readFileSync, unlinkSync, existsSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, unlinkSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { MeroJs, type TokenStore, type TokenData } from '@calimero-network/mero-js';
 import type { Config, Handoff } from './config.ts';
@@ -25,17 +25,26 @@ export class FileTokenStore implements TokenStore {
   }
 
   getTokens(): TokenData | null {
-    if (!existsSync(this.path)) return null;
     try {
       return JSON.parse(readFileSync(this.path, 'utf8')) as TokenData;
-    } catch {
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
       console.error(`[mero-mcp] ${this.path} is not valid JSON; ignoring it.`);
       return null;
     }
   }
 
   setTokens(data: TokenData): void {
-    writeFileSync(this.path, JSON.stringify(data), { mode: 0o600 });
+    // Write-then-rename so a crash mid-write can't leave a half-written file
+    // that reads as "no tokens" and triggers re-injection of a consumed token.
+    const tmpPath = `${this.path}.tmp`;
+    writeFileSync(tmpPath, JSON.stringify(data), { mode: 0o600 });
+    try {
+      renameSync(tmpPath, this.path);
+    } catch (err) {
+      unlinkSync(tmpPath);
+      throw err;
+    }
   }
 
   clear(): void {

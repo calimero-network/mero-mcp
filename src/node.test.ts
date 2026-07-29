@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, statSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, statSync, existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { FileTokenStore, pickAuthMode } from './node.ts';
@@ -39,6 +39,30 @@ test('FileTokenStore.clear removes the file and returns null after', () => {
 
 test('FileTokenStore returns null when nothing was ever stored', () => {
   withDir((dir) => assert.equal(new FileTokenStore(dir, 'http://x').getTokens(), null));
+});
+
+test('FileTokenStore.setTokens leaves no .tmp file behind after a successful write', () => {
+  withDir((dir) => {
+    const store = new FileTokenStore(dir, 'http://localhost:2528');
+    store.setTokens({ access_token: 'a', refresh_token: 'r', expires_at: 1 });
+    assert.equal(existsSync(`${store.path}.tmp`), false);
+  });
+});
+
+test('FileTokenStore.setTokens still writes the final file 0600', () => {
+  withDir((dir) => {
+    const store = new FileTokenStore(dir, 'http://localhost:2528');
+    store.setTokens({ access_token: 'a', refresh_token: 'r', expires_at: 1 });
+    assert.equal(statSync(store.path).mode & 0o777, 0o600);
+  });
+});
+
+test('FileTokenStore.getTokens returns null and does not throw on invalid JSON', () => {
+  withDir((dir) => {
+    const store = new FileTokenStore(dir, 'http://localhost:2528');
+    writeFileSync(store.path, 'not json', { mode: 0o600 });
+    assert.equal(store.getTokens(), null);
+  });
 });
 
 test('pickAuthMode prefers the handoff file over env token and credentials', () => {
