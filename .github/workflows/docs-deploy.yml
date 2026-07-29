@@ -104,10 +104,7 @@ jobs:
           
           cat > _site/_sidebar.md << EOL
           * [Home](/)
-          * [API Documentation](API.md)
-          * [Testing Guide](TESTING.md)
-          * Architecture
-            * [Overview](architecture/OVERVIEW.md)
+          * [MCP Protocol](MCP-PROTOCOL.md)
           EOL
       
       - name: Upload artifact
