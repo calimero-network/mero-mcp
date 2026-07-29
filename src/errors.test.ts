@@ -13,16 +13,40 @@ test('decodeFunctionCallErrorData falls back to the raw decoded text when it is 
   assert.equal(decodeFunctionCallErrorData(`the method call returned an error: ${JSON.stringify(bytes)}`), 'boom');
 });
 
-test('decodeFunctionCallErrorData returns undefined for non-string, absent, or non-array data', () => {
+test('decodeFunctionCallErrorData returns undefined for non-string or absent data', () => {
   assert.equal(decodeFunctionCallErrorData(undefined), undefined);
   assert.equal(decodeFunctionCallErrorData(42), undefined);
-  assert.equal(decodeFunctionCallErrorData('no brackets here'), undefined);
+});
+
+test('decodeFunctionCallErrorData surfaces a plain-string guest panic, no byte array involved', () => {
+  const data = 'guest panicked: key not found at apps/kv-store/src/lib.rs:133:33';
+  assert.equal(decodeFunctionCallErrorData(data), data);
+});
+
+test('decodeFunctionCallErrorData surfaces any bracket-free string as-is (a defensible over-surface, not a Debug blob)', () => {
+  assert.equal(decodeFunctionCallErrorData('no brackets here'), 'no brackets here');
+});
+
+test('decodeFunctionCallErrorData treats blank data (empty or whitespace-only) as no message', () => {
+  assert.equal(decodeFunctionCallErrorData(''), undefined);
+  assert.equal(decodeFunctionCallErrorData('   '), undefined);
 });
 
 test('toMessage unwraps a FunctionCallError-typed RpcError into the guest message', () => {
   const bytes = JSON.stringify([...Buffer.from('"label must be at most 64 characters"', 'utf8')]);
   const err = new RpcError(-32000, 'FunctionCallError', `the method call returned an error: ${bytes}`, 'FunctionCallError');
   assert.equal(toMessage(err), 'label must be at most 64 characters');
+});
+
+test('toMessage unwraps a FunctionCallError-typed RpcError carrying a plain-string guest panic', () => {
+  const data = 'guest panicked: key not found at apps/kv-store/src/lib.rs:133:33';
+  const err = new RpcError(-32000, 'FunctionCallError', data, 'FunctionCallError');
+  assert.equal(toMessage(err), data);
+});
+
+test('toMessage leaves a non-FunctionCallError RpcError untouched, using its own message', () => {
+  const err = new RpcError(-32000, 'internal error', 'irrelevant data', 'InternalError');
+  assert.equal(toMessage(err), 'internal error');
 });
 
 test('toMessage passes a plain Error through unchanged', () => {

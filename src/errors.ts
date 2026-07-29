@@ -2,15 +2,21 @@ import { RpcError } from '@calimero-network/mero-js';
 
 /**
  * A guest (WASM app) error has no top-level `message` - only `type:
- * "FunctionCallError"` plus `data`, a Rust Debug-formatted string like
- * "the method call returned an error: [108, 97, 98, 101, 108, ...]" (the
- * error text's UTF-8 bytes as a decimal array, not JSON). Recover the real
- * message so callers see it instead of the opaque "FunctionCallError" type.
+ * "FunctionCallError"` plus `data`, which core emits in one of two shapes:
+ * a Rust Debug-formatted string like "the method call returned an error:
+ * [108, 97, 98, 101, 108, ...]" (the error text's UTF-8 bytes as a decimal
+ * array, not JSON), or a plain string such as a guest panic message. Recover
+ * the real message so callers see it instead of the opaque "FunctionCallError"
+ * type.
  */
 export function decodeFunctionCallErrorData(data: unknown): string | undefined {
   if (typeof data !== 'string') return undefined;
   const match = data.match(/\[[\d,\s]+\]/);
-  if (!match) return undefined;
+  // No embedded byte array: treat non-blank data as the message itself (e.g. a guest panic).
+  if (!match) {
+    const trimmed = data.trim();
+    return trimmed || undefined;
+  }
   try {
     const bytes: unknown = JSON.parse(match[0]);
     if (!Array.isArray(bytes) || bytes.length === 0 || !bytes.every((b) => Number.isInteger(b) && b >= 0 && b <= 255)) {
