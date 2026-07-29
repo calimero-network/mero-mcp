@@ -54,7 +54,12 @@ export function createAbiLoader(session: NodeSession) {
   const cache = new Map<string, AbiManifest>();
 
   async function resolveAppId(nameOrId: string): Promise<{ id: string; blobId: string }> {
-    const { apps } = (await session.mero.admin.listApplications()) as { apps: InstalledApp[] };
+    let apps: InstalledApp[];
+    try {
+      ({ apps } = (await session.mero.admin.listApplications()) as { apps: InstalledApp[] });
+    } catch (err) {
+      throw abiError(err);
+    }
     const app = apps.find((a) => a.id === nameOrId || a.package === nameOrId);
     if (!app) {
       const installed = apps.map((a) => a.package || a.id).join(', ') || '(none)';
