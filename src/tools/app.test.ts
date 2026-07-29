@@ -159,7 +159,7 @@ test('an explicit context beats the pinned one', async () => {
   const { call, executed } = setup({ contexts: { 'kv-id': ['ctx-a', 'ctx-b'] } });
   await call('select_app', { app: 'kv-store', context: 'ctx-pinned' });
   await call('app_set', { key: 'k' });
-  await call('app_set', { key: 'k', context: 'ctx-explicit' });
+  await call('app_set', { key: 'k', _context: 'ctx-explicit' });
   assert.deepEqual(executed.map((e) => e.contextId), ['ctx-pinned', 'ctx-explicit']);
 });
 
@@ -197,6 +197,15 @@ test('a method with a parameter named context still receives its own argument', 
   await call('select_app', { app: 'kv-store' });
   await call('app_note', { context: 'the app owns this' });
   assert.deepEqual(executed, [{ contextId: 'ctx-only', method: 'note', argsJson: { context: 'the app owns this' } }]);
+});
+
+test('a method with a parameter named context can still be targeted with _context', async () => {
+  const abis = { 'kv-id': manifest([method('note', [{ name: 'context', type: 'string' }])]) };
+  const { call, executed } = setup({ abis, contexts: { 'kv-id': ['ctx-a', 'ctx-b'] } });
+  await call('select_app', { app: 'kv-store', context: 'ctx-pinned' });
+  await call('app_note', { context: 'the app owns this', _context: 'ctx-explicit' });
+  // The option targets the call and never reaches the app; the param reaches the app and never targets the call.
+  assert.deepEqual(executed, [{ contextId: 'ctx-explicit', method: 'note', argsJson: { context: 'the app owns this' } }]);
 });
 
 test('call validates against the same derived schema', async () => {

@@ -82,10 +82,13 @@ function bytesSchema(size?: number): z.ZodTypeAny {
   return z.union([hex, array]).describe(`bytes: a hex string or ${label}`);
 }
 
+/** The targeting option lives under a leading underscore, which no abi generator emits, so an app's own `context` parameter keeps its name. */
+export const CONTEXT_OPTION = '_context';
+
 export function inputShapeForMethod(method: AbiMethod, m: AbiManifest): Record<string, z.ZodTypeAny> {
   const shape: Record<string, z.ZodTypeAny> = {};
-  shape.context = z.string().optional().describe('Context id or alias to execute against; defaults to the selected context.');
-  // Params last: an app method named `context` owns the key, since dropping its argument would break the call.
+  shape[CONTEXT_OPTION] = z.string().optional().describe('Context id or alias to execute against; defaults to the selected context.');
+  // Params last: on the pathological collision the declared param still owns the key, since dropping its argument would break the call.
   for (const p of method.params) {
     const base = zodForType(p.type, m);
     shape[p.name] = p.nullable ? base.nullable().optional() : base;

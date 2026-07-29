@@ -5,7 +5,7 @@ import { createAbiLoader, type ResolvedApp } from '../abi.ts';
 import type { Config } from '../config.ts';
 import type { NodeSession } from '../node.ts';
 import { errorResult, textResult } from '../errors.ts';
-import { inputShapeForMethod, renderMethodSignature } from '../schema.ts';
+import { CONTEXT_OPTION, inputShapeForMethod, renderMethodSignature } from '../schema.ts';
 
 interface Selected {
   resolved: ResolvedApp;
@@ -42,10 +42,10 @@ const severalContexts = (label: string, ids: string[]) =>
 const argsFrom = (method: AbiMethod, input: Record<string, unknown>): Record<string, unknown> =>
   Object.fromEntries(method.params.filter((p) => p.name in input).map((p) => [p.name, input[p.name]]));
 
-/** schema.ts lets an app parameter named `context` own the key, so the targeting option exists only when the method declares none. */
+/** schema.ts lets a declared param of the same name own the key, so targeting exists only when the method declares none. */
 function targetFrom(method: AbiMethod, input: Record<string, unknown>): string | undefined {
-  if (method.params.some((p) => p.name === 'context')) return undefined;
-  return typeof input.context === 'string' ? input.context : undefined;
+  if (method.params.some((p) => p.name === CONTEXT_OPTION)) return undefined;
+  return typeof input[CONTEXT_OPTION] === 'string' ? input[CONTEXT_OPTION] : undefined;
 }
 
 export function registerAppTools(server: McpServer, session: NodeSession, _cfg: Config): void {

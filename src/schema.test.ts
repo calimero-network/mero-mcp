@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { AbiManifest } from '@calimero-network/abi-codegen';
-import { inputShapeForMethod, zodForType, renderMethodSignature } from './schema.ts';
+import { CONTEXT_OPTION, inputShapeForMethod, zodForType, renderMethodSignature } from './schema.ts';
 import { z } from 'zod';
 
 function deepFreeze<T>(v: T): T {
@@ -78,10 +78,11 @@ test('inputShapeForMethod makes a nullable param optional and nullable', () => {
   assert.equal(obj.safeParse({ b: 'y' }).success, false);
 });
 
-test('inputShapeForMethod adds an optional context parameter', () => {
+test('inputShapeForMethod adds an optional _context targeting option', () => {
   const shape = inputShapeForMethod({ name: 'm', params: [] } as never, manifest());
-  assert.ok('context' in shape);
+  assert.ok(CONTEXT_OPTION in shape);
   assert.equal(z.object(shape).safeParse({}).success, true);
+  assert.equal(z.object(shape).safeParse({ [CONTEXT_OPTION]: 'ctx' }).success, true);
 });
 
 test('renderMethodSignature marks read_only methods as view', () => {
@@ -185,10 +186,14 @@ test('inputShapeForMethod does not let a param named context shadow the context 
     manifest(),
   );
   const obj = z.object(shape);
+  // The param keeps its own name and its declared type: neither unioned with the option nor left optional.
   assert.equal(obj.safeParse({ context: 1 }).success, true);
-  // The param wins outright: it is neither unioned with the context option nor left optional.
   assert.equal(obj.safeParse({ context: 'ctx' }).success, false);
   assert.equal(obj.safeParse({}).success, false);
+  // And targeting survives alongside it, under the reserved name.
+  assert.ok(CONTEXT_OPTION in shape);
+  assert.equal(obj.safeParse({ context: 1, [CONTEXT_OPTION]: 'ctx' }).success, true);
+  assert.equal(obj.safeParse({ context: 1, [CONTEXT_OPTION]: 7 }).success, false);
 });
 
 test('renderMethodSignature shows nullability and defaults an absent return to unit', () => {
