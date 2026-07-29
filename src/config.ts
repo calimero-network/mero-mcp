@@ -90,6 +90,22 @@ export interface DiscoveredNode {
 
 export interface Handoff { nodeUrl?: string; accessToken: string; refreshToken?: string }
 
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
+
+/** Returns the origin to name in a rejection, or null when the url is a loopback node. Origin only: the rest of the url can carry a token. */
+function nonLoopbackOrigin(url: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return 'an unparseable url';
+  }
+  const scheme = parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  if (scheme && LOOPBACK_HOSTS.has(parsed.hostname)) return null;
+  // A non-special scheme has no origin of its own, and there the scheme is the whole story.
+  return parsed.origin === 'null' ? parsed.protocol : parsed.origin;
+}
+
 /** The desktop app's "Connect AI agent" output. Absent or malformed is not an error - the next auth rung applies. */
 export function readHandoff(cfg: Config): Handoff | null {
   const path = join(cfg.stateDir, 'agent.json');
@@ -98,6 +114,13 @@ export function readHandoff(cfg: Config): Handoff | null {
     const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<Handoff>;
     if (!parsed.accessToken) {
       console.error(`[mero-mcp] ${path} has no accessToken; ignoring it.`);
+      return null;
+    }
+    // Only the local desktop app writes this file, so a remote origin means someone else did - which makes
+    // its token untrustworthy too, not just its url. Set CALIMERO_NODE_URL to reach a remote node.
+    const origin = parsed.nodeUrl === undefined ? null : nonLoopbackOrigin(parsed.nodeUrl);
+    if (origin) {
+      console.error(`[mero-mcp] ${path} points at ${origin}, which is not a local node; ignoring the file.`);
       return null;
     }
     return { ...parsed, accessToken: parsed.accessToken };

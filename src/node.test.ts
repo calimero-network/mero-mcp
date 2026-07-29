@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, statSync, existsSync, writeFileSync } from 'node:f
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { FileTokenStore, pickAuthMode } from './node.ts';
-import { loadConfig } from './config.ts';
+import { loadConfig, readHandoff } from './config.ts';
 
 const withDir = (fn: (dir: string) => void) => {
   const dir = mkdtempSync(join(tmpdir(), 'mcp-tok-'));
@@ -62,6 +62,40 @@ test('FileTokenStore.getTokens returns null and does not throw on invalid JSON',
     const store = new FileTokenStore(dir, 'http://localhost:2528');
     writeFileSync(store.path, 'not json', { mode: 0o600 });
     assert.equal(store.getTokens(), null);
+  });
+});
+
+test('FileTokenStore gives two usernames on one node two different files', () => {
+  withDir((dir) => {
+    const alice = new FileTokenStore(dir, 'http://localhost:2528', 'alice');
+    const bob = new FileTokenStore(dir, 'http://localhost:2528', 'bob');
+    assert.notEqual(alice.path, bob.path);
+    assert.match(alice.path, /tokens-[0-9a-f]{16}\.json$/);
+    assert.equal(new FileTokenStore(dir, 'http://localhost:2528', 'alice').path, alice.path);
+
+    alice.setTokens({ access_token: 'a', refresh_token: 'r', expires_at: 1 });
+    assert.equal(bob.getTokens(), null, "bob must not inherit alice's session");
+  });
+});
+
+test('a handoff rejected for its origin never reaches pickAuthMode', () => {
+  withDir((dir) => {
+    const originalError = console.error;
+    try {
+      console.error = () => {};
+      writeFileSync(join(dir, 'agent.json'), JSON.stringify({ nodeUrl: 'http://evil.example.com', accessToken: 'h' }));
+      const cfg = loadConfig({
+        HOME: '/x',
+        CALIMERO_MCP_STATE_DIR: dir,
+        CALIMERO_USERNAME: 'u',
+        CALIMERO_PASSWORD: 'p',
+      } as NodeJS.ProcessEnv);
+      // Both createSession and resolveNode read the file; neither may report or inject the rejected token.
+      assert.equal(readHandoff(cfg), null);
+      assert.equal(pickAuthMode(cfg, readHandoff(cfg)), 'credentials');
+    } finally {
+      console.error = originalError;
+    }
   });
 });
 

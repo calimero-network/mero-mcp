@@ -18,9 +18,11 @@ export interface NodeSession {
 export class FileTokenStore implements TokenStore {
   readonly path: string;
 
-  constructor(stateDir: string, nodeUrl: string) {
+  constructor(stateDir: string, nodeUrl: string, username?: string) {
     mkdirSync(stateDir, { recursive: true, mode: 0o700 });
-    const hash = createHash('sha256').update(nodeUrl).digest('hex').slice(0, 16);
+    // Identity is part of the key: switching to a lower-privilege account must not silently
+    // keep running on the previous account's cached tokens.
+    const hash = createHash('sha256').update(`${nodeUrl}\0${username ?? ''}`).digest('hex').slice(0, 16);
     this.path = join(stateDir, `tokens-${hash}.json`);
   }
 
@@ -67,7 +69,7 @@ export async function createSession(cfg: Config): Promise<NodeSession> {
   const node = await resolveNode(cfg);
   const handoff = readHandoff(cfg);
   const authMode = pickAuthMode(cfg, handoff);
-  const store = new FileTokenStore(cfg.stateDir, node.url);
+  const store = new FileTokenStore(cfg.stateDir, node.url, cfg.username);
 
   const mero = new MeroJs({
     baseUrl: node.url,

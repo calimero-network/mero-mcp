@@ -28,6 +28,24 @@ function withHandoff(stateDir: string, handoff: Record<string, unknown>): void {
   writeFileSync(join(stateDir, 'agent.json'), JSON.stringify(handoff));
 }
 
+/** Diagnostics go to stderr, so they are both asserted on and kept out of the test output. */
+async function captureErrors(fn: () => void | Promise<void>): Promise<string[]> {
+  const lines: string[] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => { lines.push(args.join(' ')); };
+  try { await fn(); } finally { console.error = original; }
+  return lines;
+}
+
+/** Runs fn against a config whose state dir holds this handoff. */
+async function withHandoffCfg(handoff: Record<string, unknown>, fn: (cfg: ReturnType<typeof loadConfig>) => void): Promise<string[]> {
+  const stateDir = mkdtempSync(join(tmpdir(), 'mcp-state-'));
+  try {
+    withHandoff(stateDir, handoff);
+    return await captureErrors(() => fn(loadConfig({ HOME: '/x', CALIMERO_MCP_STATE_DIR: stateDir } as NodeJS.ProcessEnv)));
+  } finally { rmSync(stateDir, { recursive: true, force: true }); }
+}
+
 test('loadConfig defaults nodeHome to ~/.calimero and toolsets to all', () => {
   const cfg = loadConfig({ HOME: '/home/x' } as NodeJS.ProcessEnv);
   assert.equal(cfg.nodeHome, '/home/x/.calimero');
@@ -147,6 +165,90 @@ test('readHandoff returns null for valid JSON that has no accessToken', () => {
     console.error = originalError;
     rmSync(stateDir, { recursive: true, force: true });
   }
+});
+
+test('readHandoff accepts every loopback form, with and without a port', async () => {
+  const urls = [
+    'http://localhost:2528',
+    'http://localhost',
+    'https://localhost:2528',
+    'http://127.0.0.1:2528',
+    'http://127.0.0.1',
+    'http://[::1]:2528',
+    'http://[::1]',
+  ];
+  for (const nodeUrl of urls) {
+    const logged = await withHandoffCfg({ nodeUrl, accessToken: 'tok' }, (cfg) => {
+      assert.deepEqual(readHandoff(cfg), { nodeUrl, accessToken: 'tok' }, nodeUrl);
+    });
+    assert.deepEqual(logged, [], `${nodeUrl} should not be flagged`);
+  }
+});
+
+test('readHandoff rejects the whole file when its nodeUrl is not a loopback http(s) node', async () => {
+  const urls = [
+    'http://evil.example.com:2528',
+    'https://10.0.0.5',
+    'http://localhost.evil.example.com',
+    'http://127.0.0.1.evil.example.com',
+    'file:///etc/passwd',
+    'ftp://evil.example.com',
+    'not a url',
+    '',
+  ];
+  for (const nodeUrl of urls) {
+    // The token is rejected with the url: a file naming a remote host was not written by the local desktop app.
+    const logged = await withHandoffCfg({ nodeUrl, accessToken: 'tok' }, (cfg) => {
+      assert.doesNotThrow(() => assert.equal(readHandoff(cfg), null, nodeUrl));
+    });
+    assert.equal(logged.length, 1, `${nodeUrl} should be flagged once`);
+  }
+});
+
+test('a rejected handoff is logged naming the origin only, never the token or the path', async () => {
+  const logged = await withHandoffCfg(
+    { nodeUrl: 'http://user:pw@evil.example.com:8080/secret-path?t=s3cr3t', accessToken: 's3cr3t-token' },
+    (cfg) => assert.equal(readHandoff(cfg), null),
+  );
+  assert.equal(logged.length, 1);
+  assert.match(logged[0], /http:\/\/evil\.example\.com:8080/);
+  for (const leak of ['s3cr3t', 'secret-path', 'user:pw']) {
+    assert.ok(!logged[0].includes(leak), `stderr line must not carry ${leak}: ${logged[0]}`);
+  }
+});
+
+test('readHandoff keeps a file that carries only a token, since discovery then pins the origin itself', async () => {
+  const logged = await withHandoffCfg({ accessToken: 'tok' }, (cfg) => {
+    assert.deepEqual(readHandoff(cfg), { accessToken: 'tok' });
+  });
+  assert.deepEqual(logged, []);
+});
+
+test('resolveNode: a handoff naming a remote host is ignored and discovery continues', async () => {
+  const home = nodeHome({ name: 'alpha', port: 2528 });
+  const stateDir = mkdtempSync(join(tmpdir(), 'mcp-state-'));
+  try {
+    withHandoff(stateDir, { nodeUrl: 'http://evil.example.com', accessToken: 'tok' });
+    const cfg = loadConfig({
+      HOME: '/x',
+      CALIMERO_NODE_HOME: home,
+      CALIMERO_MCP_STATE_DIR: stateDir,
+    } as NodeJS.ProcessEnv);
+    let node!: Awaited<ReturnType<typeof resolveNode>>;
+    await captureErrors(async () => { node = await resolveNode(cfg); });
+    assert.equal(node.url, 'http://localhost:2528');
+    assert.equal(node.source, 'config-scan');
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test('resolveNode: CALIMERO_NODE_URL is not restricted to loopback', async () => {
+  const cfg = loadConfig({ HOME: '/x', CALIMERO_NODE_URL: 'https://node.example.com/' } as NodeJS.ProcessEnv);
+  const node = await resolveNode(cfg);
+  assert.equal(node.url, 'https://node.example.com');
+  assert.equal(node.source, 'env');
 });
 
 test('resolveNode: CALIMERO_NODE_URL wins over a handoff file and configured nodes', async () => {
