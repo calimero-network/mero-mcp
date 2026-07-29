@@ -66,12 +66,37 @@ function fake(
 
 test('resolveAppId matches an exact application id', async () => {
   const { loader } = fake();
-  assert.deepEqual(await loader.resolveAppId(APP_ID), { id: APP_ID, blobId: 'blob-v1' });
+  assert.deepEqual(await loader.resolveAppId(APP_ID), { id: APP_ID, package: 'kv-store', blobId: 'blob-v1' });
 });
 
 test('resolveAppId matches a package name', async () => {
   const { loader } = fake();
-  assert.deepEqual(await loader.resolveAppId('kv-store'), { id: APP_ID, blobId: 'blob-v1' });
+  assert.deepEqual(await loader.resolveAppId('kv-store'), { id: APP_ID, package: 'kv-store', blobId: 'blob-v1' });
+});
+
+test('resolveAppId matches the last segment of a dotted package name, ignoring case', async () => {
+  const { loader } = fake({ apps: [app({ package: 'com.calimero.KV-Store' })] });
+  assert.deepEqual(await loader.resolveAppId('kv-store'), { id: APP_ID, package: 'com.calimero.KV-Store', blobId: 'blob-v1' });
+});
+
+test('resolveAppId on a segment two applications share names both by full package', async () => {
+  const apps = [app({ package: 'com.calimero.kv-store' }), app({ id: 'other', package: 'org.example.kv-store' })];
+  const { loader } = fake({ apps });
+  await assert.rejects(
+    loader.resolveAppId('kv-store'),
+    /ambiguous: com\.calimero\.kv-store, org\.example\.kv-store\. Pass the full package name or the application id/,
+  );
+});
+
+test('an exact package name resolves even when its last segment is ambiguous', async () => {
+  const apps = [app({ package: 'com.calimero.kv-store' }), app({ id: 'other', package: 'org.example.kv-store' })];
+  const { loader } = fake({ apps });
+  assert.equal((await loader.resolveAppId('org.example.kv-store')).id, 'other');
+});
+
+test('resolveAppId matches whole segments only, never a prefix of one', async () => {
+  const { loader } = fake({ apps: [app({ package: 'com.calimero.mero-chat-v2' })] });
+  await assert.rejects(loader.resolveAppId('mero-chat'), /not found\. Installed: com\.calimero\.mero-chat-v2/);
 });
 
 test('resolveAppId on a miss lists what is installed', async () => {

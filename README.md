@@ -92,6 +92,13 @@ Anything an agent does through this server (installing an application, creating 
 **Application** (always registered):
 `describe_app` shows an application's ABI without selecting it.
 `select_app` picks an application and a context to run it against.
-`call` invokes a method on the selected (or an explicitly named) application.
+`deselect_app` drops one application again, leaving any others selected.
+`call` invokes a method on a selected (or an explicitly named) application.
 
-Once `select_app` has run, one more tool appears per ABI method (named `app_<method>`, or `app_<service>_<method>` for a multi-service application) for as long as this server process stays up.
+Several applications can be selected at once, so one instruction can span two of them without losing the first one's tools.
+Each keeps its own pinned context, and `deselect_app` or a re-`select_app` affects only the application named.
+
+Anywhere an application is named you can pass its id, its full package name, or just the last dot-separated segment of that package (`kv-store` for `com.calimero.kv-store`), as long as that segment is unambiguous among the installed applications.
+
+Once `select_app` has run, one more tool appears per ABI method for as long as this server process stays up.
+Those tools are named `<app>_<method>`, or `<app>_<service>_<method>` for a multi-service application, where `<app>` is that same trailing package segment: `com.calimero.kv-store` yields `kv_store_get`.

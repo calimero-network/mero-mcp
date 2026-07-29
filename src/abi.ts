@@ -7,10 +7,14 @@ const UPGRADE_MEROD =
 
 export interface ResolvedApp {
   id: string;
+  package?: string;
   manifest: AbiManifest;
   serviceName?: string;
   blobId: string;
 }
+
+/** Packages are reverse-DNS dotted; the trailing segment is the name people type and tool names are built from. */
+export const lastSegment = (name: string) => name.split('.').pop() || name;
 
 // mero-js ships its admin and http-client types behind extensionless directory
 // barrels, which NodeNext will not resolve, so `mero.admin` reaches us as `any`.
@@ -53,19 +57,30 @@ function abiError(err: unknown): unknown {
 export function createAbiLoader(session: NodeSession) {
   const cache = new Map<string, AbiManifest>();
 
-  async function resolveAppId(nameOrId: string): Promise<{ id: string; blobId: string }> {
+  async function resolveAppId(nameOrId: string): Promise<{ id: string; package?: string; blobId: string }> {
     let apps: InstalledApp[];
     try {
       ({ apps } = (await session.mero.admin.listApplications()) as { apps: InstalledApp[] });
     } catch (err) {
       throw abiError(err);
     }
-    const app = apps.find((a) => a.id === nameOrId || a.package === nameOrId);
+
+    const exact = apps.find((a) => a.id === nameOrId || a.package === nameOrId);
+    // Whole segments only, never a prefix: "mero-chat" must not resolve to "mero-chat-v2".
+    const matches = exact
+      ? [exact]
+      : apps.filter((a) => a.package && lastSegment(a.package).toLowerCase() === nameOrId.toLowerCase());
+
+    if (matches.length > 1) {
+      const candidates = matches.map((a) => a.package).join(', ');
+      throw new Error(`Application "${nameOrId}" is ambiguous: ${candidates}. Pass the full package name or the application id.`);
+    }
+    const app = matches[0];
     if (!app) {
       const installed = apps.map((a) => a.package || a.id).join(', ') || '(none)';
       throw new Error(`Application "${nameOrId}" not found. Installed: ${installed}`);
     }
-    return { id: app.id, blobId: app.blob.bytecode };
+    return { id: app.id, package: app.package, blobId: app.blob.bytecode };
   }
 
   return {
@@ -73,11 +88,11 @@ export function createAbiLoader(session: NodeSession) {
 
     async load(nameOrId: string, serviceName?: string): Promise<ResolvedApp> {
       // Blob ids are content-addressed, so an upgraded app resolves to a new key.
-      const { id, blobId } = await resolveAppId(nameOrId);
+      const { id, package: pkg, blobId } = await resolveAppId(nameOrId);
       const key = `${blobId}:${serviceName ?? ''}`;
 
       const cached = cache.get(key);
-      if (cached) return { id, manifest: cached, serviceName, blobId };
+      if (cached) return { id, package: pkg, manifest: cached, serviceName, blobId };
 
       let raw: unknown;
       try {
@@ -89,7 +104,7 @@ export function createAbiLoader(session: NodeSession) {
       // Cached only past every failure mode, so one bad fetch can't wedge the app.
       const manifest = parseAbiManifest(raw);
       cache.set(key, manifest);
-      return { id, manifest, serviceName, blobId };
+      return { id, package: pkg, manifest, serviceName, blobId };
     },
   };
 }
