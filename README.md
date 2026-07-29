@@ -3,7 +3,47 @@
 A stdio MCP server that drives any application installed on a local Calimero node.
 It exposes node administration (contexts, namespaces, blobs) as MCP tools, and once you point it at an application, generates a tool for every method in that application's ABI.
 
-## Setup
+## Quickstart
+
+Paste this into any AI harness (Claude Code, Cursor, Codex CLI, Claude Desktop, Zed, ...) and let it register the server for you:
+
+```text
+Set up the mero-mcp MCP server for me.
+
+It is on npm as @calimero-network/mero-mcp and runs over stdio. Find where
+your own harness keeps its MCP server config (for Claude Code that's
+.mcp.json in the project or ~/.claude.json for a user-wide server; for
+Claude Desktop it's claude_desktop_config.json; for Cursor/Windsurf it's
+.cursor/mcp.json; for Codex CLI it's ~/.codex/config.toml) and register a
+server named "calimero" that runs `npx -y @calimero-network/mero-mcp`.
+(If I tell you I'm running this from a local clone instead of the published
+package, use `node /abs/path/to/dist/index.js` as the command instead, with
+no args.)
+
+Before adding any environment variables, check whether
+~/.config/calimero/mcp/agent.json exists on my machine. If it does, register
+the server with no env vars at all - that file is a handoff from the
+Calimero desktop app and the server picks up the node URL and credentials
+from it automatically. If it does not exist, ask me for CALIMERO_NODE_URL
+(the node to connect to) and how I want to authenticate - either
+CALIMERO_AUTH_TOKEN (plus optional CALIMERO_REFRESH_TOKEN), or
+CALIMERO_USERNAME plus CALIMERO_PASSWORD - and set those instead. If I don't
+know, ask me to check whether the node has auth enabled at all before
+assuming I need any of this.
+
+Once it's registered, verify the connection yourself: call the node_status
+tool, then list_applications, then list_contexts. Report back what each one
+returned. If list_contexts comes back empty, tell me: applications install
+without a context, so I need to create one before most tools will work
+(either in the desktop app, or via the create_context tool).
+
+If anything fails, don't guess - show me the server's stderr output so we
+can see the actual error.
+```
+
+Prefer to wire it up by hand? See [manual setup](#manual-setup) below.
+
+## Manual setup
 
 Add this to your MCP client's config:
 
