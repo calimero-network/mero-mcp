@@ -67,12 +67,19 @@ function recordSchema(fields: AbiField[], m: AbiManifest, depth: number): z.ZodT
   return z.object(shape);
 }
 
-/** The node decodes bytes from a JSON number array; a string is accepted so agents can pass hex/base64. */
+/**
+ * The node wants a JSON number array, and hex is the only string form the Calimero toolchain reads.
+ * The size rides in the pattern so the advertised JSON Schema carries it, not just the validator.
+ */
 function bytesSchema(size?: number): z.ZodTypeAny {
-  const array = z.array(z.number().int());
-  const bytes = size === undefined ? array : array.length(size);
+  const bytes = z.array(z.number().int().min(0).max(255));
+  const array = size === undefined ? bytes : bytes.length(size);
+  const hex = z
+    .string()
+    .regex(size === undefined ? /^(?:[0-9a-fA-F]{2})*$/ : new RegExp(`^[0-9a-fA-F]{${size * 2}}$`))
+    .transform((s) => Array.from(Buffer.from(s, 'hex')));
   const label = size === undefined ? 'a byte array' : `a ${size}-byte array`;
-  return z.union([z.string(), bytes]).describe(`bytes: an encoded string or ${label}`);
+  return z.union([hex, array]).describe(`bytes: a hex string or ${label}`);
 }
 
 export function inputShapeForMethod(method: AbiMethod, m: AbiManifest): Record<string, z.ZodTypeAny> {
@@ -102,6 +109,9 @@ function typeName(t: AbiTypeRef): string {
       return `map<${typeName(t.key)}, ${typeName(t.value)}>`;
     case 'tuple':
       return `(${t.elements.map(typeName).join(', ')})`;
+    case 'record':
+      // Must match zodForType's unwrap: the signature the agent reads is what it calls the tool by.
+      return t.crdt_type && t.inner_type ? typeName(t.inner_type) : t.kind;
     default:
       return t.kind;
   }
