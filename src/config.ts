@@ -96,7 +96,11 @@ export function readHandoff(cfg: Config): Handoff | null {
   if (!existsSync(path)) return null;
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<Handoff>;
-    return parsed.accessToken ? { ...parsed, accessToken: parsed.accessToken } : null;
+    if (!parsed.accessToken) {
+      console.error(`[mero-mcp] ${path} has no accessToken; ignoring it.`);
+      return null;
+    }
+    return { ...parsed, accessToken: parsed.accessToken };
   } catch {
     console.error(`[mero-mcp] ${path} is not valid JSON; ignoring it.`);
     return null;
