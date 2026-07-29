@@ -32,21 +32,25 @@ export function decodeFunctionCallErrorData(data: unknown): string | undefined {
   }
 }
 
+interface RpcErrorLike {
+  type?: string;
+  data?: unknown;
+}
+
+// RpcError resolves to `any` under NodeNext, so instanceof is the real check; read fields through this structural type instead of casting.
+const isRpcErrorLike = (err: unknown): err is RpcErrorLike => err instanceof RpcError;
+
 /** mero-js does not decode guest errors: a FunctionCallError carries the real message as bytes in `data`. */
 export function toMessage(err: unknown): string {
-  if (err instanceof RpcError) {
-    // mero-js's re-export of RpcError breaks instanceof narrowing under NodeNext; cast explicitly.
-    const rpcErr = err as RpcError;
-    if (rpcErr.type === 'FunctionCallError') {
-      const decoded = decodeFunctionCallErrorData(rpcErr.data);
-      if (decoded) return decoded;
-    }
+  if (isRpcErrorLike(err) && err.type === 'FunctionCallError') {
+    const decoded = decodeFunctionCallErrorData(err.data);
+    if (decoded) return decoded;
   }
   return err instanceof Error ? err.message : String(err);
 }
 
 export function textResult(data: unknown) {
-  const text = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+  const text = typeof data === 'string' ? data : (JSON.stringify(data, null, 2) ?? 'null');
   return { content: [{ type: 'text' as const, text }] };
 }
 

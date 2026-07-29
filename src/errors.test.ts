@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { RpcError } from '@calimero-network/mero-js';
-import { decodeFunctionCallErrorData, toMessage } from './errors.ts';
+import { decodeFunctionCallErrorData, textResult, toMessage } from './errors.ts';
 
 test('decodeFunctionCallErrorData unwraps a JSON-quoted guest message embedded in a Debug-formatted string', () => {
   const bytes = [...Buffer.from('"boom"', 'utf8')];
@@ -27,4 +27,8 @@ test('toMessage unwraps a FunctionCallError-typed RpcError into the guest messag
 
 test('toMessage passes a plain Error through unchanged', () => {
   assert.equal(toMessage(new Error('boom')), 'boom');
+});
+
+test('textResult(undefined) yields the string "null", not the literal undefined', () => {
+  assert.equal(textResult(undefined).content[0].text, 'null');
 });

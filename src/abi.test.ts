@@ -34,7 +34,13 @@ const baseApp = () => ({
 const httpError = (status: number, message?: string) =>
   new HTTPError(status, 'Err', 'http://node/abi', new Headers(), message === undefined ? undefined : JSON.stringify({ error: message }));
 
-function fake(opts: { apps?: ReturnType<typeof app>[]; abi?: (id: string, serviceName?: string) => unknown } = {}) {
+function fake(
+  opts: {
+    apps?: ReturnType<typeof app>[];
+    abi?: (id: string, serviceName?: string) => unknown;
+    list?: () => unknown;
+  } = {},
+) {
   const calls = { list: 0, abi: 0, abiArgs: [] as Array<[string, string | undefined]> };
   let apps = opts.apps ?? [app()];
   const session = {
@@ -45,7 +51,7 @@ function fake(opts: { apps?: ReturnType<typeof app>[]; abi?: (id: string, servic
       admin: {
         listApplications: async () => {
           calls.list++;
-          return { apps };
+          return opts.list ? opts.list() : { apps };
         },
         getApplicationAbi: async (id: string, serviceName?: string) => {
           calls.abi++;
@@ -76,6 +82,22 @@ test('resolveAppId on a miss lists what is installed', async () => {
 test('resolveAppId on an empty node says (none)', async () => {
   const { loader } = fake({ apps: [] });
   await assert.rejects(loader.resolveAppId('kv-store'), /Installed: \(none\)/);
+});
+
+test("resolveAppId on a transport failure surfaces the node's message, not the bare HTTP line", async () => {
+  const { loader } = fake({ list: () => { throw httpError(0, 'merod is not reachable'); } });
+  await assert.rejects(loader.resolveAppId('kv-store'), (err: Error) => {
+    assert.equal(err.message, 'merod is not reachable');
+    return true;
+  });
+});
+
+test("resolveAppId on an expired token surfaces the node's message, not the bare HTTP line", async () => {
+  const { loader } = fake({ list: () => { throw httpError(401, 'token expired'); } });
+  await assert.rejects(loader.resolveAppId('kv-store'), (err: Error) => {
+    assert.equal(err.message, 'token expired');
+    return true;
+  });
 });
 
 test('load parses the manifest and passes the service name through', async () => {
