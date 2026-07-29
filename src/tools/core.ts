@@ -4,6 +4,7 @@ import type { Config } from '../config.ts';
 import { discoverLocalNodes, listConfiguredNodes, resolveNode } from '../config.ts';
 import type { NodeSession } from '../node.ts';
 import { errorResult, textResult } from '../errors.ts';
+import { getSelection } from './app.ts';
 
 /** Runs an admin call and folds its result or throw into the MCP text-result convention. */
 function wrap<Args>(fn: (args: Args) => Promise<unknown>) {
@@ -43,7 +44,14 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
     },
     wrap(async (_args: Record<string, never>) => {
       const [health, discovered] = await Promise.all([admin.healthCheck(), resolveNode(cfg)]);
-      return { health, url: session.url, nodeName: session.nodeName, discoverySource: discovered.source, authMode: session.authMode };
+      return {
+        health,
+        url: session.url,
+        nodeName: session.nodeName,
+        discoverySource: discovered.source,
+        authMode: session.authMode,
+        ...getSelection(),
+      };
     }),
   );
 
