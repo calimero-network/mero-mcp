@@ -33,9 +33,7 @@ assuming I need any of this.
 
 Once it's registered, verify the connection yourself: call the node_status
 tool, then list_applications, then list_contexts. Report back what each one
-returned. If list_contexts comes back empty, tell me: applications install
-without a context, so I need to create one before most tools will work
-(either in the desktop app, or via the create_context tool).
+returned.
 
 If anything fails, don't guess - show me the server's stderr output so we
 can see the actual error.
