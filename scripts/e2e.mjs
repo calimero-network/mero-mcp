@@ -27,7 +27,7 @@ import {
   toolText,
 } from './e2e-lib.mjs';
 
-const PLANNED = 14;
+const PLANNED = 16;
 
 const { values: opts } = parseArgs({
   options: { node: { type: 'string' }, app: { type: 'string' } },
@@ -173,6 +173,8 @@ async function runChecks({ checks, mcp, api, kv, second }) {
       'a round trip through MCP is visible to a direct /jsonrpc read',
       'the generic call tool reaches the same method',
       'a schema-violating argument is a validation error and changes nothing',
+      "a real node rejection carries the node's own message, not a bare status line",
+      "a plain-text node rejection also carries the node's own message",
     ]) {
       checks.skip(label, FOREIGN);
     }
@@ -218,6 +220,29 @@ async function runChecks({ checks, mcp, api, kv, second }) {
       const seen = await api.execute(kv.context, 'get', { key });
       assertEqual(seen, 'untouched', 'the rejected call still changed state');
       return text.slice(0, 110);
+    });
+
+    // A real node rejection, not a fake in a unit test: core answers create_context with
+    // {"error": "..."} on a syntactically invalid namespace, and that text must survive to the caller.
+    await checks.check("a real node rejection carries the node's own message, not a bare status line", async () => {
+      const msg = await mcp.callRaw('create_context', { application: kv.name, namespace: 'not-a-valid-hex-namespace' });
+      const text = toolText(msg);
+      assert(msg.result?.isError, `create_context with an invalid namespace succeeded: ${text}`);
+      assert(/Invalid group_id: expected hex-encoded 32 bytes/.test(text), `the node's own message is missing: ${text}`);
+      assert(!/^Error: HTTP \d+ [A-Za-z ]+$/.test(text), `a bare status line reached the caller instead: ${text}`);
+      return text.slice(0, 140);
+    });
+
+    // core's install failure is a plain-text body, not its usual {"error": ...} envelope - the other
+    // branch of the same extraction. nope.invalid is reserved (RFC 2606) and never resolves, so the
+    // node's own fetch fails fast and deterministically without depending on anything reachable.
+    await checks.check("a plain-text node rejection also carries the node's own message", async () => {
+      const msg = await mcp.callRaw('install_application', { url: 'https://nope.invalid/app.wasm' });
+      const text = toolText(msg);
+      assert(msg.result?.isError, `install_application with an unreachable URL succeeded: ${text}`);
+      assert(/error sending request for url/.test(text), `the node's own message is missing: ${text}`);
+      assert(!/^Error: HTTP \d+ [A-Za-z ]+$/.test(text), `a bare status line reached the caller instead: ${text}`);
+      return text.slice(0, 140);
     });
   }
 
