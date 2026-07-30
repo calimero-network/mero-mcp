@@ -32,7 +32,7 @@
   },
   "dependencies": {
     "@calimero-network/abi-codegen": "^1.2.2",
-    "@calimero-network/mero-js": "^7.3.1",
+    "@calimero-network/mero-js": "^7.3.2",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "zod": "^4.4.3"
   },
