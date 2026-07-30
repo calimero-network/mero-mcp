@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { SignedGroupOpenInvitation } from '@calimero-network/mero-js';
+import type { Application, ContextWithGroup, SignedGroupOpenInvitation } from '@calimero-network/mero-js';
 import type { Config } from '../config.ts';
 import { discoverLocalNodes, listConfiguredNodes, resolveNode } from '../config.ts';
 import type { NodeSession } from '../node.ts';
@@ -24,6 +24,25 @@ function wrap<Args>(fn: (args: Args) => Promise<unknown>) {
 const opaqueInvitation = z
   .record(z.string(), z.unknown())
   .describe('The invitation object returned by invite_to_namespace, passed through unchanged.');
+
+/**
+ * An app's metadata rides the wire as raw bytes; for display, recover the JSON object it usually
+ * encodes, fall back to the plain string, or drop it - never dump the byte array itself.
+ */
+function displayMetadata(bytes: number[]): unknown {
+  if (bytes.length === 0) return undefined;
+  const buf = Buffer.from(bytes);
+  const text = buf.toString('utf8');
+  if (!Buffer.from(text, 'utf8').equals(buf)) return undefined; // not valid UTF-8: nothing readable to show
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+// Hex matches how this codebase already renders bytes for display (see schema.ts's bytesSchema).
+const toHex = (bytes: number[]) => Buffer.from(bytes).toString('hex');
 
 export function registerCoreTools(server: McpServer, session: NodeSession, cfg: Config): void {
   const admin = session.mero.admin;
@@ -70,7 +89,10 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
   server.registerTool(
     'list_applications',
     { description: 'Applications installed on this node.', inputSchema: {}, annotations: { readOnlyHint: true } },
-    wrap(async (_args: Record<string, never>) => admin.listApplications()),
+    wrap(async (_args: Record<string, never>) => {
+      const { apps } = await admin.listApplications();
+      return { apps: apps.map((app: Application) => ({ ...app, metadata: displayMetadata(app.metadata) })) };
+    }),
   );
 
   server.registerTool(
@@ -86,9 +108,10 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
       inputSchema: { application: z.string().optional() },
       annotations: { readOnlyHint: true },
     },
-    wrap(async ({ application }: { application?: string }) =>
-      application ? admin.getContextsForApplication(application) : admin.getContexts(),
-    ),
+    wrap(async ({ application }: { application?: string }) => {
+      const { contexts } = application ? await admin.getContextsForApplication(application) : await admin.getContexts();
+      return { contexts: contexts.map((ctx: ContextWithGroup) => ({ ...ctx, dagHeads: ctx.dagHeads.map(toHex) })) };
+    }),
   );
 
   server.registerTool(

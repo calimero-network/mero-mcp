@@ -127,6 +127,51 @@ test('list_contexts calls getContextsForApplication when given an application, e
   assert.deepEqual(calls, ['getContexts', 'getContextsForApplication:app1']);
 });
 
+const utf8Bytes = (s: string) => [...Buffer.from(s, 'utf8')];
+
+test('list_applications decodes metadata for display: JSON object, plain string, dropped non-UTF-8 bytes, and an absent empty array', async () => {
+  const admin = {
+    listApplications: async () => ({
+      apps: [
+        { id: 'AppId1', package: 'pkg-json', version: '0.1.0', metadata: utf8Bytes(JSON.stringify({ name: 'kv-store' })) },
+        { id: 'AppId2', package: 'pkg-text', version: '0.1.0', metadata: utf8Bytes('plain text') },
+        { id: 'AppId3', package: 'pkg-binary', version: '0.1.0', metadata: [0xff, 0xfe] },
+        { id: 'AppId4', package: 'pkg-empty', version: '0.1.0', metadata: [] },
+      ],
+    }),
+  };
+  const { server, tools } = fakeServer();
+  registerCoreTools(server, fakeSession(admin), loadConfig(env()));
+  const { apps } = jsonOf(await tools.get('list_applications')!({})) as unknown as { apps: Array<Record<string, unknown>> };
+
+  assert.deepEqual(apps[0].metadata, { name: 'kv-store' });
+  assert.equal(apps[1].metadata, 'plain text');
+  assert.equal('metadata' in apps[2], false, 'non-UTF-8 metadata is not readable, so it is dropped rather than dumped');
+  assert.equal('metadata' in apps[3], false, 'an empty metadata array carries nothing worth showing');
+});
+
+test('list_contexts renders dagHeads as hex, keeping every head a multi-head context carries', async () => {
+  const admin = {
+    getContexts: async () => ({
+      contexts: [
+        {
+          id: 'Ctx111',
+          applicationId: 'AppId111',
+          contextStateHash: 'a'.repeat(64),
+          dagHeads: [
+            [1, 2, 3],
+            [255, 0, 128],
+          ],
+        },
+      ],
+    }),
+  };
+  const { server, tools } = fakeServer();
+  registerCoreTools(server, fakeSession(admin), loadConfig(env()));
+  const { contexts } = jsonOf(await tools.get('list_contexts')!({})) as unknown as { contexts: Array<{ dagHeads: string[] }> };
+  assert.deepEqual(contexts[0].dagHeads, ['010203', 'ff0080']);
+});
+
 // The exact object invite_to_namespace hands back: core's wire keys are snake_case, and it carries
 // two fields (application_id, app_key) no camelCase mirror of the type mentions.
 const INVITATION = {
