@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -7,6 +8,11 @@ import { loadConfig, type Config } from './config.ts';
 import { createSession, type NodeSession } from './node.ts';
 import { registerCoreTools } from './tools/core.ts';
 import { registerAppTools } from './tools/app.ts';
+
+/** The published version, so a client's diagnostics name the build it is talking to. */
+function packageVersion(): string {
+  return createRequire(import.meta.url)('../package.json').version as string;
+}
 
 type Methods = Record<string, (...args: unknown[]) => unknown>;
 
@@ -59,7 +65,7 @@ async function main() {
   const cfg = loadConfig();
   const session = createLazySession(cfg);
 
-  const server = new McpServer({ name: 'mero-mcp', version: '0.0.0' });
+  const server = new McpServer({ name: 'mero-mcp', version: packageVersion() });
   registerCoreTools(server, session, cfg);
   registerAppTools(server, session, cfg);
 
