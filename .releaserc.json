@@ -7,6 +7,10 @@
         "preset": "conventionalcommits",
         "releaseRules": [
           {
+            "breaking": true,
+            "release": "major"
+          },
+          {
             "type": "fix",
             "release": "patch"
           },

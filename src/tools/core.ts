@@ -110,7 +110,7 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
     },
     wrap(async ({ application }: { application?: string }) => {
       const { contexts } = application ? await admin.getContextsForApplication(application) : await admin.getContexts();
-      return { contexts: contexts.map((ctx: ContextWithGroup) => ({ ...ctx, dagHeads: ctx.dagHeads.map(toHex) })) };
+      return { contexts: contexts.map((ctx: ContextWithGroup) => ({ ...ctx, dagHeads: ctx.dagHeads?.map(toHex) })) };
     }),
   );
 

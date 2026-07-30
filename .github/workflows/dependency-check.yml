@@ -29,8 +29,10 @@ jobs:
       - name: Check for outdated dependencies
         run: npm outdated || true
       
+      # Gate on what ships. The dev tree carries findings inside the npm CLI that
+      # @semantic-release/npm vendors, which no bump can clear and no consumer runs.
       - name: Run npm audit
-        run: npm audit
+        run: npm audit --omit=dev
       
       - name: Install npm-check-updates
         run: npm install -g npm-check-updates
