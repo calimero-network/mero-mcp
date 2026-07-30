@@ -1,0 +1,2377 @@
+{
+  "schema_version": "wasm-abi/1",
+  "types": {
+    "E2eKvStore": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "kv_items",
+          "type": {
+            "kind": "map",
+            "key": {
+              "kind": "string"
+            },
+            "value": {
+              "kind": "record",
+              "fields": [],
+              "crdt_type": "lww_register",
+              "inner_type": {
+                "kind": "string"
+              }
+            },
+            "crdt_type": "unordered_map"
+          }
+        },
+        {
+          "name": "handler_counter",
+          "type": {
+            "kind": "record",
+            "fields": [],
+            "crdt_type": "counter"
+          }
+        },
+        {
+          "name": "user_items_simple",
+          "type": {
+            "kind": "map",
+            "key": {
+              "kind": "string"
+            },
+            "value": {
+              "kind": "record",
+              "fields": [],
+              "crdt_type": "lww_register",
+              "inner_type": {
+                "kind": "string"
+              }
+            }
+          }
+        },
+        {
+          "name": "user_items_nested",
+          "type": {
+            "kind": "map",
+            "key": {
+              "kind": "string"
+            },
+            "value": {
+              "$ref": "NestedMap"
+            }
+          }
+        },
+        {
+          "name": "frozen_items",
+          "type": {
+            "kind": "map",
+            "key": {
+              "kind": "string"
+            },
+            "value": {
+              "kind": "string"
+            }
+          }
+        },
+        {
+          "name": "games",
+          "type": {
+            "kind": "map",
+            "key": {
+              "kind": "string"
+            },
+            "value": {
+              "kind": "record",
+              "fields": [],
+              "crdt_type": "lww_register",
+              "inner_type": {
+                "kind": "string"
+              }
+            },
+            "crdt_type": "unordered_map"
+          }
+        },
+        {
+          "name": "files",
+          "type": {
+            "kind": "map",
+            "key": {
+              "kind": "string"
+            },
+            "value": {
+              "$ref": "FileRecord"
+            },
+            "crdt_type": "unordered_map"
+          }
+        },
+        {
+          "name": "file_counter",
+          "type": {
+            "kind": "record",
+            "fields": [],
+            "crdt_type": "lww_register",
+            "inner_type": {
+              "kind": "u64"
+            }
+          }
+        },
+        {
+          "name": "file_owner",
+          "type": {
+            "kind": "record",
+            "fields": [],
+            "crdt_type": "lww_register",
+            "inner_type": {
+              "kind": "string"
+            }
+          }
+        },
+        {
+          "name": "crdt_counters",
+          "type": {
+            "kind": "map",
+            "key": {
+              "kind": "string"
+            },
+            "value": {
+              "kind": "record",
+              "fields": [],
+              "crdt_type": "counter"
+            },
+            "crdt_type": "unordered_map"
+          }
+        },
+        {
+          "name": "crdt_pn_counters",
+          "type": {
+            "kind": "map",
+            "key": {
+              "kind": "string"
+            },
+            "value": {
+              "kind": "record",
+              "fields": [],
+              "crdt_type": "counter"
+            },
+            "crdt_type": "unordered_map"
+          }
+        },
+        {
+          "name": "crdt_registers",
+          "type": {
+            "kind": "map",
+            "key": {
+              "kind": "string"
+            },
+            "value": {
+              "kind": "record",
+              "fields": [],
+              "crdt_type": "lww_register",
+              "inner_type": {
+                "kind": "string"
+              }
+            },
+            "crdt_type": "unordered_map"
+          }
+        },
+        {
+          "name": "crdt_metadata",
+          "type": {
+            "kind": "map",
+            "key": {
+              "kind": "string"
+            },
+            "value": {
+              "kind": "map",
+              "key": {
+                "kind": "string"
+              },
+              "value": {
+                "kind": "record",
+                "fields": [],
+                "crdt_type": "lww_register",
+                "inner_type": {
+                  "kind": "string"
+                }
+              },
+              "crdt_type": "unordered_map"
+            },
+            "crdt_type": "unordered_map"
+          }
+        },
+        {
+          "name": "crdt_metrics",
+          "type": {
+            "kind": "list",
+            "items": {
+              "kind": "record",
+              "fields": [],
+              "crdt_type": "counter"
+            },
+            "crdt_type": "vector"
+          }
+        },
+        {
+          "name": "crdt_tags",
+          "type": {
+            "kind": "map",
+            "key": {
+              "kind": "string"
+            },
+            "value": {
+              "kind": "list",
+              "items": {
+                "kind": "string"
+              },
+              "crdt_type": "unordered_set"
+            },
+            "crdt_type": "unordered_map"
+          }
+        },
+        {
+          "name": "sorted_items",
+          "type": {
+            "kind": "map",
+            "key": {
+              "kind": "string"
+            },
+            "value": {
+              "kind": "record",
+              "fields": [],
+              "crdt_type": "lww_register",
+              "inner_type": {
+                "kind": "string"
+              }
+            },
+            "crdt_type": "sorted_map"
+          }
+        },
+        {
+          "name": "sorted_tags",
+          "type": {
+            "kind": "list",
+            "items": {
+              "kind": "string"
+            },
+            "crdt_type": "sorted_set"
+          }
+        },
+        {
+          "name": "rga_document",
+          "type": {
+            "kind": "record",
+            "fields": [],
+            "crdt_type": "replicated_growable_array"
+          }
+        },
+        {
+          "name": "rga_edit_count",
+          "type": {
+            "kind": "record",
+            "fields": [],
+            "crdt_type": "counter"
+          }
+        },
+        {
+          "name": "rga_metadata",
+          "type": {
+            "kind": "map",
+            "key": {
+              "kind": "string"
+            },
+            "value": {
+              "kind": "record",
+              "fields": [],
+              "crdt_type": "lww_register",
+              "inner_type": {
+                "kind": "string"
+              }
+            },
+            "crdt_type": "unordered_map"
+          }
+        },
+        {
+          "name": "authored_items",
+          "type": {
+            "kind": "map",
+            "key": {
+              "kind": "string"
+            },
+            "value": {
+              "kind": "record",
+              "fields": [],
+              "crdt_type": "lww_register",
+              "inner_type": {
+                "kind": "string"
+              }
+            },
+            "crdt_type": "authored_map"
+          }
+        },
+        {
+          "name": "authored_vec",
+          "type": {
+            "kind": "list",
+            "items": {
+              "kind": "record",
+              "fields": [],
+              "crdt_type": "lww_register",
+              "inner_type": {
+                "kind": "string"
+              }
+            },
+            "crdt_type": "authored_vector"
+          }
+        },
+        {
+          "name": "shared_data",
+          "type": {
+            "kind": "record",
+            "fields": [],
+            "crdt_type": "shared_storage",
+            "inner_type": {
+              "kind": "record",
+              "fields": [],
+              "crdt_type": "lww_register",
+              "inner_type": {
+                "kind": "string"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "Event_AuthoredInserted": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "owner",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ]
+    },
+    "Event_AuthoredRemoved": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ]
+    },
+    "Event_AuthoredUpdated": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ]
+    },
+    "Event_AuthoredVecPushed": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "index",
+          "type": {
+            "kind": "u32"
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "owner",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ]
+    },
+    "Event_AuthoredVecRemoved": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "index",
+          "type": {
+            "kind": "u32"
+          }
+        }
+      ]
+    },
+    "Event_AuthoredVecUpdated": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "index",
+          "type": {
+            "kind": "u32"
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ]
+    },
+    "Event_DocumentCreated": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "title",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "owner",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ]
+    },
+    "Event_FileDeleted": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "id",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "name",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ]
+    },
+    "Event_FileUploaded": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "id",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "name",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "size",
+          "type": {
+            "kind": "u64"
+          }
+        },
+        {
+          "name": "uploader",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ]
+    },
+    "Event_FrozenAdded": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "hash",
+          "type": {
+            "kind": "bytes",
+            "size": 32
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ]
+    },
+    "Event_GCounterIncremented": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "kind": "u64"
+          }
+        }
+      ]
+    },
+    "Event_Guessed": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "game_id",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "success",
+          "type": {
+            "kind": "bool"
+          }
+        },
+        {
+          "name": "by",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ]
+    },
+    "Event_Inserted": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ]
+    },
+    "Event_MetadataSet": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "outer_key",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "inner_key",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ]
+    },
+    "Event_MetricPushed": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "value",
+          "type": {
+            "kind": "u64"
+          }
+        }
+      ]
+    },
+    "Event_PnCounterChanged": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "kind": "i64"
+          }
+        },
+        {
+          "name": "operation",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ]
+    },
+    "Event_RegisterSet": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ]
+    },
+    "Event_Removed": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ]
+    },
+    "Event_SecretSet": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "game_id",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ]
+    },
+    "Event_SharedSet": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "value",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "by",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ]
+    },
+    "Event_SharedWriterAdded": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "writer",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ]
+    },
+    "Event_TagAdded": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "tag",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ]
+    },
+    "Event_TextDeleted": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "start",
+          "type": {
+            "kind": "u32"
+          }
+        },
+        {
+          "name": "end",
+          "type": {
+            "kind": "u32"
+          }
+        },
+        {
+          "name": "editor",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ]
+    },
+    "Event_TextInserted": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "position",
+          "type": {
+            "kind": "u32"
+          }
+        },
+        {
+          "name": "text",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "editor",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ]
+    },
+    "Event_TitleChanged": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "old_title",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "new_title",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "editor",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ]
+    },
+    "Event_Updated": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ]
+    },
+    "Event_UserNestedSet": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "executor_id",
+          "type": {
+            "kind": "bytes",
+            "size": 32
+          }
+        },
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ]
+    },
+    "Event_UserSimpleSet": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "executor_id",
+          "type": {
+            "kind": "bytes",
+            "size": 32
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ]
+    },
+    "FileRecord": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "id",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "name",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "blob_id",
+          "type": {
+            "kind": "bytes",
+            "size": 32
+          }
+        },
+        {
+          "name": "size",
+          "type": {
+            "kind": "u64"
+          }
+        },
+        {
+          "name": "mime_type",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "uploaded_by",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "uploaded_at",
+          "type": {
+            "kind": "u64"
+          }
+        }
+      ]
+    },
+    "NestedMap": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "map",
+          "type": {
+            "kind": "map",
+            "key": {
+              "kind": "string"
+            },
+            "value": {
+              "kind": "record",
+              "fields": [],
+              "crdt_type": "lww_register",
+              "inner_type": {
+                "kind": "string"
+              }
+            },
+            "crdt_type": "unordered_map"
+          }
+        }
+      ]
+    }
+  },
+  "methods": [
+    {
+      "name": "add_frozen",
+      "params": [
+        {
+          "name": "value",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "string"
+      }
+    },
+    {
+      "name": "add_guess",
+      "params": [
+        {
+          "name": "game_id",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "guess",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "bool"
+      }
+    },
+    {
+      "name": "add_secret",
+      "params": [
+        {
+          "name": "game_id",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "secret",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "unit"
+      }
+    },
+    {
+      "name": "add_tag",
+      "params": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "tag",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "unit"
+      }
+    },
+    {
+      "name": "authored_entries",
+      "params": [],
+      "returns": {
+        "kind": "map",
+        "key": {
+          "kind": "string"
+        },
+        "value": {
+          "kind": "string"
+        }
+      }
+    },
+    {
+      "name": "authored_get",
+      "params": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "string"
+      }
+    },
+    {
+      "name": "authored_get_owner",
+      "params": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "string"
+      }
+    },
+    {
+      "name": "authored_insert",
+      "params": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "unit"
+      }
+    },
+    {
+      "name": "authored_len",
+      "params": [],
+      "returns": {
+        "kind": "u32"
+      }
+    },
+    {
+      "name": "authored_remove",
+      "params": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "string"
+      }
+    },
+    {
+      "name": "authored_update",
+      "params": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "unit"
+      }
+    },
+    {
+      "name": "authored_vec_entries",
+      "params": [],
+      "returns": {
+        "kind": "list",
+        "items": {
+          "kind": "string"
+        }
+      }
+    },
+    {
+      "name": "authored_vec_get",
+      "params": [
+        {
+          "name": "index",
+          "type": {
+            "kind": "u32"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "string"
+      }
+    },
+    {
+      "name": "authored_vec_get_owner",
+      "params": [
+        {
+          "name": "index",
+          "type": {
+            "kind": "u32"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "string"
+      }
+    },
+    {
+      "name": "authored_vec_len",
+      "params": [],
+      "returns": {
+        "kind": "u32"
+      }
+    },
+    {
+      "name": "authored_vec_push",
+      "params": [
+        {
+          "name": "value",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "u32"
+      }
+    },
+    {
+      "name": "authored_vec_remove",
+      "params": [
+        {
+          "name": "index",
+          "type": {
+            "kind": "u32"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "unit"
+      }
+    },
+    {
+      "name": "authored_vec_update",
+      "params": [
+        {
+          "name": "index",
+          "type": {
+            "kind": "u32"
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "unit"
+      }
+    },
+    {
+      "name": "clear",
+      "params": [],
+      "returns": {
+        "kind": "unit"
+      }
+    },
+    {
+      "name": "clear_handler",
+      "params": [],
+      "returns": {
+        "kind": "unit"
+      }
+    },
+    {
+      "name": "clear_with_handler",
+      "params": [],
+      "returns": {
+        "kind": "unit"
+      }
+    },
+    {
+      "name": "decrement_pn_counter",
+      "params": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "i64"
+      }
+    },
+    {
+      "name": "delete_file",
+      "params": [
+        {
+          "name": "file_id",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "unit"
+      }
+    },
+    {
+      "name": "entries",
+      "params": [],
+      "returns": {
+        "kind": "map",
+        "key": {
+          "kind": "string"
+        },
+        "value": {
+          "kind": "string"
+        }
+      }
+    },
+    {
+      "name": "games",
+      "params": [],
+      "returns": {
+        "kind": "map",
+        "key": {
+          "kind": "string"
+        },
+        "value": {
+          "kind": "string"
+        }
+      }
+    },
+    {
+      "name": "get",
+      "params": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "string"
+      }
+    },
+    {
+      "name": "get_blob_id_b58",
+      "params": [
+        {
+          "name": "file_id",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "string"
+      }
+    },
+    {
+      "name": "get_counter",
+      "params": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "u64"
+      }
+    },
+    {
+      "name": "get_file",
+      "params": [
+        {
+          "name": "file_id",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "$ref": "FileRecord"
+      }
+    },
+    {
+      "name": "get_frozen",
+      "params": [
+        {
+          "name": "hash_hex",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "string"
+      }
+    },
+    {
+      "name": "get_g_counter",
+      "params": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "u64"
+      }
+    },
+    {
+      "name": "get_handler_execution_count",
+      "params": [],
+      "returns": {
+        "kind": "u64"
+      }
+    },
+    {
+      "name": "get_metadata",
+      "params": [
+        {
+          "name": "outer_key",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "inner_key",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "string"
+      }
+    },
+    {
+      "name": "get_metric",
+      "params": [
+        {
+          "name": "index",
+          "type": {
+            "kind": "u32"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "u64"
+      }
+    },
+    {
+      "name": "get_pn_counter",
+      "params": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "i64"
+      }
+    },
+    {
+      "name": "get_register",
+      "params": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "string"
+      }
+    },
+    {
+      "name": "get_result",
+      "params": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "string"
+      }
+    },
+    {
+      "name": "get_tag_count",
+      "params": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "u64"
+      }
+    },
+    {
+      "name": "get_user_nested",
+      "params": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "string"
+      }
+    },
+    {
+      "name": "get_user_simple",
+      "params": [],
+      "returns": {
+        "kind": "string"
+      }
+    },
+    {
+      "name": "get_user_simple_for",
+      "params": [
+        {
+          "name": "user_key",
+          "type": {
+            "kind": "bytes",
+            "size": 32
+          }
+        }
+      ],
+      "returns": {
+        "kind": "string"
+      }
+    },
+    {
+      "name": "has_tag",
+      "params": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "tag",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "bool"
+      }
+    },
+    {
+      "name": "increment_counter",
+      "params": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "u64"
+      }
+    },
+    {
+      "name": "increment_g_counter",
+      "params": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "u64"
+      }
+    },
+    {
+      "name": "increment_pn_counter",
+      "params": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "i64"
+      }
+    },
+    {
+      "name": "init",
+      "params": [],
+      "returns": {
+        "kind": "unit"
+      }
+    },
+    {
+      "name": "insert_handler",
+      "params": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "unit"
+      }
+    },
+    {
+      "name": "len",
+      "params": [],
+      "returns": {
+        "kind": "u32"
+      }
+    },
+    {
+      "name": "list_files",
+      "params": [],
+      "returns": {
+        "kind": "list",
+        "items": {
+          "$ref": "FileRecord"
+        }
+      }
+    },
+    {
+      "name": "metrics_len",
+      "params": [],
+      "returns": {
+        "kind": "u32"
+      }
+    },
+    {
+      "name": "my_secrets",
+      "params": [],
+      "returns": {
+        "kind": "map",
+        "key": {
+          "kind": "string"
+        },
+        "value": {
+          "kind": "string"
+        }
+      }
+    },
+    {
+      "name": "push_metric",
+      "params": [
+        {
+          "name": "value",
+          "type": {
+            "kind": "u64"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "u32"
+      }
+    },
+    {
+      "name": "remove",
+      "params": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "string"
+      }
+    },
+    {
+      "name": "remove_handler",
+      "params": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "unit"
+      }
+    },
+    {
+      "name": "remove_with_handler",
+      "params": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "string"
+      }
+    },
+    {
+      "name": "rga_append_text",
+      "params": [
+        {
+          "name": "text",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "unit"
+      }
+    },
+    {
+      "name": "rga_clear",
+      "params": [],
+      "returns": {
+        "kind": "unit"
+      }
+    },
+    {
+      "name": "rga_delete_text",
+      "params": [
+        {
+          "name": "start",
+          "type": {
+            "kind": "u32"
+          }
+        },
+        {
+          "name": "end",
+          "type": {
+            "kind": "u32"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "unit"
+      }
+    },
+    {
+      "name": "rga_get_length",
+      "params": [],
+      "returns": {
+        "kind": "u32"
+      }
+    },
+    {
+      "name": "rga_get_text",
+      "params": [],
+      "returns": {
+        "kind": "string"
+      }
+    },
+    {
+      "name": "rga_get_title",
+      "params": [],
+      "returns": {
+        "kind": "string"
+      }
+    },
+    {
+      "name": "rga_insert_text",
+      "params": [
+        {
+          "name": "position",
+          "type": {
+            "kind": "u32"
+          }
+        },
+        {
+          "name": "text",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "unit"
+      }
+    },
+    {
+      "name": "rga_is_empty",
+      "params": [],
+      "returns": {
+        "kind": "bool"
+      }
+    },
+    {
+      "name": "rga_set_title",
+      "params": [
+        {
+          "name": "new_title",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "unit"
+      }
+    },
+    {
+      "name": "search_files",
+      "params": [
+        {
+          "name": "query",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "list",
+        "items": {
+          "$ref": "FileRecord"
+        }
+      }
+    },
+    {
+      "name": "set",
+      "params": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "unit"
+      }
+    },
+    {
+      "name": "set_metadata",
+      "params": [
+        {
+          "name": "outer_key",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "inner_key",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "unit"
+      }
+    },
+    {
+      "name": "set_register",
+      "params": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "unit"
+      }
+    },
+    {
+      "name": "set_user_nested",
+      "params": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "unit"
+      }
+    },
+    {
+      "name": "set_user_simple",
+      "params": [
+        {
+          "name": "value",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "unit"
+      }
+    },
+    {
+      "name": "set_with_handler",
+      "params": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "unit"
+      }
+    },
+    {
+      "name": "shared_add_writer",
+      "params": [
+        {
+          "name": "writer_bs58",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "unit"
+      }
+    },
+    {
+      "name": "shared_get",
+      "params": [],
+      "returns": {
+        "kind": "string"
+      }
+    },
+    {
+      "name": "shared_get_writers",
+      "params": [],
+      "returns": {
+        "kind": "list",
+        "items": {
+          "kind": "string"
+        }
+      }
+    },
+    {
+      "name": "shared_is_frozen",
+      "params": [],
+      "returns": {
+        "kind": "bool"
+      }
+    },
+    {
+      "name": "shared_is_writer",
+      "params": [
+        {
+          "name": "key_bs58",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "bool"
+      }
+    },
+    {
+      "name": "shared_rotate_writers",
+      "params": [
+        {
+          "name": "writers",
+          "type": {
+            "kind": "list",
+            "items": {
+              "kind": "string"
+            }
+          }
+        }
+      ],
+      "returns": {
+        "kind": "unit"
+      }
+    },
+    {
+      "name": "shared_set",
+      "params": [
+        {
+          "name": "value",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "unit"
+      }
+    },
+    {
+      "name": "sorted_keys",
+      "params": [],
+      "returns": {
+        "kind": "list",
+        "items": {
+          "kind": "string"
+        }
+      }
+    },
+    {
+      "name": "sorted_last_key",
+      "params": [],
+      "returns": {
+        "kind": "string"
+      }
+    },
+    {
+      "name": "sorted_range",
+      "params": [
+        {
+          "name": "start",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "end",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "map",
+        "key": {
+          "kind": "string"
+        },
+        "value": {
+          "kind": "string"
+        }
+      }
+    },
+    {
+      "name": "sorted_set",
+      "params": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "unit"
+      }
+    },
+    {
+      "name": "sorted_tag_add",
+      "params": [
+        {
+          "name": "tag",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "bool"
+      }
+    },
+    {
+      "name": "sorted_tag_contains",
+      "params": [
+        {
+          "name": "tag",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "bool"
+      }
+    },
+    {
+      "name": "sorted_tag_remove",
+      "params": [
+        {
+          "name": "tag",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "bool"
+      }
+    },
+    {
+      "name": "sorted_tags_all",
+      "params": [],
+      "returns": {
+        "kind": "list",
+        "items": {
+          "kind": "string"
+        }
+      }
+    },
+    {
+      "name": "sorted_tags_last",
+      "params": [],
+      "returns": {
+        "kind": "string"
+      }
+    },
+    {
+      "name": "sorted_tags_range",
+      "params": [
+        {
+          "name": "start",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "end",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "list",
+        "items": {
+          "kind": "string"
+        }
+      }
+    },
+    {
+      "name": "tracing_probe",
+      "params": [
+        {
+          "name": "debug",
+          "type": {
+            "kind": "bool"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "unit"
+      }
+    },
+    {
+      "name": "update_handler",
+      "params": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "unit"
+      }
+    },
+    {
+      "name": "upload_file",
+      "params": [
+        {
+          "name": "name",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "blob_id_str",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "size",
+          "type": {
+            "kind": "u64"
+          }
+        },
+        {
+          "name": "mime_type",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "string"
+      }
+    }
+  ],
+  "events": [
+    {
+      "name": "AuthoredInserted",
+      "payload": {
+        "$ref": "Event_AuthoredInserted"
+      }
+    },
+    {
+      "name": "AuthoredRemoved",
+      "payload": {
+        "$ref": "Event_AuthoredRemoved"
+      }
+    },
+    {
+      "name": "AuthoredUpdated",
+      "payload": {
+        "$ref": "Event_AuthoredUpdated"
+      }
+    },
+    {
+      "name": "AuthoredVecPushed",
+      "payload": {
+        "$ref": "Event_AuthoredVecPushed"
+      }
+    },
+    {
+      "name": "AuthoredVecRemoved",
+      "payload": {
+        "$ref": "Event_AuthoredVecRemoved"
+      }
+    },
+    {
+      "name": "AuthoredVecUpdated",
+      "payload": {
+        "$ref": "Event_AuthoredVecUpdated"
+      }
+    },
+    {
+      "name": "Cleared"
+    },
+    {
+      "name": "DocumentCreated",
+      "payload": {
+        "$ref": "Event_DocumentCreated"
+      }
+    },
+    {
+      "name": "FileDeleted",
+      "payload": {
+        "$ref": "Event_FileDeleted"
+      }
+    },
+    {
+      "name": "FileUploaded",
+      "payload": {
+        "$ref": "Event_FileUploaded"
+      }
+    },
+    {
+      "name": "FrozenAdded",
+      "payload": {
+        "$ref": "Event_FrozenAdded"
+      }
+    },
+    {
+      "name": "GCounterIncremented",
+      "payload": {
+        "$ref": "Event_GCounterIncremented"
+      }
+    },
+    {
+      "name": "Guessed",
+      "payload": {
+        "$ref": "Event_Guessed"
+      }
+    },
+    {
+      "name": "Inserted",
+      "payload": {
+        "$ref": "Event_Inserted"
+      }
+    },
+    {
+      "name": "MetadataSet",
+      "payload": {
+        "$ref": "Event_MetadataSet"
+      }
+    },
+    {
+      "name": "MetricPushed",
+      "payload": {
+        "$ref": "Event_MetricPushed"
+      }
+    },
+    {
+      "name": "PnCounterChanged",
+      "payload": {
+        "$ref": "Event_PnCounterChanged"
+      }
+    },
+    {
+      "name": "RegisterSet",
+      "payload": {
+        "$ref": "Event_RegisterSet"
+      }
+    },
+    {
+      "name": "Removed",
+      "payload": {
+        "$ref": "Event_Removed"
+      }
+    },
+    {
+      "name": "SecretSet",
+      "payload": {
+        "$ref": "Event_SecretSet"
+      }
+    },
+    {
+      "name": "SharedSet",
+      "payload": {
+        "$ref": "Event_SharedSet"
+      }
+    },
+    {
+      "name": "SharedWriterAdded",
+      "payload": {
+        "$ref": "Event_SharedWriterAdded"
+      }
+    },
+    {
+      "name": "TagAdded",
+      "payload": {
+        "$ref": "Event_TagAdded"
+      }
+    },
+    {
+      "name": "TextDeleted",
+      "payload": {
+        "$ref": "Event_TextDeleted"
+      }
+    },
+    {
+      "name": "TextInserted",
+      "payload": {
+        "$ref": "Event_TextInserted"
+      }
+    },
+    {
+      "name": "TitleChanged",
+      "payload": {
+        "$ref": "Event_TitleChanged"
+      }
+    },
+    {
+      "name": "Updated",
+      "payload": {
+        "$ref": "Event_Updated"
+      }
+    },
+    {
+      "name": "UserNestedSet",
+      "payload": {
+        "$ref": "Event_UserNestedSet"
+      }
+    },
+    {
+      "name": "UserSimpleSet",
+      "payload": {
+        "$ref": "Event_UserSimpleSet"
+      }
+    }
+  ],
+  "state_root": "E2eKvStore",
+  "state_version": 1
+}

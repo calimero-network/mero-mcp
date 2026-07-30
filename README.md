@@ -1,259 +1,171 @@
-# Mero MCP Server
+# mero-mcp
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![CI](https://github.com/calimero-network/mero-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/calimero-network/mero-mcp/actions/workflows/ci.yml)
-[![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://calimero-network.github.io/mero-mcp/)
+A stdio MCP server that drives any application installed on a local Calimero node.
+It exposes node administration (contexts, namespaces, blobs) as MCP tools, and once you point it at an application, generates a tool for every method in that application's ABI.
 
-A robust Express-based server implementation of the [Model Context Protocol (MCP)](https://modelcontextprotocol.ai/), designed to provide a standardized interface for AI model integrations.
+## Quickstart
 
-## Table of Contents
+Paste this into any AI harness (Claude Code, Cursor, Codex CLI, Claude Desktop, Zed, ...) and let it register the server for you:
 
-- [Overview](#overview)
-- [Features](#features)
-- [Getting Started](#getting-started)
-  - [Prerequisites](#prerequisites)
-  - [Installation](#installation)
-  - [Environment Variables](#environment-variables)
-- [Usage](#usage)
-  - [CLI Tool](#cli-tool)
-  - [Running in Development](#running-in-development)
-  - [Building for Production](#building-for-production)
-  - [Docker Deployment](#docker-deployment)
-  - [Docker Compose](#docker-compose)
-- [API Documentation](#api-documentation)
-- [Testing](#testing)
-- [CI/CD](#cicd)
-- [Contributing](#contributing)
-- [License](#license)
+```text
+Set up the mero-mcp MCP server for me.
 
-## Overview
+It is on npm as @calimero-network/mero-mcp and runs over stdio. Register a
+server named "calimero" that runs `npx -y @calimero-network/mero-mcp`.
 
-The Mero MCP Server implements the Model Context Protocol, which defines a standard interface for AI models to interact with tools, resources, and context. This server provides endpoints for resource fetching, tool execution, and prompt handling according to the MCP specification.
+In Claude Code that is one command:
+  claude mcp add -s local calimero -- npx -y @calimero-network/mero-mcp
 
-## Features
+Otherwise find where your own harness keeps its MCP server config - Claude
+Desktop uses claude_desktop_config.json, Cursor/Windsurf use .cursor/mcp.json,
+Codex CLI uses ~/.codex/config.toml (same fields, TOML syntax).
+(If I tell you I'm running this from a local clone instead of the published
+package, use `node /abs/path/to/dist/index.js` as the command instead, with
+no args.)
 
-- **MCP Compliance**: Full implementation of the Model Context Protocol specification
-- **Resource Management**: API for registering and accessing external resources
-- **Tool Integration**: Standardized interface for tool registration and execution
-- **Prompt Handling**: Structured prompt management with schema validation
-- **SSE Connections**: Server-Sent Events for real-time communication
-- **Robust Error Handling**: Comprehensive error management and logging
-- **TypeScript**: Type-safe implementation with modern JavaScript features
+Before adding any environment variables, check whether
+~/.config/calimero/mcp/agent.json exists on my machine. If it does, register
+the server with no env vars at all - that file is a handoff from the
+Calimero desktop app and the server picks up the node URL and credentials
+from it automatically. If it does not exist, ask me for CALIMERO_NODE_URL
+(the node to connect to) and how I want to authenticate - either
+CALIMERO_AUTH_TOKEN (plus optional CALIMERO_REFRESH_TOKEN), or
+CALIMERO_USERNAME plus CALIMERO_PASSWORD - and set those instead. If I don't
+know, ask me to check whether the node has auth enabled at all before
+assuming I need any of this.
 
-## Getting Started
+Once it's registered, verify the connection yourself: call the node_status
+tool, then list_applications, then list_contexts. Report back what each one
+returned.
+
+If anything fails, don't guess - show me the server's stderr output so we
+can see the actual error.
+```
+
+Prefer to wire it up by hand? See [manual setup](#manual-setup) below.
+
+## Manual setup
+
+Add this to your MCP client's config:
+
+```json
+{
+  "mcpServers": {
+    "calimero": {
+      "command": "npx",
+      "args": ["-y", "@calimero-network/mero-mcp"]
+    }
+  }
+}
+```
+
+| Client | Where |
+| --- | --- |
+| Claude Code | `.mcp.json` in the project, or `~/.claude.json` for a user-wide server |
+| Claude Desktop | `claude_desktop_config.json` |
+| Cursor / Windsurf | `.cursor/mcp.json` |
+| Codex CLI | `~/.codex/config.toml`, same fields in TOML: `[mcp_servers.calimero]` / `command = "npx"` / `args = ["-y", "@calimero-network/mero-mcp"]` |
 
 ### Prerequisites
 
-- Node.js 16.x or higher
-- npm or yarn
+- A Calimero node running (the desktop app, or `merod` directly).
+- An application installed on that node.
+- **A context created for that application.**
+  This is the step people miss: installing an application from the registry does not create a context, and most of this server's app tools need one to run against.
+  Create one in the desktop app, or via the `create_context` tool.
 
-### Installation
+## Environment variables
 
-Clone the repository and install dependencies:
+All optional; the server tries to discover a node and an identity on its own.
 
-```bash
-git clone https://github.com/calimero-network/mero-mcp.git
-cd mero-mcp
-npm install
-```
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `CALIMERO_NODE_URL` | Connect to this node directly, skipping discovery | - |
+| `CALIMERO_NODE_NAME` | Select a node by name out of `CALIMERO_NODE_HOME` | - |
+| `CALIMERO_NODE_HOME` | Directory of node configs to scan | `~/.calimero` |
+| `CALIMERO_AUTH_TOKEN` | Bearer access token | - |
+| `CALIMERO_REFRESH_TOKEN` | Refresh token paired with `CALIMERO_AUTH_TOKEN` | - |
+| `CALIMERO_USERNAME` | Username for credential auth | - |
+| `CALIMERO_PASSWORD` | Password for credential auth | - |
+| `CALIMERO_PASSWORD_FILE` | File to read the password from, used when `CALIMERO_PASSWORD` is unset | - |
+| `CALIMERO_MCP_STATE_DIR` | Where the token cache and the desktop app's handoff file live | `~/.config/calimero/mcp` |
+| `CALIMERO_MCP_TOOLSETS` | Comma-separated toolsets to enable (`core`, `blobs`, `governance`); `core` is always on | all three |
 
-### Environment Variables
+## Node discovery
 
-Create a `.env` file in the root directory with the following variables:
+The server resolves which node to talk to in this order, stopping at the first match:
 
-```
-PORT=3000
-NODE_ENV=development
-LOG_LEVEL=info
-```
+1. `CALIMERO_NODE_URL`, if set.
+2. The desktop app's handoff file (`agent.json` in the state dir), if it names a node.
+3. A node under `CALIMERO_NODE_HOME` matching `CALIMERO_NODE_NAME`, if that variable is set.
+4. The single node under `CALIMERO_NODE_HOME`, if there's exactly one - or the one named `default`, if there are several.
+5. A live probe of common local ports.
 
-## Usage
+For steps 3 and 4, the port comes from that node's own `config.toml` (its `[server]` listen address), not from an assumed default.
+Only the last-resort probe in step 5 guesses at conventional ports.
 
-### CLI Tool
+## Authentication
 
-The project includes a CLI tool for common operations. You can use it as follows:
+The server picks the first of these that applies:
 
-```bash
-# Show available commands
-./bin/mero-cli help
+1. **Handoff** - a token written by the desktop app's "Connect AI agent" action.
+2. **Token** - `CALIMERO_AUTH_TOKEN` (with an optional `CALIMERO_REFRESH_TOKEN`).
+3. **Credentials** - `CALIMERO_USERNAME` and `CALIMERO_PASSWORD` (or `CALIMERO_PASSWORD_FILE`).
+4. **None** - no auth is attempted; this only works against a node with no auth requirement.
 
-# Start the server
-./bin/mero-cli start
+Tokens are cached per node and identity under `CALIMERO_MCP_STATE_DIR`, so re-authentication only happens once.
 
-# Run in development mode
-./bin/mero-cli dev
+**The agent credential carries `admin` permission on the node.**
+It is a separate, revocable credential - not the same one the desktop app uses - but it is not scoped down, and every action it takes is attributed to the node's own identity exactly the way the desktop app's actions are.
+Anything an agent does through this server (installing an application, creating a context, calling a mutating method) is indistinguishable, on the node, from you having done it yourself.
 
-# Build the project
-./bin/mero-cli build
+## Tools
 
-# Run tests
-./bin/mero-cli test
+**Core** (always registered):
+`node_status`, `list_nodes`, `list_applications`, `list_namespaces`, `list_contexts`, `create_context`, `create_alias`, `lookup_alias`.
 
-# Run linting
-./bin/mero-cli lint
+**Blobs** (in `CALIMERO_MCP_TOOLSETS` by default):
+`install_application`, `uninstall_application`, `upload_blob`, `list_blobs`, `delete_blob`.
 
-# Run formatting
-./bin/mero-cli format
+**Governance** (in `CALIMERO_MCP_TOOLSETS` by default):
+`create_namespace`, `delete_namespace`, `invite_to_namespace`, `join_namespace`, `leave_namespace`, `list_group_members`, `add_group_members`.
 
-# Validate the codebase (build, lint, test, coverage)
-./bin/mero-cli validate
-```
+**Application** (always registered):
+`describe_app` shows an application's ABI without selecting it.
+`select_app` picks an application and a context to run it against.
+`deselect_app` drops one application again, leaving any others selected.
+`call` invokes a method on a selected (or an explicitly named) application.
 
-The CLI tool is designed to work consistently across environments without depending on system-wide Node.js installations.
+Several applications can be selected at once, so one instruction can span two of them without losing the first one's tools.
+Each keeps its own pinned context, and `deselect_app` or a re-`select_app` affects only the application named.
 
-### Running in Development
+Anywhere an application is named you can pass its id, its full package name, or just the last dot-separated segment of that package (`kv-store` for `com.calimero.kv-store`), as long as that segment is unambiguous among the installed applications.
 
-```bash
-npm run dev
-# or
-./bin/mero-cli dev
-```
+Once `select_app` has run, one more tool appears per ABI method for as long as this server process stays up.
+Those tools are named `<app>_<method>`, or `<app>_<service>_<method>` for a multi-service application, where `<app>` is that same trailing package segment: `com.calimero.kv-store` yields `kv_store_get`.
 
-This starts the server in development mode with hot reloading.
+## Verifying it works
 
-### Building for Production
-
-```bash
-npm run build
-npm start
-# or
-./bin/mero-cli build
-./bin/mero-cli start
-```
-
-### Docker Deployment
-
-```bash
-# Build and run with Docker
-docker build -t mero-mcp .
-docker run -p 3000:3000 -e NODE_ENV=production mero-mcp
-```
-
-### Docker Compose
-
-For a more complete setup, you can use Docker Compose:
+Two harnesses drive the built server over real MCP stdio against a real node.
+Both boot their own `merod` on port 2571 in a temp home and tear it down on the way out, so neither touches `~/.calimero` or your real state directory.
 
 ```bash
-# Fix any Docker build issues first
-./scripts/docker-fix.sh
-
-# Start the services
-docker-compose up -d
-
-# View logs
-docker-compose logs -f
-
-# Stop the services
-docker-compose down
+npm run e2e          # 14 assertions: the protocol, the ABI-derived tools, and a round trip verified out of band
+npm run e2e:cycle    # 7 assertions: admin login -> client key -> agent.json handoff, with zero credentials in the environment
 ```
 
-The provided `docker-compose.yml` includes:
-- Production-ready Mero MCP server
-- Proper volume mapping for data persistence
-- Health checks for container monitoring
-- A commented-out development service configuration
-
-To customize the Docker Compose setup, edit the `docker-compose.yml` file in the project root.
-
-## API Documentation
-
-The server exposes the following MCP endpoints:
-
-- GET `/mcp/sse` - Establishes an SSE connection for real-time communication
-- GET `/mcp/resource/:name` - Accesses registered resources
-- POST `/mcp/tool/:name` - Executes registered tools
-- POST `/mcp/prompt/:name` - Processes registered prompts
-
-For detailed API documentation, see our [documentation site](https://calimero-network.github.io/mero-mcp/) or the [API.md](docs/API.md) file directly.
-
-## Testing
-
-The project includes comprehensive tests for all components:
+`MEROD_BINARY` selects the binary to boot, and defaults to core's `target/debug/merod`.
+Until a core release carries `GET /admin-api/applications/:id/abi`, that binary has to come from core master:
 
 ```bash
-# Run tests
-npm test
-# or 
-./bin/mero-cli test
-
-# Check test coverage
-npm test -- --coverage
-# or
-./bin/mero-cli coverage
+cd <core> && cargo build -p merod
+MEROD_BINARY=<core>/target/debug/merod npm run e2e
 ```
 
-### Docker Setup Testing
-
-To verify that your Docker setup is working correctly, you can use the provided script:
+To reproduce a problem against a node you already have running, point the harness at it:
 
 ```bash
-# Test Docker deployment
-./scripts/docker-test.sh
-
-# Optionally specify a custom container name
-./scripts/docker-test.sh my-custom-container-name
+npm run e2e -- --node http://localhost:2528 --app my-app
 ```
 
-This script:
-1. Verifies that required dependencies are installed
-2. Checks if the Docker container is running
-3. Tests all API endpoints to ensure they're functioning correctly
-4. Cleans up any test artifacts created during testing
-
-### SSE Functionality Testing
-
-To test the Server-Sent Events (SSE) functionality, including the event broadcasting feature:
-
-```bash
-# Test SSE functionality
-./scripts/test-sse.sh
-```
-
-This script:
-1. Establishes an SSE connection to the server
-2. Attempts to trigger and receive broadcast events
-3. Verifies that the connection and event handling are working correctly
-
-Both test scripts provide detailed output and clear error messages to help diagnose any issues.
-
-## CI/CD
-
-The project uses GitHub Actions for continuous integration and delivery:
-
-### Workflows
-
-- **CI**: Runs on every push to main and pull request to validate the codebase
-  - Builds the project
-  - Runs linters
-  - Executes tests
-  - Reports test coverage
-
-- **Validate PR**: Targeted validation for changed files in pull requests
-  - Formats and lints only changed files
-  - Runs tests related to changed files
-  - Executes the full validation script
-
-- **Dependency Check**: Checks for outdated or vulnerable dependencies
-  - Runs on package.json changes and weekly schedule
-  - Generates dependency update reports
-  - Performs security audits
-
-- **Documentation**: Validates documentation quality
-  - Checks Markdown links
-  - Runs Markdown linting rules
-
-### Running Locally
-
-You can run the same checks locally using the CLI tool:
-
-```bash
-./bin/mero-cli validate
-```
-
-## Contributing
-
-Contributions are welcome! Please see our [Contributing Guidelines](CONTRIBUTING.md) for more details.
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details. 
+In that mode it provisions nothing and tears nothing down; it attaches to what is there and prints `SKIP` for each assertion that needs a node it controls.
