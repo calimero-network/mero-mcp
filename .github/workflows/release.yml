@@ -1,0 +1,76 @@
+name: Release and Publish
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  release:
+    name: Create Release and Publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      issues: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          registry-url: 'https://registry.npmjs.org'
+          scope: '@calimero-network'
+          token: false
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Run semantic-release
+        id: semantic
+        run: |
+          OUTPUT=$(npx semantic-release 2>&1)
+          echo "$OUTPUT"
+          if echo "$OUTPUT" | grep -q "Published release"; then
+            echo "new_release=true" >> $GITHUB_OUTPUT
+          else
+            echo "new_release=false" >> $GITHUB_OUTPUT
+            echo "No new release"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_ENV: production
+
+      # OIDC trusted publishing (no token). Repo is public, so provenance is safe to attach.
+      # Prereq: the npm trusted publisher for this package must point at this
+      # repo and this workflow filename (release.yml).
+      - name: Publish to npm with OIDC
+        if: steps.semantic.outputs.new_release == 'true'
+        run: npm publish --provenance --access public
+
+      # success() guard so a failed npm publish never pushes a half-release
+      # (release commit + tag) with nothing on npm behind it.
+      - name: Push release commit and tag
+        if: success() && steps.semantic.outputs.new_release == 'true'
+        run: |
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+          git push origin HEAD:main --follow-tags || true
