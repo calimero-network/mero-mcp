@@ -1,8 +1,10 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { SignedGroupOpenInvitation } from '@calimero-network/mero-js';
 import type { Config } from '../config.ts';
 import { discoverLocalNodes, listConfiguredNodes, resolveNode } from '../config.ts';
 import type { NodeSession } from '../node.ts';
+import { createAbiLoader } from '../abi.ts';
 import { errorResult, textResult } from '../errors.ts';
 import { getSelection } from './app.ts';
 
@@ -17,21 +19,15 @@ function wrap<Args>(fn: (args: Args) => Promise<unknown>) {
   };
 }
 
-// Mirrors core's SignedGroupOpenInvitation wire shape (the object invite_to_namespace
-// returns) so join_namespace can validate it instead of accepting an opaque blob.
-const signedInvitation = z.object({
-  invitation: z.object({
-    inviterIdentity: z.array(z.number()),
-    groupId: z.array(z.number()),
-    expirationTimestamp: z.number(),
-    secretSalt: z.array(z.number()),
-    invitedRole: z.number().optional(),
-  }),
-  inviterSignature: z.string(),
-});
+// An invitation is signed over its own bytes, so declaring its fields would reshape it
+// (and zod would strip the ones we failed to declare) and the signature would stop verifying.
+const opaqueInvitation = z
+  .record(z.string(), z.unknown())
+  .describe('The invitation object returned by invite_to_namespace, passed through unchanged.');
 
 export function registerCoreTools(server: McpServer, session: NodeSession, cfg: Config): void {
   const admin = session.mero.admin;
+  const { resolveAppId } = createAbiLoader(session);
 
   // core: always registered, regardless of CALIMERO_MCP_TOOLSETS.
 
@@ -47,7 +43,7 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
       return {
         health,
         url: session.url,
-        nodeName: session.nodeName,
+        nodeName: session.nodeName ?? null,
         discoverySource: discovered.source,
         authMode: session.authMode,
         ...getSelection(),
@@ -100,21 +96,40 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
     {
       description: 'Create a new context for an application under a namespace.',
       inputSchema: {
-        application: z.string(),
+        application: z.string().describe('Application id or package name.'),
         namespace: z.string(),
         name: z.string().optional(),
         service: z.string().optional(),
       },
     },
     wrap(async ({ application, namespace, name, service }: { application: string; namespace: string; name?: string; service?: string }) =>
-      admin.createContext({ applicationId: application, groupId: namespace, name, serviceName: service }),
+      admin.createContext({ applicationId: (await resolveAppId(application)).id, groupId: namespace, name, serviceName: service }),
+    ),
+  );
+
+  server.registerTool(
+    'delete_context',
+    {
+      description: 'Delete a context from this node, including its data. Use this to clear a context left behind by a deleted namespace.',
+      inputSchema: {
+        context: z.string(),
+        requester: z.string().optional().describe('Member identity to delete as; only needed when the node holds several.'),
+      },
+      annotations: { destructiveHint: true },
+    },
+    wrap(async ({ context, requester }: { context: string; requester?: string }) =>
+      admin.deleteContext(context, requester ? { requester } : undefined),
     ),
   );
 
   server.registerTool(
     'create_alias',
     { description: 'Create a human-friendly alias for a context id.', inputSchema: { alias: z.string(), contextId: z.string() } },
-    wrap(async ({ alias, contextId }: { alias: string; contextId: string }) => admin.createContextAlias({ alias, contextId })),
+    wrap(async ({ alias, contextId }: { alias: string; contextId: string }) => {
+      // Core answers with an empty body, and a bare `null` reads as a failure.
+      await admin.createContextAlias({ alias, contextId });
+      return `Alias "${alias}" now resolves to context ${contextId}.`;
+    }),
   );
 
   server.registerTool(
@@ -124,7 +139,11 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
       inputSchema: { name: z.string() },
       annotations: { readOnlyHint: true },
     },
-    wrap(async ({ name }: { name: string }) => admin.lookupContextAlias(name)),
+    wrap(async ({ name }: { name: string }) => {
+      const { value } = await admin.lookupContextAlias(name);
+      // A miss is a true answer to a fair question, so it is a result rather than an error - but it has to say so.
+      return value ? { alias: name, contextId: value } : `No alias named "${name}" on this node.`;
+    }),
   );
 
   if (cfg.toolsets.has('blobs')) {
@@ -178,20 +197,28 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
       {
         description: 'Create a namespace for an application.',
         inputSchema: {
-          application: z.string(),
+          application: z.string().describe('Application id or package name.'),
           upgradePolicy: z.enum(['Automatic', 'LazyOnAccess']).optional(),
           name: z.string().optional(),
         },
       },
       wrap(
         async ({ application, upgradePolicy, name }: { application: string; upgradePolicy?: 'Automatic' | 'LazyOnAccess'; name?: string }) =>
-          admin.createNamespace({ applicationId: application, upgradePolicy: upgradePolicy ?? 'Automatic', name }),
+          admin.createNamespace({
+            applicationId: (await resolveAppId(application)).id,
+            upgradePolicy: upgradePolicy ?? 'Automatic',
+            name,
+          }),
       ),
     );
 
     server.registerTool(
       'delete_namespace',
-      { description: 'Delete a namespace.', inputSchema: { namespace: z.string() }, annotations: { destructiveHint: true } },
+      {
+        description: 'Delete a namespace. Its contexts outlive it and stay uncallable until delete_context removes them.',
+        inputSchema: { namespace: z.string() },
+        annotations: { destructiveHint: true },
+      },
       wrap(async ({ namespace }: { namespace: string }) => admin.deleteNamespace(namespace)),
     );
 
@@ -204,18 +231,24 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
     server.registerTool(
       'join_namespace',
       {
-        description: 'Join a namespace using an invitation minted by invite_to_namespace.',
-        inputSchema: { namespace: z.string(), invitation: signedInvitation, groupName: z.string().optional() },
+        description:
+          'Join a namespace using an invitation minted by invite_to_namespace. Pass that invitation object through unchanged - it is signed, and any reshaping invalidates it.',
+        inputSchema: { namespace: z.string(), invitation: opaqueInvitation, groupName: z.string().optional() },
       },
-      wrap(async ({ namespace, invitation, groupName }: { namespace: string; invitation: z.infer<typeof signedInvitation>; groupName?: string }) =>
-        admin.joinNamespace(namespace, { invitation, groupName }),
+      wrap(async ({ namespace, invitation, groupName }: { namespace: string; invitation: Record<string, unknown>; groupName?: string }) =>
+        // mero-js declares a camelCase mirror of the invitation, but core's wire keys are snake_case;
+        // the payload is signed, so it goes back exactly as it arrived rather than being reshaped to fit.
+        admin.joinNamespace(namespace, { invitation: invitation as unknown as SignedGroupOpenInvitation, groupName }),
       ),
     );
 
     server.registerTool(
       'leave_namespace',
       { description: 'Leave a namespace.', inputSchema: { namespace: z.string() }, annotations: { destructiveHint: true } },
-      wrap(async ({ namespace }: { namespace: string }) => admin.leaveNamespace(namespace)),
+      wrap(async ({ namespace }: { namespace: string }) => {
+        await admin.leaveNamespace(namespace);
+        return `Left namespace ${namespace}.`;
+      }),
     );
 
     server.registerTool(
@@ -231,9 +264,10 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
         description: 'Add members to a group.',
         inputSchema: { group: z.string(), members: z.array(z.object({ identity: z.string(), role: z.string() })) },
       },
-      wrap(async ({ group, members }: { group: string; members: Array<{ identity: string; role: string }> }) =>
-        admin.addGroupMembers(group, { members }),
-      ),
+      wrap(async ({ group, members }: { group: string; members: Array<{ identity: string; role: string }> }) => {
+        await admin.addGroupMembers(group, { members });
+        return `Added ${members.map((m) => `${m.identity} (${m.role})`).join(', ')} to group ${group}.`;
+      }),
     );
   }
 }

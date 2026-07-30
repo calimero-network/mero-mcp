@@ -2,16 +2,25 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync, readFileSync, unlinkSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { MeroJs, type TokenStore, type TokenData } from '@calimero-network/mero-js';
-import type { Config, Handoff } from './config.ts';
-import { resolveNode, readHandoff } from './config.ts';
+import type { Config, DiscoveredNode, Handoff } from './config.ts';
+import { resolveNode, readHandoff, listConfiguredNodes } from './config.ts';
 
 export type AuthMode = 'handoff' | 'token' | 'credentials' | 'none';
 
 export interface NodeSession {
   url: string;
-  nodeName: string;
+  /** Absent when nothing actually named this node; how it was found is a separate fact, never the name. */
+  nodeName?: string;
   authMode: AuthMode;
   mero: MeroJs;
+}
+
+/**
+ * resolveNode labels a node by how it was found ('handoff', 'discovered'), which is a source and
+ * not a name. Only its directory under nodeHome - the name list_nodes reports - or CALIMERO_NODE_NAME names one.
+ */
+export function nodeNameFor(cfg: Config, node: DiscoveredNode): string | undefined {
+  return listConfiguredNodes(cfg).find((n) => n.url === node.url)?.name ?? cfg.nodeName;
 }
 
 /** Per-node token cache so multiple configured nodes don't clobber each other's file. */
@@ -111,5 +120,5 @@ export async function createSession(cfg: Config): Promise<NodeSession> {
   }
   if (authMode === 'credentials' && !mero.isAuthenticated()) await mero.authenticate();
 
-  return { url: node.url, nodeName: node.name, authMode, mero };
+  return { url: node.url, nodeName: nodeNameFor(cfg, node), authMode, mero };
 }

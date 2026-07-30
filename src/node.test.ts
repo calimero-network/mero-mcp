@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, statSync, existsSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, statSync, existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { FileTokenStore, createSession, isNewerCredential, pickAuthMode } from './node.ts';
-import { loadConfig, readHandoff } from './config.ts';
+import { loadConfig, readHandoff, resolveNode } from './config.ts';
 
 /** A token shaped like the node's: only the payload is ever read. */
 const jwt = (claims: Record<string, unknown>) => `h.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.s`;
@@ -158,6 +158,49 @@ test('createSession adopts a handoff minted after the cached token', async () =>
     writeFileSync(join(dir, 'agent.json'), JSON.stringify({ accessToken: at(2000), refreshToken: 'fresh' }));
     await createSession(sessionCfg(dir));
     assert.deepEqual(store.getTokens()?.refresh_token, 'fresh');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/** A node home holding one node directory, named `name`, whose config.toml listens on `port`. */
+function nodeHome(dir: string, name: string, port: number): string {
+  const home = join(dir, 'calimero');
+  mkdirSync(join(home, name), { recursive: true });
+  writeFileSync(join(home, name, 'config.toml'), `[server]\nlisten = ["/ip4/127.0.0.1/tcp/${port}"]\n`);
+  return home;
+}
+
+test('a node found through the handoff reports its own name, not the label for how it was found', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mcp-name-'));
+  try {
+    const home = nodeHome(dir, 'default', 2528);
+    writeFileSync(join(dir, 'agent.json'), JSON.stringify({ nodeUrl: 'http://localhost:2528', accessToken: at(1000) }));
+    const cfg = loadConfig({ HOME: '/x', CALIMERO_MCP_STATE_DIR: dir, CALIMERO_NODE_HOME: home } as NodeJS.ProcessEnv);
+
+    // The discovery source is still 'handoff' - that fact is reported separately, and only the name changes.
+    assert.equal((await resolveNode(cfg)).source, 'handoff');
+    const session = await createSession(cfg);
+    assert.equal(session.authMode, 'handoff');
+    assert.equal(session.nodeName, 'default', 'node_status would report the source label while list_nodes reports "default"');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a node nothing ever named has no name rather than a made-up one', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mcp-name-'));
+  try {
+    const cfg = loadConfig({
+      HOME: '/x',
+      CALIMERO_MCP_STATE_DIR: dir,
+      CALIMERO_NODE_HOME: nodeHome(dir, 'default', 2528),
+      CALIMERO_NODE_URL: 'http://localhost:9999',
+    } as NodeJS.ProcessEnv);
+    assert.equal((await createSession(cfg)).nodeName, undefined);
+
+    const named = loadConfig({ HOME: '/x', CALIMERO_MCP_STATE_DIR: dir, CALIMERO_NODE_URL: 'http://localhost:9999', CALIMERO_NODE_NAME: 'remote' } as NodeJS.ProcessEnv);
+    assert.equal((await createSession(named)).nodeName, 'remote');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
