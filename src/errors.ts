@@ -44,14 +44,60 @@ interface RpcErrorLike {
 }
 
 // RpcError resolves to `any` under NodeNext, so instanceof is the real check; read fields through this structural type instead of casting.
-const isRpcErrorLike = (err: unknown): err is RpcErrorLike => err instanceof RpcError;
+const isRpcErrorLike = (err: unknown): err is Error & RpcErrorLike => err instanceof RpcError;
 
-/** mero-js does not decode guest errors: a FunctionCallError carries the real message as bytes in `data`. */
-export function toMessage(err: unknown): string {
-  if (isRpcErrorLike(err) && err.type === 'FunctionCallError') {
-    const decoded = decodeFunctionCallErrorData(err.data);
-    if (decoded) return decoded;
+// mero-js ships HTTPError behind an extensionless barrel NodeNext will not resolve,
+// so these are the fields we read and the check is structural.
+interface HttpErrorLike {
+  status: number;
+  url?: string;
+  bodyText?: string;
+}
+
+export const isHttpError = (err: unknown): err is Error & HttpErrorLike =>
+  err instanceof Error && typeof (err as Partial<HttpErrorLike>).status === 'number';
+
+/** Core answers every handled failure with `{"error": "..."}`; a route it never registered has no body. */
+export function nodeMessage(bodyText?: string): string | undefined {
+  if (!bodyText) return undefined;
+  try {
+    const parsed = JSON.parse(bodyText) as { error?: unknown } | null;
+    return typeof parsed?.error === 'string' && parsed.error ? parsed.error : undefined;
+  } catch {
+    return undefined;
   }
+}
+
+/** A query string can carry a credential, and the path is what names the call. */
+const endpoint = (url?: string) => url?.split('?')[0];
+
+/** Enough of an unstructured body to diagnose from, short of pasting a whole HTML error page. */
+const BODY_LIMIT = 300;
+
+/**
+ * HTTPError.message is only `HTTP <status> <statusText>`, so the node's own explanation has to
+ * come out of the body; with no body, name the endpoint so the status at least says what failed.
+ */
+function httpMessage(err: Error & HttpErrorLike): string {
+  const message = nodeMessage(err.bodyText);
+  if (message) return message;
+  const where = endpoint(err.url);
+  const body = err.bodyText?.trim();
+  // status 0 is this process failing to reach the node, which is nothing the node rejected.
+  if (err.status === 0) return `Cannot reach the node${where ? ` at ${where}` : ''}: ${body || 'network error'}`;
+  return `${err.message}${where ? ` from ${where}` : ''} - ${body ? `the node said: ${body.slice(0, BODY_LIMIT)}` : 'the node returned no message'}`;
+}
+
+/** mero-js surfaces neither guest errors nor node error bodies: both arrive as a type name or a bare status line. */
+export function toMessage(err: unknown): string {
+  if (isRpcErrorLike(err)) {
+    const decoded = decodeFunctionCallErrorData(err.data);
+    if (decoded && err.type === 'FunctionCallError') return decoded;
+    // Core tags every other server error the same way, and mero-js falls back to the tag when
+    // there is no `message`, so a ParseError reads as that bare word with the reason in `data`.
+    if (decoded && err.message === err.type) return `${err.type}: ${decoded}`;
+  }
+  if (isHttpError(err)) return httpMessage(err);
   return err instanceof Error ? err.message : String(err);
 }
 

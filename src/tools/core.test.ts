@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import * as meroJs from '@calimero-network/mero-js';
 import { loadConfig } from '../config.ts';
 import type { NodeSession } from '../node.ts';
 import { registerCoreTools } from './core.ts';
@@ -73,6 +74,15 @@ const jsonOf = (result: { content: Array<{ type: 'text'; text: string }> }) => J
 const listApplications = async () => ({
   apps: [{ id: 'AppId111', package: 'network.calimero.kv-store', blob: { bytecode: 'Blob111' } }],
 });
+
+// HTTPError is absent from mero-js's resolvable types but real at runtime, and it is what
+// every rejected admin call throws, so use the genuine class rather than a stand-in.
+type HttpErrorCtor = new (status: number, statusText: string, url: string, headers: Headers, bodyText?: string) => Error;
+const { HTTPError } = meroJs as unknown as { HTTPError: HttpErrorCtor };
+
+/** `{"error": ...}` is what core's ApiError serializes to for every handled failure. */
+const httpError = (status: number, message: string) =>
+  new HTTPError(status, 'Bad Request', 'http://localhost:2528/admin-api/dev/contexts', new Headers(), JSON.stringify({ error: message }));
 
 test('default toolsets register core, blobs, and governance tools', () => {
   const { server, tools } = fakeServer();
@@ -285,4 +295,52 @@ test('a throwing admin call yields isError: true carrying the message', async ()
   const result = await tools.get('list_applications')!({});
   assert.equal(result.isError, true);
   assert.match(result.content[0].text, /boom/);
+});
+
+test("a rejected admin call reaches the tool result as the node's own message, not its status line", async () => {
+  const noNamespace = 'namespace Ns111 is not on this node';
+  const needsService = 'application has multiple services; pass service_name (available: api, worker)';
+  const admin = {
+    listApplications,
+    createNamespace: async () => {
+      throw httpError(400, noNamespace);
+    },
+    createContext: async () => {
+      throw httpError(400, needsService);
+    },
+  };
+  const { server, tools } = fakeServer();
+  registerCoreTools(server, fakeSession(admin), loadConfig(env()));
+
+  const namespaced = await tools.get('create_namespace')!({ application: 'kv-store' });
+  assert.equal(namespaced.isError, true);
+  assert.equal(textOf(namespaced), `Error: ${noNamespace}`);
+
+  const contexted = await tools.get('create_context')!({ application: 'kv-store', namespace: 'Ns111' });
+  assert.equal(contexted.isError, true);
+  assert.equal(textOf(contexted), `Error: ${needsService}`);
+});
+
+test('a bodyless rejection still names the endpoint and the status, and an unreachable node says so', async () => {
+  const admin = {
+    listBlobs: async () => {
+      throw new HTTPError(500, 'Internal Server Error', 'http://localhost:2528/admin-api/dev/blobs', new Headers());
+    },
+    healthCheck: async () => {
+      throw new HTTPError(0, 'Network Error', 'http://localhost:2528/admin-api/health', new Headers(), 'fetch failed');
+    },
+  };
+  const { server, tools } = fakeServer();
+  registerCoreTools(server, fakeSession(admin), loadConfig(env({ CALIMERO_NODE_URL: 'http://localhost:2528' })));
+
+  const bodyless = await tools.get('list_blobs')!({});
+  assert.equal(bodyless.isError, true);
+  assert.equal(
+    textOf(bodyless),
+    'Error: HTTP 500 Internal Server Error from http://localhost:2528/admin-api/dev/blobs - the node returned no message',
+  );
+
+  const unreachable = await tools.get('node_status')!({});
+  assert.equal(unreachable.isError, true);
+  assert.equal(textOf(unreachable), 'Error: Cannot reach the node at http://localhost:2528/admin-api/health: fetch failed');
 });

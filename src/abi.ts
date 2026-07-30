@@ -1,4 +1,5 @@
 import { parseAbiManifest, type AbiManifest } from '@calimero-network/abi-codegen';
+import { isHttpError, nodeMessage } from './errors.ts';
 import type { NodeSession } from './node.ts';
 
 const UPGRADE_MEROD =
@@ -16,31 +17,12 @@ export interface ResolvedApp {
 /** Packages are reverse-DNS dotted; the trailing segment is the name people type and tool names are built from. */
 export const lastSegment = (name: string) => name.split('.').pop() || name;
 
-// mero-js ships its admin and http-client types behind extensionless directory
-// barrels, which NodeNext will not resolve, so `mero.admin` reaches us as `any`.
-// These describe the fields we actually read until the SDK's .d.ts files resolve.
+// mero-js ships its admin types behind extensionless directory barrels, which NodeNext
+// will not resolve, so `mero.admin` reaches us as `any`; these are the fields we read.
 interface InstalledApp {
   id: string;
   package?: string;
   blob: { bytecode: string };
-}
-interface HttpErrorLike {
-  status: number;
-  bodyText?: string;
-}
-
-const isHttpError = (err: unknown): err is Error & HttpErrorLike =>
-  err instanceof Error && typeof (err as Partial<HttpErrorLike>).status === 'number';
-
-/** Core answers every handled failure with `{"error": "..."}`; a route it never registered has no body. */
-function nodeMessage(bodyText?: string): string | undefined {
-  if (!bodyText) return undefined;
-  try {
-    const parsed = JSON.parse(bodyText) as { error?: unknown } | null;
-    return typeof parsed?.error === 'string' && parsed.error ? parsed.error : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 /**
