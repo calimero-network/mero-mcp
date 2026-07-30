@@ -48,15 +48,18 @@ jobs:
 
       - name: Run semantic-release
         id: semantic
+        # tee, not command substitution: the step runs under `bash -e`, so
+        # `OUTPUT=$(...)` killed it on failure before the log could be printed.
         run: |
-          OUTPUT=$(npx semantic-release 2>&1)
-          echo "$OUTPUT"
-          if echo "$OUTPUT" | grep -q "Published release"; then
+          npx semantic-release 2>&1 | tee semantic-release.log
+          code=${PIPESTATUS[0]}
+          if grep -q "Published release" semantic-release.log; then
             echo "new_release=true" >> $GITHUB_OUTPUT
           else
             echo "new_release=false" >> $GITHUB_OUTPUT
             echo "No new release"
           fi
+          exit "$code"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NODE_ENV: production
