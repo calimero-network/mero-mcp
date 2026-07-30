@@ -37,15 +37,15 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@semantic-release/changelog": "^6.0.3",
-    "@semantic-release/commit-analyzer": "^13.0.0",
-    "@semantic-release/git": "^10.0.1",
-    "@semantic-release/github": "^9.2.6",
-    "@semantic-release/npm": "^12.0.1",
-    "@semantic-release/release-notes-generator": "^12.1.0",
+    "@semantic-release/changelog": "^7.0.0",
+    "@semantic-release/commit-analyzer": "^13.0.1",
+    "@semantic-release/git": "^11.0.1",
+    "@semantic-release/github": "^12.0.9",
+    "@semantic-release/npm": "^13.1.5",
+    "@semantic-release/release-notes-generator": "^14.1.1",
     "@types/node": "^25.6.0",
-    "conventional-changelog-conventionalcommits": "^7.0.0",
-    "semantic-release": "^24.2.9",
+    "conventional-changelog-conventionalcommits": "^10.2.1",
+    "semantic-release": "^25.0.8",
     "tsx": "^4.19.2",
     "typescript": "^5.7.0"
   }

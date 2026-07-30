@@ -25,7 +25,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # semantic-release 25 requires >=22.14; npm OIDC publishing needs npm >=11.5.1.
+          node-version: '24'
           cache: 'npm'
           registry-url: 'https://registry.npmjs.org'
           scope: '@calimero-network'
