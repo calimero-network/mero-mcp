@@ -1,0 +1,130 @@
+---
+title: Configuration
+description: Every environment variable the server reads, with defaults and the behaviour each one changes.
+sidebar:
+  order: 2
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+All variables are optional — the server discovers a node and an identity on its own.
+Set them when discovery is not enough: a remote node, several local nodes, or a node
+with auth enabled and no desktop handoff.
+
+Every value is trimmed, and an empty string counts as unset.
+
+## Node selection
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `CALIMERO_NODE_URL` | Connect to this node directly, skipping discovery entirely | — |
+| `CALIMERO_NODE_NAME` | Select a node by name out of `CALIMERO_NODE_HOME` | — |
+| `CALIMERO_NODE_HOME` | Directory of node configs to scan | `~/.calimero` |
+
+`CALIMERO_NODE_URL` has trailing slashes trimmed and is the only setting that reaches
+a remote host. `CALIMERO_NODE_NAME` naming a node that does not exist is a hard error,
+not a fallback. For the full resolution order, see
+[node discovery](/understand/node-discovery/).
+
+## Authentication
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `CALIMERO_AUTH_TOKEN` | Bearer access token | — |
+| `CALIMERO_REFRESH_TOKEN` | Refresh token paired with `CALIMERO_AUTH_TOKEN` | — |
+| `CALIMERO_USERNAME` | Username for credential auth | — |
+| `CALIMERO_PASSWORD` | Password for credential auth | — |
+| `CALIMERO_PASSWORD_FILE` | File to read the password from; used when `CALIMERO_PASSWORD` is unset | — |
+
+Credential auth needs **both** a username and a password to engage; a username alone
+falls through to `none`. See [authentication](/understand/authentication/) for the mode
+precedence and how injected tokens are reconciled with cached ones.
+
+<Aside type="tip">
+Prefer `CALIMERO_PASSWORD_FILE` over `CALIMERO_PASSWORD` — MCP client configs
+(`.mcp.json`, `.cursor/mcp.json`) are frequently committed to repositories.
+</Aside>
+
+## State directory
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `CALIMERO_MCP_STATE_DIR` | Where the token cache and the desktop handoff file live | `~/.config/calimero/mcp` |
+
+Two things live here:
+
+- **`agent.json`** — the desktop app's handoff file (node URL + tokens).
+- **`tokens-<hash>.json`** — the token cache, keyed by node URL + username, written
+  `0600` in a directory created `0700`. Delete these to force re-authentication.
+
+## Toolsets
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `CALIMERO_MCP_TOOLSETS` | Comma-separated toolsets to enable | all three |
+
+Valid names: **`core`**, **`blobs`**, **`governance`**. The literal value `all` means
+the same as leaving it unset.
+
+`core` is **always** enabled, whether you list it or not. So:
+
+```bash
+# node, context and alias tools only — no blob or governance tools
+CALIMERO_MCP_TOOLSETS=core
+
+# core + blobs, no governance
+CALIMERO_MCP_TOOLSETS=core,blobs
+
+# same thing; core is implicit
+CALIMERO_MCP_TOOLSETS=blobs
+```
+
+Application tools (`describe_app`, `select_app`, `deselect_app`, `call`, and every
+generated method tool) are **not** part of any toolset and are always registered.
+
+An unrecognised name matches nothing and is not reported. See the
+[tool reference](/reference/tools/) for what each toolset contains.
+
+<Aside type="caution">
+Trimming toolsets is not a read-only mode. `core` still includes `create_context` and
+`delete_context`, and generated tools always include every mutating method the ABI
+declares. See [blast radius](/understand/authentication/#blast-radius).
+</Aside>
+
+## Setting them
+
+In an MCP client config, under `env`:
+
+```json title=".mcp.json"
+{
+  "mcpServers": {
+    "calimero": {
+      "command": "npx",
+      "args": ["-y", "@calimero-network/mero-mcp"],
+      "env": {
+        "CALIMERO_NODE_URL": "http://localhost:2428",
+        "CALIMERO_MCP_TOOLSETS": "core,blobs"
+      }
+    }
+  }
+}
+```
+
+TOML, for Codex CLI:
+
+```toml title="~/.codex/config.toml"
+[mcp_servers.calimero]
+command = "npx"
+args = ["-y", "@calimero-network/mero-mcp"]
+
+[mcp_servers.calimero.env]
+CALIMERO_NODE_URL = "http://localhost:2428"
+```
+
+## Ports the server knows about
+
+Not configurable, but worth knowing: the last-resort discovery probe tries
+`http://localhost:` on **2528, 2428, 2529, 2429**, preferring them in that order.
+2528 is the desktop app's port; 2428 is `merod`'s CLI convention. Anything else needs
+`CALIMERO_NODE_URL` — or a node config under `CALIMERO_NODE_HOME`, whose port is read
+from its own `config.toml` rather than guessed.

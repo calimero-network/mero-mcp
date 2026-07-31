@@ -1,0 +1,146 @@
+---
+title: ABI mapping
+description: How each Calimero ABI type becomes a JSON Schema an MCP client can validate against, including bytes, variants, CRDT wrappers and recursion.
+sidebar:
+  order: 3
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+An application's ABI manifest is turned into a zod schema per method, which the MCP
+SDK advertises as JSON Schema. That schema is what stops an agent guessing at argument
+shapes — a wrong type fails locally, before anything reaches the node.
+
+## Tool naming
+
+Generated tools are named:
+
+```
+<app>_<method>                    single-service application
+<app>_<service>_<method>          multi-service application
+```
+
+`<app>` is the **trailing dot-separated segment** of the package name, lowercased with
+every run of non-`[a-z0-9_]` characters collapsed to `_`. So `com.calimero.kv-store`
+gives `kv_store`, and its `get` method gives `kv_store_get`.
+
+The slug is derived from the *resolved* application, not the string you typed, so one
+application always names its tools the same way. If two packages sanitise to the same
+slug, the second gets a suffix from its application id — never from selection order,
+so names are stable across sessions.
+
+## Scalars
+
+| ABI kind | JSON Schema |
+| --- | --- |
+| `bool` | boolean |
+| `string` | string |
+| `unit` | null |
+| `i32`, `i64` | integer |
+| `u32`, `u64` | integer, `>= 0` |
+| `f32`, `f64` | number |
+
+<Aside type="caution">
+`i64`/`u64` map to a JSON number, so values beyond 2^53 lose precision in transit.
+That is a limitation of JSON numbers, not of the mapping.
+</Aside>
+
+## Composites
+
+| ABI kind | JSON Schema |
+| --- | --- |
+| `list` | array of the item schema |
+| `map` | object with string keys and the value schema |
+| `tuple` | fixed-length array, positionally typed |
+| `record` | object with one property per field |
+
+A field marked `nullable` in the ABI becomes nullable in the schema. For **method
+parameters**, nullable also means **optional** — a nullable parameter can be omitted
+entirely, not just passed as `null`.
+
+## Bytes
+
+`bytes` accepts **either** form:
+
+- a **hex string** — `"deadbeef"` — which is the only string form the Calimero
+  toolchain reads, or
+- an **array of integers** 0–255, which is what the node itself wants.
+
+Hex input is transformed to a byte array before it goes out. Fixed-size `bytes` carry
+their length in both forms: the array is length-constrained, and the hex pattern
+requires exactly `2 × size` hex characters — so the size travels in the advertised
+JSON Schema rather than living only in the validator.
+
+Each bytes field is described as `bytes: a hex string or a 32-byte array`, so an agent
+reading the schema knows both are accepted.
+
+## Variants (enums)
+
+Rust enums arrive as `variant` definitions and map to serde's **externally tagged**
+representation:
+
+- **Unit variants** ride as bare names — `"Pending"`.
+- **Payload variants** ride as a single-key object — `{"Approved": {"by": "…"}}`.
+
+A variant with no payloads anywhere becomes a plain string enum. A mix becomes a union
+of the string enum and one object schema per payload variant.
+
+## CRDT collection wrappers
+
+A `record` carrying both `crdt_type` and `inner_type` is a **transparent wrapper**: the
+wire value is the inner type, not the wrapper's fields. The schema unwraps it, and the
+rendered signature unwraps it the same way — the signature an agent reads has to match
+what the tool actually accepts.
+
+## Type references and recursion
+
+A `$ref` is resolved through the manifest's type table. Two escape hatches:
+
+- A `$ref` naming a built-in absent from the type table degrades to `unknown` rather
+  than failing the whole application.
+- Recursion is capped at **depth 8**; beyond that the schema degrades to `unknown`.
+  Self-referential types would otherwise expand forever.
+
+`unknown` means the argument is accepted unvalidated and passed through — the call can
+still succeed, it just is not checked locally.
+
+## The `_context` option
+
+Every generated tool gets one injected argument:
+
+```
+_context?: string   Context id or alias to execute against; defaults to the selected context.
+```
+
+The leading underscore is the whole trick: no ABI generator emits a parameter starting
+with `_`, so an application's own `context` parameter keeps its name.
+
+Two guarantees follow:
+
+1. **Declared parameters win.** If a method really does declare `_context`, the
+   declared parameter owns the key and targeting is unavailable for that method —
+   dropping its argument would break the call.
+2. **It never reaches the application.** Outgoing arguments are built by filtering the
+   input down to the method's *declared* parameters, so an injected option cannot leak
+   into the app by construction.
+
+## Method signatures
+
+`describe_app` and `select_app` render each method as a signature, and it is also the
+tool's description:
+
+```
+[view] get(key: string) -> string | null
+[mut]  set(key: string, value: string) -> unit
+[view] entries() -> map<string, string>
+```
+
+- `[view]` — the ABI marks it `read_only`; the tool carries `readOnlyHint`.
+- `[mut]` — everything else.
+- `?` after a parameter name means nullable/optional.
+- `| null` after the return type means the return is nullable.
+- A missing return type renders as `unit`.
+
+Type names in signatures follow the same rules as the schemas: `T[]` for lists,
+`map<K, V>` for maps, `(A, B)` for tuples, `$ref` names for referenced types, and CRDT
+wrappers unwrapped to their inner type.

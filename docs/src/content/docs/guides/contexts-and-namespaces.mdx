@@ -1,0 +1,135 @@
+---
+title: Contexts and namespaces
+description: Creating the namespace and context an application needs, aliasing contexts, inviting members, and the deletion order that leaves contexts stranded.
+sidebar:
+  order: 2
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+Almost every "the app tools don't work" report comes down to a missing context.
+This is the shape of it.
+
+## The hierarchy
+
+- An **application** is installed WASM plus its ABI. Installing it creates no state.
+- A **namespace** is the governance unit: it owns members and an upgrade policy, and
+  is created *for* an application.
+- A **context** is where state actually lives and where calls execute. It belongs to
+  a namespace and runs one application (one *service* of it, for a multi-service app).
+
+So a method call needs a context, a context needs a namespace, and a namespace needs
+an installed application.
+
+<Aside type="caution">
+Installing an application from the registry does **not** create a context. This is
+the step people miss, and it is why `select_app` can succeed — it only needs the
+ABI — while every call against it fails.
+</Aside>
+
+## From nothing to a callable app
+
+<Steps>
+
+1. **Install the application** (or confirm it is installed):
+
+   ```text
+   Call list_applications.
+   ```
+
+   To add one, `install_application` takes a `url` and an optional `hash`.
+
+2. **Create a namespace for it:**
+
+   ```text
+   Call create_namespace with application "kv-store".
+   ```
+
+   `upgradePolicy` is `Automatic` unless you pass `LazyOnAccess`. The result carries
+   the namespace id.
+
+3. **Create a context in that namespace:**
+
+   ```text
+   Call create_context with application "kv-store" and namespace "<namespace-id>".
+   ```
+
+   For a multi-service application, pass `service` too — `describe_app` reports the
+   service names existing contexts use, and that is the value this wants.
+
+4. **Select the app and call it:**
+
+   ```text
+   Select kv-store, then call its get method for key "greeting".
+   ```
+
+   With exactly one context, `select_app` pins it automatically.
+
+</Steps>
+
+## Aliases
+
+Context ids are base58 and unmemorable. An alias fixes that for the whole node, not
+just this session:
+
+```text
+Create an alias "staging" for context 8Hk2….
+```
+
+`create_alias` takes `alias` and `contextId`; `lookup_alias` resolves one back. A
+lookup that misses is reported as a result, not an error — "No alias named …" is a
+true answer to a fair question.
+
+Anywhere a tool takes a context — `_context` on a generated tool, `context` on
+`call`, `select_app`'s pin — an alias works in place of the id. Resolved aliases are
+cached for the session.
+
+## Members
+
+Namespace membership is governance, and lives in the `governance` toolset:
+
+- `invite_to_namespace` mints an invitation for a namespace.
+- `join_namespace` accepts one.
+- `leave_namespace` leaves.
+- `list_group_members` / `add_group_members` inspect and extend a group's roster.
+  Members are added as `{ identity, role }` pairs.
+
+<Aside type="caution" title="Pass the invitation through unchanged">
+An invitation is **signed over its own bytes.** Reshaping it — renaming keys,
+dropping fields, re-serialising through a schema — invalidates the signature and the
+join fails. Hand the object `invite_to_namespace` returned to `join_namespace`
+exactly as it came back. The server declares it as an opaque object for this reason:
+declaring its fields would let validation strip the ones it did not know about.
+</Aside>
+
+## Deleting things, in the right order
+
+**Delete contexts before their namespace.** Contexts outlive the namespace they
+belonged to, and a context whose namespace is gone is uncallable but still present —
+holding its data and showing up in `list_contexts`:
+
+```text
+1. delete_context for each context in the namespace
+2. delete_namespace
+```
+
+If you already deleted the namespace first, `delete_context` is still the fix — it
+is what clears a context stranded that way.
+
+`delete_context` takes an optional `requester`, the member identity to delete as,
+needed only when the node holds several.
+
+`delete_context`, `delete_namespace`, `uninstall_application`, `delete_blob` and
+`leave_namespace` are all marked destructive, so a client that surfaces that hint
+can prompt before running them.
+
+## Blobs
+
+The `blobs` toolset covers node storage: `upload_blob` (base64 bytes, optional
+`hash`, optional `context` to scope it), `list_blobs`, `delete_blob`, plus
+`install_application` / `uninstall_application`. Application bytecode is a blob,
+which is why they share a toolset.
+
+Both `blobs` and `governance` are on by default and can be trimmed with
+[`CALIMERO_MCP_TOOLSETS`](/reference/configuration/#toolsets) when you want a
+smaller, read-mostly tool list.

@@ -1,0 +1,160 @@
+---
+title: Development
+description: Building the server from source, the unit test suite, the two real-node e2e harnesses, and how to work on these docs.
+sidebar:
+  order: 1
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+## Setup
+
+```bash
+git clone https://github.com/calimero-network/mero-mcp
+cd mero-mcp
+npm install
+```
+
+| Command | What it does |
+| --- | --- |
+| `npm start` | Run the server from source with `tsx` |
+| `npm run typecheck` | `tsc --noEmit` |
+| `npm test` | Unit tests via the Node test runner |
+| `npm run build` | Compile to `dist/` |
+| `npm run test:bin` | Build, pack, install, and start by bin name |
+| `npm run e2e` | Protocol e2e against a real node |
+| `npm run e2e:cycle` | Full credential-handoff cycle against a real node |
+
+To drive your build from an MCP client, point it at `node /abs/path/to/dist/index.js`
+with no arguments — see [setup](/get-started/setup/#running-from-a-clone).
+
+## Unit tests
+
+```bash
+npm test
+```
+
+Plain `node:test` with `node:assert/strict`, run through `tsx`. Every module has a
+sibling `*.test.ts`. Two are worth knowing about:
+
+- **`schema.conformance.test.ts`** checks the ABI→schema mapping against committed
+  fixtures, so a change to the mapping has to face real manifests.
+- **`fixtures.test.ts`** validates the bundles under `test/fixtures` — it will tell you
+  to re-bundle with `cargo mero bundle --dev` if a bundle is missing its hashes.
+
+## The bin smoke test
+
+```bash
+npm run test:bin
+```
+
+This packs the tarball, installs it, and starts the server **by bin name**, which is
+the only way to exercise the symlink npm creates. It exists because the entrypoint is
+resolved by node itself: node reports the symlink path in `argv[1]` while
+`import.meta.url` resolves to the realpath, so any main-module comparison in
+`index.ts` would silently skip `main()` and exit 0. CI runs it on Node 20, 22 and 24
+because that resolution can break on a runtime the other jobs never use.
+
+## End-to-end harnesses
+
+Two harnesses drive the **built** server over real MCP stdio against a real node.
+
+```bash
+npm run e2e          # 16 assertions: the protocol, the ABI-derived tools, and a round trip verified out of band
+npm run e2e:cycle    # 8 assertions: admin login → client key → agent.json handoff, with zero credentials in the environment
+```
+
+Both boot their own `merod` on port **2571** in a temp home and tear it down in a
+`finally`, so neither touches `~/.calimero` or your real state directory.
+
+`e2e-cycle` is the whole product cycle headless: the desktop app's contribution is one
+HTTP call plus one file write, so there is nothing a GUI would add — log in as admin,
+mint the agent its own client key, hand it over in `agent.json`, and let the server find
+the node and authenticate with nothing else to go on.
+
+### The merod requirement
+
+`MEROD_BINARY` selects the binary to boot, defaulting to core's
+`target/debug/merod`. Until a core release carries
+`GET /admin-api/applications/:id/abi`, that binary has to come from core `master` —
+every generated tool comes from that endpoint:
+
+```bash
+cd <core> && cargo build -p merod
+MEROD_BINARY=<core>/target/debug/merod npm run e2e
+```
+
+### Attaching to a running node
+
+To reproduce a problem against a node you already have:
+
+```bash
+npm run e2e -- --node http://localhost:2528 --app my-app
+```
+
+In that mode it provisions nothing and tears nothing down — it attaches to what is
+there and prints `SKIP` for each assertion that needs a node it controls.
+
+<Aside type="note">
+CI refuses a vacuous green: it greps the harness output for
+`N passed, 0 failed, 0 skipped`, so an all-skipped run fails the job instead of
+reading as success.
+</Aside>
+
+## CI
+
+`.github/workflows/ci.yml` runs three jobs on every PR to `main`:
+
+- **Validate** — typecheck, unit tests, build.
+- **Bin smoke** — matrixed over Node 20, 22, 24.
+- **E2E** — builds `merod` from core `master`, then runs both harnesses. Logs are
+  uploaded as artifacts, and any surviving node is killed in an `always()` step.
+
+## Releases
+
+Releases are automated with `semantic-release` from
+[conventional commits](https://www.conventionalcommits.org/), publishing to npm as
+`@calimero-network/mero-mcp`. Commit messages decide the version bump, so write them
+accordingly — `fix:` for a patch, `feat:` for a minor, a `BREAKING CHANGE:` footer for
+a major.
+
+## Working on these docs
+
+The site is Astro Starlight in `docs/`, matching
+[core](https://calimero-network.github.io/core/) and the SDK sites.
+
+<Steps>
+
+1. **Run it locally:**
+
+   ```bash
+   cd docs
+   npm install
+   npm run dev
+   ```
+
+2. **Check it before pushing** — this is exactly what CI runs:
+
+   ```bash
+   npm run check   # astro build + internal link check
+   ```
+
+</Steps>
+
+Content lives in `docs/src/content/docs/`, grouped **Get Started → Guides → Understand
+→ Reference → Contribute**, with the sidebar declared explicitly in
+`docs/astro.config.mjs` (a new page needs adding there).
+
+Two things to know about links:
+
+- Write in-content links **without** the `/mero-mcp` base — `/reference/tools/`.
+  `src/middleware.ts` adds the base at render time, in dev and in the build, because
+  Astro only base-prefixes its own nav.
+- `scripts/check-links.mjs` fails the build on a link that is missing the base or does
+  not resolve to a built page. It runs on every PR touching `docs/**` via
+  `.github/workflows/docs-ci.yml`.
+
+Pushing to `main` deploys via `.github/workflows/docs-site.yml`. The theme
+(`src/styles/theme.css`) is the shared Calimero design system — DM Sans, JetBrains
+Mono, the `#a5ff11` lime on a Zinc ramp — and is kept identical across the sibling
+sites, so change it there rather than diverging here.
