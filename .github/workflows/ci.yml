@@ -33,6 +33,36 @@ jobs:
       - name: Build
         run: npm run build
 
+  # Installs the packed tarball and starts it by bin name, which is the only way
+  # to exercise the symlink npm creates. Matrixed because the entrypoint is
+  # resolved by node itself, so it can break on a runtime the other jobs never use.
+  bin:
+    name: Bin smoke (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20', '22', '24']
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Start the installed package by bin name
+        run: node scripts/bin-smoke.mjs
+
   e2e:
     name: E2E (vs merod built from core master)
     runs-on: ubuntu-latest

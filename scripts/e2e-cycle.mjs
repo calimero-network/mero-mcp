@@ -20,7 +20,7 @@ import {
   bootNode,
   createChecks,
   fatal,
-  requireBuild,
+  installServerBin,
   resolveMerod,
   sleep,
 } from './e2e-lib.mjs';
@@ -50,7 +50,7 @@ function serverEnv(stateDir) {
 }
 
 async function main() {
-  const entry = requireBuild();
+  const launcher = installServerBin();
   const checks = createChecks(PLANNED);
   const merod = resolveMerod();
   const logPath = join(process.cwd(), 'merod-cycle.log');
@@ -90,7 +90,7 @@ async function main() {
 
     const drive = async (label) => {
       const env = serverEnv(stateDir);
-      const mcp = new McpClient(entry, env);
+      const mcp = new McpClient(launcher, env);
       try {
         await mcp.initialize();
         const status = await mcp.call('node_status');
@@ -173,6 +173,7 @@ async function main() {
     });
   } finally {
     node.stop();
+    launcher.cleanup();
   }
 
   checks.finish();

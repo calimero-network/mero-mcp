@@ -26,6 +26,7 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx --test $(find src -name '*.test.ts')",
     "build": "tsc -p tsconfig.build.json",
+    "test:bin": "npm run build && node scripts/bin-smoke.mjs",
     "e2e": "npm run build && node scripts/e2e.mjs",
     "e2e:cycle": "npm run build && node scripts/e2e-cycle.mjs",
     "prepublishOnly": "npm run build"

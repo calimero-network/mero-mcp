@@ -4,8 +4,8 @@
 // Provisioning goes over HTTP rather than meroctl on purpose: meroctl's only auth path
 // against an embedded-auth node is a browser round trip (crates/meroctl/src/auth.rs), so
 // it cannot run unattended. One HTTP path runs identically locally and in CI.
-import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, openSync, rmSync } from 'node:fs';
+import { spawn, execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, openSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -42,10 +42,35 @@ export function resolveMerod() {
   return path;
 }
 
-export function requireBuild() {
+/**
+ * Packs and installs the tarball, then hands back the bin name and the directory to put on
+ * PATH. Launching by name is the whole point: spawning dist/index.js by path resolves the
+ * symlink npm installs, which is how a server that could never start shipped green.
+ */
+export function installServerBin() {
   const entry = join(ROOT, 'dist', 'index.js');
   if (!existsSync(entry)) throw new E2eError(`${entry} does not exist. Run \`npm run build\` first.`);
-  return entry;
+
+  const work = mkdtempSync(join(tmpdir(), 'mero-mcp-pack-'));
+  try {
+    execFileSync('npm', ['pack', '--pack-destination', work], { cwd: ROOT, stdio: 'pipe' });
+    const tarball = readdirSync(work).find((f) => f.endsWith('.tgz'));
+    if (!tarball) throw new E2eError('npm pack produced no tarball');
+    execFileSync('npm', ['init', '-y'], { cwd: work, stdio: 'ignore' });
+    execFileSync('npm', ['install', '--no-audit', '--no-fund', join(work, tarball)], {
+      cwd: work,
+      stdio: 'pipe',
+    });
+  } catch (err) {
+    rmSync(work, { recursive: true, force: true });
+    throw err instanceof E2eError ? err : new E2eError(`could not install the packed server: ${err.message}`);
+  }
+
+  return {
+    command: 'mero-mcp',
+    binDir: join(work, 'node_modules', '.bin'),
+    cleanup: () => rmSync(work, { recursive: true, force: true }),
+  };
 }
 
 async function portIsFree(port) {
@@ -236,8 +261,9 @@ function run(cmd, args, env) {
  * corrupting the stream for every real client.
  */
 export class McpClient {
-  constructor(entry, env) {
-    this.child = spawn(process.execPath, [entry], { stdio: ['pipe', 'pipe', 'pipe'], env });
+  constructor(launcher, env) {
+    const PATH = `${launcher.binDir}:${env.PATH ?? process.env.PATH ?? ''}`;
+    this.child = spawn(launcher.command, [], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...env, PATH } });
     this.pending = new Map();
     this.frameViolations = [];
     this.nextId = 1;
