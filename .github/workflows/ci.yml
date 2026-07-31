@@ -33,6 +33,12 @@ jobs:
       - name: Build
         run: npm run build
 
+      # Packs, installs, and starts the server by bin name on PATH. The unit
+      # tests and e2e both reach dist/index.js by path, which resolves the
+      # symlink npm installs and cannot catch a broken entrypoint.
+      - name: Bin smoke test (installed tarball)
+        run: node scripts/bin-smoke.mjs
+
   e2e:
     name: E2E (vs merod built from core master)
     runs-on: ubuntu-latest

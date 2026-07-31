@@ -1,64 +1,15 @@
 #!/usr/bin/env node
 import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import type { MeroJs } from '@calimero-network/mero-js';
-import { loadConfig, type Config } from './config.ts';
-import { createSession, type NodeSession } from './node.ts';
+import { loadConfig } from './config.ts';
+import { createLazySession } from './session.ts';
 import { registerCoreTools } from './tools/core.ts';
 import { registerAppTools } from './tools/app.ts';
 
 /** The published version, so a client's diagnostics name the build it is talking to. */
 function packageVersion(): string {
   return createRequire(import.meta.url)('../package.json').version as string;
-}
-
-type Methods = Record<string, (...args: unknown[]) => unknown>;
-
-/** Every call on this namespace waits for the real session, then forwards to its same-named namespace. */
-function lazyNamespace(ensure: () => Promise<NodeSession>, namespace: 'admin' | 'rpc') {
-  return new Proxy({} as Methods, {
-    get(_target, prop) {
-      if (typeof prop === 'symbol') return undefined;
-      return (...args: unknown[]) => ensure().then((session) => (session.mero[namespace] as unknown as Methods)[prop](...args));
-    },
-  });
-}
-
-/**
- * A NodeSession stand-in that only calls `create` on first tool use, and only memoizes it on
- * success: a down node or bad credentials fails that one call instead of the server refusing to
- * start, and the next call tries again. `url`/`nodeName`/`authMode` are placeholders until then.
- */
-export function createLazySession(cfg: Config, create: (cfg: Config) => Promise<NodeSession> = createSession): NodeSession {
-  let pending: Promise<NodeSession> | undefined;
-
-  const ensure = (): Promise<NodeSession> => {
-    if (!pending) {
-      pending = create(cfg)
-        .then((real) => {
-          session.url = real.url;
-          session.nodeName = real.nodeName;
-          session.authMode = real.authMode;
-          return real;
-        })
-        .catch((err: unknown) => {
-          pending = undefined;
-          throw err;
-        });
-    }
-    return pending;
-  };
-
-  const session: NodeSession = {
-    url: '',
-    nodeName: '',
-    authMode: 'none',
-    // MeroJs is a class with private fields, so only a stand-in cast satisfies the type; .admin/.rpc are all any caller ever reads.
-    mero: { admin: lazyNamespace(ensure, 'admin'), rpc: lazyNamespace(ensure, 'rpc') } as unknown as MeroJs,
-  };
-  return session;
 }
 
 async function main() {
@@ -73,9 +24,10 @@ async function main() {
   await server.connect(new StdioServerTransport());
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  main().catch((err) => {
-    console.error(err);
-    process.exit(1);
-  });
-}
+// Unconditional: npm links this file into .bin, and node reports the symlink path
+// in argv[1] while import.meta.url resolves to the realpath, so any main-module
+// comparison here skips main() and exits 0 in silence.
+main().catch((err) => {
+  console.error('[mero-mcp] failed to start:', err);
+  process.exit(1);
+});

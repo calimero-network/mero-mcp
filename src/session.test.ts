@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createLazySession } from './index.ts';
+import { createLazySession } from './session.ts';
 import type { Config } from './config.ts';
 import type { NodeSession } from './node.ts';
 
