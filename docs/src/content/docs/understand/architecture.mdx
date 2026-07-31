@@ -1,0 +1,157 @@
+---
+title: Architecture
+description: How the server is put together — stdio transport, the lazy session, the ABI loader and its cache, and how a selection becomes a live set of MCP tools.
+sidebar:
+  order: 1
+---
+
+import { Aside, FileTree } from '@astrojs/starlight/components';
+
+## The shape of it
+
+```
+MCP client (Claude Code, Cursor, …)
+    │  stdio: JSON-RPC over stdin/stdout
+    ▼
+mero-mcp
+    ├── core tools     ─┐
+    ├── app tools      ─┤ registered on an McpServer
+    └── generated tools ┘
+    │  mero-js: HTTP admin API + JSON-RPC
+    ▼
+Calimero node (merod / desktop app)
+```
+
+One server process drives **one node**. There is no HTTP listener, no SSE, and no
+session multiplexing: the client owns the process lifetime, and stdout is the
+protocol channel — which is why every diagnostic goes to **stderr**.
+
+<Aside type="note">
+The server exposes MCP **tools** only. It registers no resources and no prompts.
+</Aside>
+
+## Source layout
+
+<FileTree>
+- src/
+  - index.ts        entrypoint: build the server, register tools, connect stdio
+  - config.ts       env parsing, node discovery, the handoff file
+  - node.ts         session creation, auth mode, the token store
+  - session.ts      the lazy session proxy
+  - abi.ts          application resolution and the ABI loader/cache
+  - schema.ts       ABI types → zod schemas → JSON Schema
+  - errors.ts       node/guest error decoding, MCP result envelopes
+  - tools/
+    - core.ts       node, context, namespace and blob tools
+    - app.ts        describe/select/deselect/call + generated method tools
+</FileTree>
+
+## Startup does not touch the network
+
+`index.ts` loads config, builds a **lazy session**, registers every tool, and
+connects the transport. Nothing has contacted the node yet.
+
+That is deliberate. If the server connected eagerly, a node that happens to be down
+would make the whole server fail to start, and the client would show it as broken
+rather than as a node problem. Instead:
+
+- The first tool call triggers the real connection.
+- On success, the session is memoised for the process lifetime.
+- On failure, **only that call fails** and the memo is cleared, so the next call
+  tries again. Starting the node afterwards needs no restart of the server.
+
+The lazy session is a `Proxy` over the `admin` and `rpc` namespaces: any method call
+on it awaits the real session, then forwards to the same-named method. Until the
+first call resolves, `url`, `nodeName` and `authMode` hold placeholders — which is
+why `node_status` reads them *after* forcing a connection.
+
+## Resolving a node and an identity
+
+`createSession` does three things in order:
+
+1. **`resolveNode`** — walk the discovery rungs until one matches
+   ([node discovery](/understand/node-discovery/)).
+2. **`pickAuthMode`** — handoff, then token, then credentials, then none
+   ([authentication](/understand/authentication/)).
+3. Build a `MeroJs` client with a per-node, per-identity `FileTokenStore`.
+
+How a node was *found* and what it is *called* are kept separate: `resolveNode`
+labels a node by its source (`handoff`, `discovered`), while the name reported to you
+comes only from its directory under `CALIMERO_NODE_HOME` or from
+`CALIMERO_NODE_NAME`. A node nothing names reports `nodeName: null` rather than
+inventing one.
+
+## The ABI loader
+
+`describe_app`, `select_app` and `call` all go through one loader, which does two
+jobs.
+
+**Resolve the application.** An id, a full package name, or an unambiguous trailing
+package segment all resolve to one installed application — or to an error that names
+the candidates (ambiguous) or the installed set (no match). Matching on the short
+form is whole-segment only, so `mero-chat` cannot resolve to `mero-chat-v2`.
+
+**Fetch and cache the manifest.** The cache key is
+`<blobId>:<serviceName>` — the application's **bytecode blob id**, not its
+application id. Blob ids are content-addressed, so an upgraded application resolves
+to a new key and gets a fresh ABI automatically; there is no staleness to invalidate.
+
+The manifest is only cached *after* it parses, so one malformed response cannot wedge
+an application for the rest of the session.
+
+## Selection and tool lifecycle
+
+A selection is a process-wide map from application id to:
+
+- the resolved application (id, package, manifest, service),
+- a **slug** — the tool-name prefix,
+- an optional pinned context,
+- the handles of the tools it registered.
+
+`select_app` holds those handles precisely so the set can be taken away again.
+`deselect_app` calls `.remove()` on each, and re-selecting the same application
+removes the old handles *before* registering new ones — which is why refreshing an
+upgraded app neither duplicates tools nor collides with itself.
+
+Ordering matters in one more place: `select_app` resolves an explicitly passed
+context **before** touching the selection, so a context name that resolves to
+nothing leaves your current tools alone instead of half-replacing them.
+
+Slugs are derived from the resolved application rather than the string you typed, so
+one application always names its tools the same way. On a collision — two packages
+sanitising to one slug — the suffix comes from the application id, never from
+selection order, keeping names stable.
+
+## Executing a call
+
+For a generated tool:
+
+1. Split the input: only **declared ABI parameters** are forwarded as arguments. The
+   injected `_context` option is filtered out by construction, so it can never reach
+   the application.
+2. Resolve the context: explicit `_context` → this application's pin → its only
+   context → an error listing the candidates.
+3. `rpc.execute({ contextId, method, argsJson })`.
+4. Fold the result, or the throw, into an MCP text result.
+
+Read-only ABI methods carry `readOnlyHint`; destructive core tools carry
+`destructiveHint`, so clients that gate on those annotations can.
+
+## Error translation
+
+`mero-js` surfaces neither guest errors nor node error bodies usefully — they arrive
+as a type name or a bare status line. `errors.ts` recovers the real message:
+
+- **Guest errors.** A WASM app error has no top-level message, only
+  `type: "FunctionCallError"` and `data`. Core emits that data in two shapes: a
+  Rust-debug-formatted byte array of the error text's UTF-8, or a plain string (a
+  panic message). Both are decoded, including unwrapping the JSON quoting the guest
+  adds.
+- **HTTP errors.** `HTTPError.message` is only `HTTP <status> <statusText>`, so the
+  explanation has to come from the body — core answers every handled failure with
+  `{"error": "…"}`. With no body, the endpoint path is named so the status at least
+  says what failed. Status `0` is reported as "cannot reach the node", since that is
+  this process failing rather than the node rejecting anything.
+
+Query strings are stripped from any URL that appears in an error, because they can
+carry a credential.

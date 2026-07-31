@@ -1,0 +1,96 @@
+---
+title: Node discovery
+description: The five rungs the server climbs to decide which Calimero node to talk to, and how to pin one deterministically.
+sidebar:
+  order: 2
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The server resolves which node to talk to on the first tool call, stopping at the
+first rung that matches. `node_status` reports which one won, as `discoverySource`.
+
+## The order
+
+| # | Rung | `discoverySource` | Condition |
+| --- | --- | --- | --- |
+| 1 | `CALIMERO_NODE_URL` | `env` | The variable is set |
+| 2 | Desktop handoff file | `handoff` | `agent.json` exists and names a node |
+| 3 | Named node config | `named` | `CALIMERO_NODE_NAME` is set |
+| 4 | Sole/`default` node config | `config-scan` | Exactly one node under the home dir, or one named `default` |
+| 5 | Live port probe | `probe` | Something answers on a conventional port |
+
+### 1. `CALIMERO_NODE_URL`
+
+Set it and everything below is skipped. Trailing slashes are trimmed. This is the
+only rung that reaches a remote or non-conventional host.
+
+### 2. The desktop handoff file
+
+`agent.json` in the [state directory](/reference/configuration/#state-directory),
+written by the Calimero desktop app's **Connect AI agent** action. If it carries a
+`nodeUrl`, that node wins — and the same file supplies the credential, so a handoff
+means you need no configuration at all.
+
+<Aside type="caution" title="Loopback only">
+A handoff file whose `nodeUrl` is **not** loopback is ignored outright, with a log
+line saying so. Only the local desktop app writes that file, so a remote origin means
+something else did — which makes its *token* untrustworthy too, not just its URL. Set
+`CALIMERO_NODE_URL` to reach a remote node.
+
+A file that is missing, unparseable, or has no `accessToken` is not an error either;
+the server logs it and falls through to the next rung.
+</Aside>
+
+### 3. A named node config
+
+With `CALIMERO_NODE_NAME` set, the server looks for that directory under
+`CALIMERO_NODE_HOME` (default `~/.calimero`). No match is a hard error listing the
+available names — it does not fall through, because silently connecting to a
+different node than the one you named would be worse.
+
+### 4. The sole node, or `default`
+
+Scanning `CALIMERO_NODE_HOME`:
+
+- **Exactly one** node config → use it.
+- **Several**, one named `default` → use that one.
+- **Several**, no `default` → hard error listing the candidates with their URLs. The
+  server does not guess between your nodes.
+
+### 5. A live probe
+
+Last resort: `GET /admin-api/health` against `http://localhost:` on ports
+**2528, 2428, 2529, 2429**, in parallel with a 2-second timeout, taking the first
+healthy one in that preference order. 2528 is the desktop app's port; 2428 is
+`merod`'s CLI convention.
+
+## Where the port comes from
+
+For rungs 3 and 4, the port is read out of that node's **own `config.toml`** — its
+`[server]` listen address — not from an assumed default. A node directory whose
+config yields no listen address is skipped entirely, which is why it can be absent
+from `list_nodes` and from the "several nodes" error.
+
+Only rung 5 guesses at ports.
+
+## Inspecting it
+
+`list_nodes` merges the configured nodes with a live probe and marks the active one:
+
+```json
+[
+  { "url": "http://localhost:2428", "name": "alice", "active": true },
+  { "url": "http://localhost:2429", "name": "bob",   "active": false },
+  { "url": "http://localhost:2528", "name": null,    "active": false }
+]
+```
+
+A `null` name is a node found only by probe — running, but not configured under the
+home directory the server is scanning.
+
+## Pinning it deterministically
+
+For anything scripted or shared, set `CALIMERO_NODE_URL`. It is rung 1, it never
+scans or probes, and it cannot be perturbed by another node appearing on the machine
+or a handoff file being rewritten.

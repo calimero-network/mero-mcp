@@ -1,0 +1,267 @@
+---
+title: Tool reference
+description: Every tool the server registers — core, blobs, governance and application — with its arguments and behaviour.
+sidebar:
+  order: 1
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Tools fall into four groups. **Core** and **application** tools are always
+registered; **blobs** and **governance** are toolsets that can be trimmed with
+[`CALIMERO_MCP_TOOLSETS`](/reference/configuration/#toolsets).
+
+<Aside type="note">
+These are the server-side names. An MCP client may expose them under a prefix of its
+own — commonly `mcp__<server>__<tool>`, so `node_status` becomes
+`mcp__calimero__node_status`.
+</Aside>
+
+Read-only tools are annotated `readOnlyHint`; destructive ones `destructiveHint`.
+
+## Core
+
+Always registered, regardless of `CALIMERO_MCP_TOOLSETS`.
+
+### `node_status`
+
+Health and identity of the connected node. No arguments. Read-only.
+
+Returns node `health`, the `url` and `nodeName` in use, the
+[`discoverySource`](/understand/node-discovery/), the
+[`authMode`](/understand/authentication/), and the current `selected` applications.
+`nodeName` is `null` when nothing on this machine names the node.
+
+Because the session connects lazily, this is usually the first call that can fail —
+which makes it the right first call of a session.
+
+### `list_nodes`
+
+Nodes known on this machine, merged with a live local probe. No arguments. Read-only.
+
+Each entry is `{ url, name, active }`. `name` is `null` for a node found only by
+probe. `active: true` marks the one this session is using.
+
+### `list_applications`
+
+Applications installed on this node. No arguments. Read-only.
+
+Application `metadata` rides the wire as raw bytes; it is decoded for display into
+the JSON object it usually encodes, or the plain string, or omitted — never dumped as
+a byte array.
+
+### `list_namespaces`
+
+Namespaces on this node. No arguments. Read-only.
+
+### `list_contexts`
+
+Contexts on this node. Read-only.
+
+| Argument | Type | Notes |
+| --- | --- | --- |
+| `application` | string, optional | Filter to one application |
+
+`dagHeads` are rendered as hex.
+
+### `create_context`
+
+Create a context for an application under a namespace.
+
+| Argument | Type | Notes |
+| --- | --- | --- |
+| `application` | string | Id, package name, or unambiguous trailing segment |
+| `namespace` | string | Namespace id |
+| `name` | string, optional | |
+| `service` | string, optional | Required for a multi-service application |
+
+### `delete_context`
+
+Delete a context and its data. **Destructive.**
+
+| Argument | Type | Notes |
+| --- | --- | --- |
+| `context` | string | Context id or alias |
+| `requester` | string, optional | Member identity to delete as; needed only when the node holds several |
+
+Also the fix for a context stranded by deleting its namespace first — those contexts
+outlive the namespace and stay uncallable until removed.
+
+### `create_alias`
+
+Create a human-friendly alias for a context id.
+
+| Argument | Type |
+| --- | --- |
+| `alias` | string |
+| `contextId` | string |
+
+### `lookup_alias`
+
+Resolve a context alias to its id. Read-only.
+
+| Argument | Type |
+| --- | --- |
+| `name` | string |
+
+A miss returns `No alias named "…" on this node.` as a **result**, not an error.
+
+## Blobs
+
+In `CALIMERO_MCP_TOOLSETS` by default. Application bytecode is a blob, which is why
+install/uninstall live here.
+
+### `install_application`
+
+| Argument | Type | Notes |
+| --- | --- | --- |
+| `url` | string | Where to fetch the application from |
+| `hash` | string, optional | Expected hash |
+
+### `uninstall_application`
+
+**Destructive.** Takes `application` (id, package, or trailing segment).
+
+### `upload_blob`
+
+| Argument | Type | Notes |
+| --- | --- | --- |
+| `data` | string | Base64-encoded blob bytes |
+| `hash` | string, optional | |
+| `context` | string, optional | Scope the blob to a context |
+
+### `list_blobs`
+
+Blobs stored on this node. No arguments. Read-only.
+
+### `delete_blob`
+
+**Destructive.** Takes `blob` (blob id).
+
+## Governance
+
+In `CALIMERO_MCP_TOOLSETS` by default.
+
+### `create_namespace`
+
+| Argument | Type | Notes |
+| --- | --- | --- |
+| `application` | string | Id, package name, or trailing segment |
+| `upgradePolicy` | `Automatic` \| `LazyOnAccess`, optional | Defaults to `Automatic` |
+| `name` | string, optional | |
+
+### `delete_namespace`
+
+**Destructive.** Takes `namespace`.
+
+Its contexts **outlive it** and stay uncallable until `delete_context` removes them —
+delete contexts first. See [contexts and namespaces](/guides/contexts-and-namespaces/#deleting-things-in-the-right-order).
+
+### `invite_to_namespace`
+
+Mint an invitation. Takes `namespace`. Returns the invitation object.
+
+### `join_namespace`
+
+| Argument | Type | Notes |
+| --- | --- | --- |
+| `namespace` | string | |
+| `invitation` | object | The object `invite_to_namespace` returned, **unchanged** |
+| `groupName` | string, optional | |
+
+<Aside type="caution">
+The invitation is signed over its own bytes. Reshaping it — renaming keys, dropping
+fields — invalidates the signature. The server declares it as an opaque object so
+validation cannot strip fields it does not know about; pass it straight through.
+</Aside>
+
+### `leave_namespace`
+
+**Destructive.** Takes `namespace`.
+
+### `list_group_members`
+
+Members of a group. Read-only. Takes `group`. Returns a flat `{ members, selfIdentity? }`.
+
+### `add_group_members`
+
+| Argument | Type |
+| --- | --- |
+| `group` | string |
+| `members` | array of `{ identity, role }` |
+
+## Application
+
+Always registered.
+
+### `describe_app`
+
+Show an application's ABI without selecting it. Read-only.
+
+| Argument | Type | Notes |
+| --- | --- | --- |
+| `app` | string | Id, package name, or trailing segment |
+| `service` | string, optional | For an app bundling several services |
+
+Returns the application id, package, version, resolved `service`, the service names
+its existing contexts use (`contextServices`), and every method as a signature —
+`[view] get(key: string) -> string | null`.
+
+Omitting `service` on a multi-service app returns an error naming the available
+services. When no context exists to read a service name from, the result says so
+explicitly: nothing on the application record or in the ABI lists an app's services.
+
+### `select_app`
+
+Select an application: register one tool per ABI method and pin a default context.
+
+| Argument | Type | Notes |
+| --- | --- | --- |
+| `app` | string | Id, package name, or trailing segment |
+| `service` | string, optional | For an app bundling several services |
+| `context` | string, optional | Context id or alias to pin; defaults to the app's only context |
+
+**Adds** to the selection — applications already selected keep their tools. Selecting
+one again refreshes it from a freshly fetched ABI.
+
+Returns everything `describe_app` does, plus the generated `tools`, the pinned
+`context`, the whole `selected` set, and `toolCount`. Past 80 total application tools
+it adds a `warning`; it never refuses the selection.
+
+### `deselect_app`
+
+Remove one application's tools and its pinned context. Other selections are untouched.
+Takes `app`.
+
+### `call`
+
+Call an application method by name, validated against its ABI. Use it when the
+generated per-method tools are not visible.
+
+| Argument | Type | Notes |
+| --- | --- | --- |
+| `method` | string | ABI method name |
+| `args` | object, optional | Arguments keyed by parameter name |
+| `app` | string, optional | Required when several applications are selected |
+| `context` | string, optional | Context id or alias; defaults to that app's pin |
+| `service` | string, optional | Only used together with `app` |
+
+With nothing selected and no `app`, it errors. With one selected, `app` defaults to
+it. An unknown `method` returns the list of methods that exist.
+
+## Generated method tools
+
+One per ABI method, for as long as the server process lives. Named
+`<app>_<method>`, or `<app>_<service>_<method>` for a multi-service application,
+where `<app>` is the sanitised trailing package segment — `com.calimero.kv-store`
+yields `kv_store_get`.
+
+Arguments are the method's declared parameters, typed from the ABI, plus:
+
+| Argument | Type | Notes |
+| --- | --- | --- |
+| `_context` | string, optional | Context id or alias for this one call, overriding the pin |
+
+`[view]` methods carry `readOnlyHint`. Only declared parameters are forwarded to the
+node, so `_context` can never reach the application. See
+[ABI mapping](/reference/abi-mapping/) for how each ABI type becomes a schema.

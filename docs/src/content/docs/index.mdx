@@ -1,0 +1,82 @@
+---
+title: mero-mcp
+description: A stdio MCP server that lets an AI agent drive any application on a local Calimero node — node administration as MCP tools, plus one generated tool per method in the application's ABI.
+template: splash
+hero:
+  tagline: Point your AI harness at a Calimero node. mero-mcp exposes contexts, namespaces and blobs as MCP tools, then reads any installed application's ABI and generates one schema-validated tool per method — so the agent calls your app directly, with arguments the node will actually accept.
+  actions:
+    - text: Get Started
+      link: /get-started/setup/
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/calimero-network/mero-mcp
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+{/* Audience-routed landing — pick your track. */}
+
+<CardGrid>
+  <Card title="Get Started" icon="rocket">
+    Register the server with Claude Code, Cursor, Codex CLI or Claude Desktop,
+    then verify the connection against a real node.
+    [Set it up →](/get-started/setup/)
+  </Card>
+  <Card title="Guides" icon="open-book">
+    Select an application and call its methods, manage the contexts and
+    namespaces those calls run against, and diagnose the failures that actually
+    come up. [Browse the guides →](/guides/working-with-apps/)
+  </Card>
+  <Card title="Understand" icon="setting">
+    How the server finds a node, how it authenticates, what that credential can
+    do, and how an ABI becomes a tool list.
+    [See the architecture →](/understand/architecture/)
+  </Card>
+  <Card title="Reference" icon="list-format">
+    Every tool with its arguments, every environment variable, and the exact
+    ABI-type→JSON-Schema mapping. [Open the reference →](/reference/tools/)
+  </Card>
+</CardGrid>
+
+## What it is
+
+`@calimero-network/mero-mcp` is a [Model Context Protocol](https://modelcontextprotocol.io)
+server that speaks **stdio** — your MCP client spawns it as a subprocess, and it
+talks to one Calimero node over that node's HTTP admin API and JSON-RPC.
+
+It registers two kinds of tools:
+
+- **Fixed tools** for the node itself — `node_status`, `list_contexts`,
+  `create_context`, `install_application`, `create_namespace` and the rest,
+  grouped into [toolsets](/reference/configuration/#toolsets) you can trim.
+- **Generated tools**, one per method of any application you point it at. Run
+  `select_app` and the server fetches that application's ABI from the node,
+  turns each method into an MCP tool with a real JSON Schema for its arguments,
+  and registers it for the life of the process.
+
+That second part is the reason this exists. An agent holding
+`kv_store_set(key: string, value: string)` with a validated schema does not have
+to guess at a JSON-RPC envelope, a context id, or an argument shape.
+
+## Requirements
+
+- **Node.js 20+** — the server is published as an npm package and run with `npx`.
+- **A running Calimero node** — the [Calimero desktop app](https://github.com/calimero-network/tauri-app)
+  or `merod` directly.
+- **An application installed on that node**, and **a context created for it**.
+  Installing an application does not create a context, and most app tools need
+  one. See [contexts and namespaces](/guides/contexts-and-namespaces/).
+
+The ABI endpoint that generated tools depend on
+(`GET /admin-api/applications/:id/abi`) is newer than the current `merod`
+release, so until a release carries it you need a `merod` built from
+[core](https://github.com/calimero-network/core) `master`.
+
+## Related
+
+- [Calimero Core](https://calimero-network.github.io/core/) — the node, the protocol, and the Rust SDK.
+- [mero-js](https://github.com/calimero-network/mero-js) — the JavaScript client this server drives the node through.
+- [Calimero JS SDK](https://calimero-network.github.io/calimero-sdk-js/) — writing the applications this server calls.

@@ -1,0 +1,208 @@
+---
+title: Setup
+description: Register mero-mcp with your AI harness — either by handing the harness a prompt that wires it up for you, or by editing the MCP config yourself.
+sidebar:
+  order: 1
+---
+
+import { Tabs, TabItem, Aside, Steps } from '@astrojs/starlight/components';
+
+The server is published as `@calimero-network/mero-mcp` and runs over stdio, so
+there is nothing to deploy and no port to pick. Your MCP client spawns it, and it
+connects to a node lazily on the first tool call.
+
+## Prerequisites
+
+<Steps>
+
+1. **Node.js 20 or newer.** `npx` comes with it.
+
+2. **A running Calimero node** — start one in the
+   [Calimero desktop app](https://github.com/calimero-network/tauri-app), or run
+   `merod` directly.
+
+3. **An application installed on that node.** From the
+   [app registry](https://apps.calimero.network/), or with the
+   `install_application` tool once the server is up.
+
+4. **A context for that application.**
+
+   <Aside type="caution" title="This is the step people miss">
+   Installing an application does **not** create a context, and most of the app
+   tools need one to run against. Create one in the desktop app, or call
+   `create_context` — see [contexts and namespaces](/guides/contexts-and-namespaces/).
+   </Aside>
+
+</Steps>
+
+## Let the agent wire it up
+
+Paste this into any AI harness (Claude Code, Cursor, Codex CLI, Claude Desktop,
+Zed, …) and let it register the server for you. It tells the harness how to
+detect whether you even need credentials, which is the part that is easy to get
+wrong by hand:
+
+```text
+Set up the mero-mcp MCP server for me.
+
+It is on npm as @calimero-network/mero-mcp and runs over stdio. Register a
+server named "calimero" that runs `npx -y @calimero-network/mero-mcp`.
+
+In Claude Code that is one command:
+  claude mcp add -s local calimero -- npx -y @calimero-network/mero-mcp
+
+Otherwise find where your own harness keeps its MCP server config - Claude
+Desktop uses claude_desktop_config.json, Cursor/Windsurf use .cursor/mcp.json,
+Codex CLI uses ~/.codex/config.toml (same fields, TOML syntax).
+(If I tell you I'm running this from a local clone instead of the published
+package, use `node /abs/path/to/dist/index.js` as the command instead, with
+no args.)
+
+Before adding any environment variables, check whether
+~/.config/calimero/mcp/agent.json exists on my machine. If it does, register
+the server with no env vars at all - that file is a handoff from the
+Calimero desktop app and the server picks up the node URL and credentials
+from it automatically. If it does not exist, ask me for CALIMERO_NODE_URL
+(the node to connect to) and how I want to authenticate - either
+CALIMERO_AUTH_TOKEN (plus optional CALIMERO_REFRESH_TOKEN), or
+CALIMERO_USERNAME plus CALIMERO_PASSWORD - and set those instead. If I don't
+know, ask me to check whether the node has auth enabled at all before
+assuming I need any of this.
+
+Once it's registered, verify the connection yourself: call the node_status
+tool, then list_applications, then list_contexts. Report back what each one
+returned.
+
+If anything fails, don't guess - show me the server's stderr output so we
+can see the actual error.
+```
+
+## Wire it up by hand
+
+The config is the same everywhere; only the file and its syntax change.
+
+<Tabs>
+<TabItem label="Claude Code">
+
+One command, for a server scoped to the current project:
+
+```bash
+claude mcp add -s local calimero -- npx -y @calimero-network/mero-mcp
+```
+
+Or edit `.mcp.json` in the project (`~/.claude.json` for a user-wide server):
+
+```json title=".mcp.json"
+{
+  "mcpServers": {
+    "calimero": {
+      "command": "npx",
+      "args": ["-y", "@calimero-network/mero-mcp"]
+    }
+  }
+}
+```
+
+</TabItem>
+<TabItem label="Claude Desktop">
+
+```json title="claude_desktop_config.json"
+{
+  "mcpServers": {
+    "calimero": {
+      "command": "npx",
+      "args": ["-y", "@calimero-network/mero-mcp"]
+    }
+  }
+}
+```
+
+Restart Claude Desktop after editing — it reads this file at launch.
+
+</TabItem>
+<TabItem label="Cursor / Windsurf">
+
+```json title=".cursor/mcp.json"
+{
+  "mcpServers": {
+    "calimero": {
+      "command": "npx",
+      "args": ["-y", "@calimero-network/mero-mcp"]
+    }
+  }
+}
+```
+
+</TabItem>
+<TabItem label="Codex CLI">
+
+Same fields, TOML syntax:
+
+```toml title="~/.codex/config.toml"
+[mcp_servers.calimero]
+command = "npx"
+args = ["-y", "@calimero-network/mero-mcp"]
+```
+
+</TabItem>
+</Tabs>
+
+### Which file, at a glance
+
+| Client | Config location |
+| --- | --- |
+| Claude Code | `.mcp.json` in the project, or `~/.claude.json` for a user-wide server |
+| Claude Desktop | `claude_desktop_config.json` |
+| Cursor / Windsurf | `.cursor/mcp.json` |
+| Codex CLI | `~/.codex/config.toml`, as `[mcp_servers.calimero]` |
+
+## Running from a clone
+
+Building locally gives you the same server without the npm round trip — use this
+when you are changing the server itself:
+
+```bash
+git clone https://github.com/calimero-network/mero-mcp
+cd mero-mcp
+npm install
+npm run build
+```
+
+Then point the client at the built entrypoint, with no arguments:
+
+```json
+{
+  "mcpServers": {
+    "calimero": {
+      "command": "node",
+      "args": ["/abs/path/to/mero-mcp/dist/index.js"]
+    }
+  }
+}
+```
+
+## Do you need environment variables?
+
+Usually not. The server discovers a node and an identity on its own:
+
+- If the desktop app has written a handoff file (`~/.config/calimero/mcp/agent.json`,
+  from its **Connect AI agent** action), the server reads both the node URL and a
+  token from it — **register with no environment variables at all.**
+- Otherwise it scans `~/.calimero` for node configs and probes common local ports.
+
+Set variables when that is not enough — a remote node, several local nodes, or a
+node with auth enabled and no handoff file. The full list is in
+[configuration](/reference/configuration/); the resolution order is in
+[node discovery](/understand/node-discovery/) and
+[authentication](/understand/authentication/).
+
+<Aside type="caution" title="The agent credential is an admin credential">
+However you authenticate, what the agent gets carries `admin` permission on the
+node. It is separate and revocable, but it is not scoped down. Read
+[authentication](/understand/authentication/#blast-radius) before pointing this at
+a node whose state you care about.
+</Aside>
+
+## Next
+
+Verify it end to end: [your first session](/get-started/first-session/).

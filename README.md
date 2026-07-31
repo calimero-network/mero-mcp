@@ -3,6 +3,17 @@
 A stdio MCP server that drives any application installed on a local Calimero node.
 It exposes node administration (contexts, namespaces, blobs) as MCP tools, and once you point it at an application, generates a tool for every method in that application's ABI.
 
+> **Full documentation**: <https://calimero-network.github.io/mero-mcp/> — organized into four tracks: **Get Started** (register it with a harness), **Guides** (selecting apps, contexts, troubleshooting), **Understand** (architecture, discovery, auth), and **Reference** (every tool, variable, and ABI mapping).
+
+| I want to… | Go to |
+| --- | --- |
+| Register the server with my AI harness | [Setup](https://calimero-network.github.io/mero-mcp/get-started/setup/) |
+| Verify it works end to end | [Your first session](https://calimero-network.github.io/mero-mcp/get-started/first-session/) |
+| Look up a tool or an environment variable | [Reference](https://calimero-network.github.io/mero-mcp/reference/tools/) |
+| Understand what the agent credential can do | [Authentication](https://calimero-network.github.io/mero-mcp/understand/authentication/) |
+| Fix an error I am seeing | [Troubleshooting](https://calimero-network.github.io/mero-mcp/guides/troubleshooting/) |
+| Work on the server itself | [Development](https://calimero-network.github.io/mero-mcp/contribute/development/) |
+
 ## Quickstart
 
 Paste this into any AI harness (Claude Code, Cursor, Codex CLI, Claude Desktop, Zed, ...) and let it register the server for you:
@@ -122,7 +133,7 @@ Anything an agent does through this server (installing an application, creating 
 ## Tools
 
 **Core** (always registered):
-`node_status`, `list_nodes`, `list_applications`, `list_namespaces`, `list_contexts`, `create_context`, `create_alias`, `lookup_alias`.
+`node_status`, `list_nodes`, `list_applications`, `list_namespaces`, `list_contexts`, `create_context`, `delete_context`, `create_alias`, `lookup_alias`.
 
 **Blobs** (in `CALIMERO_MCP_TOOLSETS` by default):
 `install_application`, `uninstall_application`, `upload_blob`, `list_blobs`, `delete_blob`.
@@ -150,8 +161,8 @@ Two harnesses drive the built server over real MCP stdio against a real node.
 Both boot their own `merod` on port 2571 in a temp home and tear it down on the way out, so neither touches `~/.calimero` or your real state directory.
 
 ```bash
-npm run e2e          # 14 assertions: the protocol, the ABI-derived tools, and a round trip verified out of band
-npm run e2e:cycle    # 7 assertions: admin login -> client key -> agent.json handoff, with zero credentials in the environment
+npm run e2e          # 16 assertions: the protocol, the ABI-derived tools, and a round trip verified out of band
+npm run e2e:cycle    # 8 assertions: admin login -> client key -> agent.json handoff, with zero credentials in the environment
 ```
 
 `MEROD_BINARY` selects the binary to boot, and defaults to core's `target/debug/merod`.

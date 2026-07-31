@@ -1,0 +1,122 @@
+---
+title: Authentication
+description: The four auth modes, how tokens are cached and rotated safely, and exactly what the agent credential can do on your node.
+sidebar:
+  order: 3
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## The four modes
+
+The server picks the first that applies, and reports the winner as `authMode` in
+`node_status`:
+
+| Mode | Source | When |
+| --- | --- | --- |
+| `handoff` | `agent.json` in the state dir | The desktop app's **Connect AI agent** action has run |
+| `token` | `CALIMERO_AUTH_TOKEN` (+ optional `CALIMERO_REFRESH_TOKEN`) | You supplied a token |
+| `credentials` | `CALIMERO_USERNAME` + `CALIMERO_PASSWORD` (or `…_PASSWORD_FILE`) | You supplied a login |
+| `none` | — | Nothing above; no auth is attempted |
+
+`none` is not a failure — a node with no auth requirement works fine. Against a node
+that does want auth, calls are rejected and `authMode: "none"` in `node_status` is the
+tell.
+
+Only `credentials` mode logs in eagerly (on the first tool call, when the session is
+built). The other modes inject what they were given and let the node judge it.
+
+## The handoff
+
+The desktop app's **Connect AI agent** action mints the agent **its own client key**
+and writes `agent.json` into the state directory:
+
+```json title="~/.config/calimero/mcp/agent.json"
+{
+  "nodeUrl": "http://localhost:2528",
+  "accessToken": "eyJ…",
+  "refreshToken": "eyJ…"
+}
+```
+
+That one file supplies both the node and the credential, which is why a handoff means
+you register the server with **no environment variables at all.**
+
+The file is treated as advisory rather than authoritative: missing, malformed, or
+carrying no `accessToken`, the server logs why and falls through to the next mode. And
+a `nodeUrl` that is not loopback causes the **whole file to be ignored** — only the
+local desktop app writes it, so a remote origin means something else did, and that
+discredits the token as much as the URL.
+
+## Token caching
+
+Tokens are cached under the state directory as `tokens-<hash>.json`, mode `0600`, in a
+directory created `0700`.
+
+The cache key hashes **node URL + username**, not just the node. Switching to a
+lower-privilege account must not silently keep running on the previous account's
+cached tokens, and per-node keying keeps several configured nodes from clobbering each
+other's file.
+
+Writes are **write-then-rename**, so a crash mid-write cannot leave a half-written file
+that reads as "no tokens" — which would trigger re-injection of an already-consumed
+token.
+
+### Which credential wins
+
+When an injected credential (from a handoff or the environment) meets a cached one, the
+server compares JWT `iat` claims and keeps the **newer** one.
+
+It cannot simply prefer the injected token: revocation is server-side state a JWT
+cannot carry, so an unexpired cached token proves nothing. And it cannot simply prefer
+the cache either — that would discard rotations this process performed and replay a
+consumed refresh token, which revokes the whole token family.
+
+So: a strictly later `iat` on the injected token replaces the store; anything
+undecidable (either token missing a readable `iat`) keeps the store, because replaying
+a consumed refresh token is the worse failure.
+
+**To force re-authentication,** delete the `tokens-*.json` files from the state
+directory.
+
+## Blast radius
+
+<Aside type="danger" title="The agent credential carries admin permission">
+It is a separate, revocable credential — not the same one the desktop app uses — but
+**it is not scoped down**, and every action it takes is attributed to the node's own
+identity exactly the way the desktop app's actions are.
+
+Anything an agent does through this server — installing an application, creating or
+deleting a context, calling a mutating method — is indistinguishable, on the node, from
+you having done it yourself.
+</Aside>
+
+What follows from that:
+
+- **There is no read-only mode.** Trimming
+  [`CALIMERO_MCP_TOOLSETS`](/reference/configuration/#toolsets) to `core` removes the
+  blob and governance tools, which shrinks the surface an agent can reach *by
+  accident* — but `core` still includes `create_context` and `delete_context`, and
+  generated tools always include every `[mut]` method the ABI declares.
+- **Destructive tools are annotated,** not gated. `delete_context`,
+  `delete_namespace`, `uninstall_application`, `delete_blob` and `leave_namespace`
+  carry `destructiveHint`; whether you get a confirmation prompt is up to your MCP
+  client.
+- **Revoke rather than rotate,** if you need to cut an agent off. The client key is
+  separate precisely so it can be revoked without touching your own credential.
+- **Point it at a node you can afford to lose** while you are learning what an agent
+  does with it — a scratch `merod` in its own home directory, not the node holding
+  state you care about.
+
+## Passwords
+
+`CALIMERO_PASSWORD_FILE` reads the password from a file, and is used only when
+`CALIMERO_PASSWORD` is unset. It is the better option when the value would otherwise
+sit in an MCP config file that gets committed — MCP client configs are frequently
+checked into repositories.
+
+## What is never logged
+
+The server strips query strings from any URL it reports in an error, since a query
+string can carry a credential. Error text from the node is passed through, and
+unstructured bodies are truncated to 300 characters rather than pasted whole.

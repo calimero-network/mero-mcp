@@ -1,0 +1,159 @@
+---
+title: Your first session
+description: Verify the connection, point the server at an application, and call one of its methods through a generated tool.
+sidebar:
+  order: 2
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+This walks the path every session takes: confirm the node, find an application,
+select it, call it. Ask your agent to run each tool and show you the result.
+
+## 1. Confirm the node
+
+```text
+Call the node_status tool.
+```
+
+`node_status` is the one tool that answers every "is this even connected?"
+question at once:
+
+```json
+{
+  "health": { "status": "healthy" },
+  "url": "http://localhost:2528",
+  "nodeName": "default",
+  "discoverySource": "config-scan",
+  "authMode": "handoff",
+  "selected": []
+}
+```
+
+- `url` / `nodeName` — which node you actually reached. `nodeName` is `null` when
+  nothing on this machine names it (a bare `CALIMERO_NODE_URL`, or a probed node).
+- `discoverySource` — *how* it was found: `env`, `handoff`, `named`, `config-scan`
+  or `probe`. If this says `probe` and you expected a specific node, discovery
+  fell through to guessing at ports.
+- `authMode` — `handoff`, `token`, `credentials` or `none`.
+- `selected` — the applications currently selected. Empty at the start of a session.
+
+The server connects lazily, so **this is the first call that can fail.** A node
+that is down or credentials that are wrong surface here, not at startup — and the
+next call retries rather than leaving the server wedged.
+
+<Aside type="tip">
+`list_nodes` shows every node this machine knows about plus a live port probe, and
+marks the one you are using with `active: true`. Reach for it when `node_status`
+connected to the wrong node.
+</Aside>
+
+## 2. Find an application and its context
+
+```text
+Call list_applications, then list_contexts.
+```
+
+`list_applications` returns what is installed, each with an `id`, a `package`
+(reverse-DNS dotted, like `com.calimero.kv-store`) and decoded `metadata`.
+
+`list_contexts` returns the contexts. **If it comes back empty, stop here and
+create one** — no amount of selecting will make app calls work without a context:
+
+```text
+Call create_context with application "kv-store" and namespace "<namespace-id>".
+```
+
+You need a namespace first; `list_namespaces` shows them and `create_namespace`
+makes one. See [contexts and namespaces](/guides/contexts-and-namespaces/).
+
+## 3. Look before you select
+
+```text
+Call describe_app with app "kv-store".
+```
+
+`describe_app` shows the ABI without registering anything — every method with its
+parameters and return type, rendered as signatures:
+
+```json
+{
+  "application": "5w8Xy…",
+  "package": "com.calimero.kv-store",
+  "version": "0.1.0",
+  "service": "KvStore",
+  "contextServices": ["KvStore"],
+  "methods": [
+    "[view] get(key: string) -> string | null",
+    "[mut] set(key: string, value: string) -> unit",
+    "[view] entries() -> map<string, string>"
+  ]
+}
+```
+
+`[view]` methods are read-only; `[mut]` methods write. Note the application name:
+you can pass the full package, the application id, or just the last dotted segment
+(`kv-store`) as long as it is unambiguous.
+
+## 4. Select it
+
+```text
+Call select_app with app "kv-store".
+```
+
+This is the step that generates tools. The server fetches the ABI, registers one
+MCP tool per method, and pins a default context:
+
+```json
+{
+  "tools": ["kv_store_get", "kv_store_set", "kv_store_entries"],
+  "context": "8Hk2…",
+  "toolCount": 3,
+  "toolsNote": "These are the server-side tool names. An MCP client may expose them under a prefix of its own…"
+}
+```
+
+The tools are named `<app>_<method>` from the trailing package segment, so
+`com.calimero.kv-store` yields `kv_store_get`. Your client may show them under a
+prefix of its own — commonly `mcp__calimero__kv_store_get`.
+
+If the application has exactly one context, it gets pinned automatically. With
+several, `select_app` returns a `note` listing the ids and you pass
+`context` explicitly.
+
+<Aside type="note">
+New tools appear mid-session, which some clients need a nudge to notice. If the
+generated tools are not visible, use the `call` tool instead — it reaches the same
+methods through a fixed tool name. See
+[when generated tools do not appear](/guides/troubleshooting/#the-generated-tools-do-not-appear).
+</Aside>
+
+## 5. Call a method
+
+```text
+Use kv_store_set to store "hello" under the key "greeting", then read it back with kv_store_get.
+```
+
+The arguments are validated against the ABI before anything reaches the node, so a
+wrong type fails locally with a schema error rather than as an opaque node
+rejection.
+
+Every generated tool also takes an optional `_context` argument to run that one
+call against a different context, overriding the pin. The leading underscore keeps
+it from colliding with an application's own `context` parameter.
+
+## Where to go next
+
+<Steps>
+
+1. [Working with applications](/guides/working-with-apps/) — several apps at once,
+   multi-service apps, `call` vs generated tools.
+
+2. [Contexts and namespaces](/guides/contexts-and-namespaces/) — creating them,
+   aliasing them, and the deletion order that leaves a mess if you get it wrong.
+
+3. [Tool reference](/reference/tools/) — every tool and its arguments.
+
+4. [Troubleshooting](/guides/troubleshooting/) — when a step above did not go this way.
+
+</Steps>

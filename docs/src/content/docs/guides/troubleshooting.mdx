@@ -1,0 +1,170 @@
+---
+title: Troubleshooting
+description: The failures that actually come up — no node found, several nodes, missing ABI endpoint, invisible generated tools, ambiguous names, and how to read the server's error messages.
+sidebar:
+  order: 3
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The server tries to put the fix in the error text, so read the message before
+reaching for this page. When it does not, start here.
+
+## Nothing works, and there is no error
+
+The server writes to **stderr**, and MCP clients hide stderr by default. On startup
+it logs:
+
+```
+[mero-mcp] ready on stdio; the node connects lazily on first tool call
+```
+
+Since it connects lazily, a down node or bad credentials do not fail at startup —
+they fail on the **first tool call**, and only that call. The next call retries. If
+tools fail and you cannot see why, find your client's MCP server log (in Claude Code,
+`claude --debug`, or the MCP output panel in editors) and read the stderr.
+
+## `No Calimero node found`
+
+```
+No Calimero node found. Start one in the Calimero desktop app, or set
+CALIMERO_NODE_URL. (Looked in ~/.calimero and probed local ports.)
+```
+
+Discovery found nothing at any rung. Either the node is not running, or it is
+somewhere the server does not look: a non-default `CALIMERO_NODE_HOME`, a port
+outside the probe set (2528, 2428, 2529, 2429), or a remote host. Set
+`CALIMERO_NODE_URL` and the whole search is skipped. See
+[node discovery](/understand/node-discovery/).
+
+## `Several nodes found in …`
+
+```
+Several nodes found in ~/.calimero: alice (http://localhost:2428),
+bob (http://localhost:2429). Set CALIMERO_NODE_NAME or CALIMERO_NODE_URL.
+```
+
+More than one node config, none of them named `default`, so the server refuses to
+guess. Name one with `CALIMERO_NODE_NAME`, or address it directly with
+`CALIMERO_NODE_URL`. `list_nodes` shows the candidates.
+
+## `Node "x" not found in …`
+
+`CALIMERO_NODE_NAME` did not match a directory under `CALIMERO_NODE_HOME`. The error
+lists the available names. Note that a node directory only counts if its
+`config.toml` yields a listen address — a directory the server cannot read a port
+out of is skipped entirely.
+
+## `This node's merod does not support the ABI endpoint`
+
+```
+This node's merod does not support the ABI endpoint
+(GET /admin-api/applications/:id/abi). Upgrade merod to a release that includes it.
+```
+
+The whole generated-tool mechanism reads the ABI from that route. It is newer than
+the current `merod` release, so until a release carries it, build `merod` from
+[core](https://github.com/calimero-network/core) `master`:
+
+```bash
+cd core && cargo build -p merod
+```
+
+Every other tool works without it — only `describe_app`, `select_app` and `call`
+need an ABI.
+
+<Aside type="note">
+This message means the route was missing (a bodyless 404). A 4xx *with* a message —
+"rebuild the app", "pass service_name" — is the node telling you something specific,
+and the server passes that through verbatim rather than blaming the version.
+</Aside>
+
+## The generated tools do not appear
+
+`select_app` registers tools **mid-session**, and it announces them in its own
+result along with a note:
+
+> These are the server-side tool names. An MCP client may expose them under a prefix
+> of its own (commonly `mcp__<server>__<tool>`), so if a name does not resolve, look
+> for the prefixed form.
+
+Two separate things go wrong here:
+
+1. **The name is prefixed.** `kv_store_get` may be exposed as
+   `mcp__calimero__kv_store_get`. Look for the prefixed form before concluding it is
+   missing.
+2. **The client did not pick up the new tool list.** Not every client refreshes on
+   a `tools/list_changed` notification. The `call` tool exists for exactly this — it
+   is registered at startup, so it is always visible, and it reaches every method:
+
+   ```text
+   Call the `call` tool with method "get" and args {"key": "greeting"}.
+   ```
+
+## `Application "x" has no contexts on this node`
+
+```
+Application "kv-store" has no contexts on this node. Create one in the Calimero
+desktop app, or use create_context.
+```
+
+Installing an application does not create a context. This is the single most common
+failure — see [contexts and namespaces](/guides/contexts-and-namespaces/).
+
+## `Application "x" has N contexts; pass context with one of: …`
+
+No pin, and the application has several contexts, so there is no default to fall back
+on. Either pass `context` to `select_app` to pin one for the session, or `_context`
+on the individual call.
+
+## `Application "x" is ambiguous`
+
+The short name you used — the trailing package segment — matches more than one
+installed application. Use the full package name or the application id. Matching is
+on whole segments, so this is never a prefix collision.
+
+## `Context "x" not found: it is neither a context id nor an alias`
+
+The value did not look like a base58 context id and no alias by that name resolved.
+The error lists the contexts that application does have. Create the alias with
+`create_alias`, or use the id.
+
+## A method call fails with the app's own error
+
+Guest (WASM) errors arrive from the node without a readable message — just
+`FunctionCallError` and a Rust-debug-formatted byte array. The server decodes that
+back into the real text, so what you see is the application's own error:
+
+```
+Error: label must not be empty
+```
+
+If you are seeing a bare `FunctionCallError` with no explanation, the payload was not
+in either shape the decoder knows, and the raw error is in the server's stderr.
+
+## `Cannot reach the node at …`
+
+A transport failure rather than anything the node rejected — wrong port, node not
+listening, TLS mismatch. Confirm with `node_status`, and check the URL with
+`list_nodes`.
+
+## Auth failures
+
+`node_status` reports `authMode`. If it says `none` and calls are rejected, the node
+wants auth and the server found no credentials. If it says `handoff` but the node
+rejects the token, the handoff file may be stale — the desktop app's
+**Connect AI agent** action rewrites it.
+
+The server ignores a handoff file that points at a **non-loopback** origin and logs
+why: only the local desktop app writes that file, so a remote URL in it means
+something else did. Use `CALIMERO_NODE_URL` to reach a remote node.
+
+Tokens are cached per node and identity under the state directory. To force
+re-authentication, delete `tokens-*.json` from `~/.config/calimero/mcp` (or your
+`CALIMERO_MCP_STATE_DIR`). See [authentication](/understand/authentication/).
+
+## A tool is missing entirely
+
+Check `CALIMERO_MCP_TOOLSETS`. It defaults to all three, but if it is set, only the
+named toolsets are registered — plus `core`, which is always on regardless. An
+unrecognised name in that list simply matches nothing, silently.
