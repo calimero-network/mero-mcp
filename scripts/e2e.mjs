@@ -22,7 +22,7 @@ import {
   bootNode,
   createChecks,
   fatal,
-  requireBuild,
+  installServerBin,
   resolveMerod,
   toolText,
 } from './e2e-lib.mjs';
@@ -40,7 +40,7 @@ const FOREIGN = 'not run against a node this script did not provision';
 const kvToolName = (slug, method) => `${slug}_${method}`;
 
 async function main() {
-  const entry = requireBuild();
+  const launcher = installServerBin();
   const checks = createChecks(PLANNED);
 
   let node = null;
@@ -96,7 +96,7 @@ async function main() {
       kv = { name: opts.app };
     }
 
-    const mcp = new McpClient(entry, serverEnv);
+    const mcp = new McpClient(launcher, serverEnv);
     try {
       await runChecks({ checks, mcp, api, kv, second });
     } finally {
@@ -104,6 +104,7 @@ async function main() {
     }
   } finally {
     stop();
+    launcher.cleanup();
   }
 
   checks.finish();

@@ -1,96 +1,56 @@
 #!/usr/bin/env node
-// Installs the packed tarball and launches the server the way npm does - by bin
-// name on PATH, never a file path. Resolving the path is what hides a broken
-// entrypoint guard, which is how a package that cannot start shipped green.
-import { spawn, execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, readdirSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+// Packs, installs, and drives the server the way a client does: by bin name on
+// PATH. Everything else in this repo reaches dist/index.js by path, which
+// resolves the symlink npm installs and cannot catch a dead entrypoint.
+//
+// Runs without a node. Every assertion here answers "did the process start and
+// register its tools", which is exactly what a broken entrypoint fails.
+import { installServerBin, McpClient, E2eError } from './e2e-lib.mjs';
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const BIN = 'mero-mcp';
-const INIT = JSON.stringify({
-  jsonrpc: '2.0',
-  id: 1,
-  method: 'initialize',
-  params: {
-    protocolVersion: '2024-11-05',
-    capabilities: {},
-    clientInfo: { name: 'bin-smoke', version: '1' },
-  },
-});
+// A broken entrypoint exits immediately, so this only trips on a genuine hang.
+const TIMEOUT_MS = 60_000;
+// Present regardless of node reachability: registration happens before any connect.
+const EXPECTED_TOOLS = ['node_status', 'list_contexts', 'select_app'];
 
-const work = mkdtempSync(join(tmpdir(), 'mero-mcp-bin-smoke-'));
-let failure;
+const deadline = setTimeout(() => {
+  console.error(`FAIL - no verdict within ${TIMEOUT_MS}ms`);
+  process.exit(1);
+}, TIMEOUT_MS).unref?.() ?? null;
+
+let launcher;
+let mcp;
+const failures = [];
 
 try {
-  execFileSync('npm', ['pack', '--pack-destination', work], { cwd: ROOT, stdio: 'inherit' });
-  const tarball = readdirSync(work).find((f) => f.endsWith('.tgz'));
-  if (!tarball) throw new Error('npm pack produced no tarball');
+  launcher = installServerBin();
+  mcp = new McpClient(launcher, { ...process.env, MERO_MCP_NODE_URL: 'http://127.0.0.1:1' });
 
-  const app = join(work, 'app');
-  writeFileSync(join(work, 'package.json'), '{"name":"smoke","private":true}');
-  execFileSync('npm', ['init', '-y'], { cwd: work, stdio: 'ignore' });
-  execFileSync('npm', ['install', '--no-audit', '--no-fund', join(work, tarball)], {
-    cwd: work,
-    stdio: 'inherit',
-  });
+  const init = await mcp.initialize();
+  const name = init?.serverInfo?.name;
+  if (name !== 'mero-mcp') failures.push(`serverInfo.name was ${JSON.stringify(name)}, expected "mero-mcp"`);
 
-  const binDir = join(work, 'node_modules', '.bin');
-  const out = await new Promise((resolve, reject) => {
-    // Bin name only. Passing a path here would resolve the symlink and pass on a
-    // package no client can actually start.
-    const child = spawn(BIN, [], {
-      env: { ...process.env, PATH: `${binDir}:${process.env.PATH}` },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    let stdout = '';
-    let stderr = '';
-    const timer = setTimeout(() => {
-      child.kill('SIGKILL');
-      reject(new Error(`no response within 20s\nstdout: ${stdout}\nstderr: ${stderr}`));
-    }, 20_000);
+  const tools = await mcp.listTools();
+  if (!tools?.length) failures.push('tools/list returned nothing, so no tool ever registered');
+  const names = new Set((tools ?? []).map((t) => t.name));
+  const missing = EXPECTED_TOOLS.filter((t) => !names.has(t));
+  if (missing.length) failures.push(`tools/list is missing ${missing.join(', ')}`);
 
-    child.stdout.on('data', (d) => {
-      stdout += d;
-      if (stdout.includes('"serverInfo"')) {
-        clearTimeout(timer);
-        child.kill('SIGTERM');
-        resolve(stdout);
-      }
-    });
-    child.stderr.on('data', (d) => (stderr += d));
-    child.on('error', (e) => {
-      clearTimeout(timer);
-      reject(e);
-    });
-    child.on('exit', (code) => {
-      clearTimeout(timer);
-      if (!stdout.includes('"serverInfo"')) {
-        reject(
-          new Error(
-            `${BIN} exited (code ${code}) without answering initialize.\n` +
-              `stdout: ${JSON.stringify(stdout)}\nstderr: ${JSON.stringify(stderr)}`,
-          ),
-        );
-      }
-    });
+  // Anything non-JSON-RPC on stdout corrupts the stream for every real client.
+  if (mcp.frameViolations.length) {
+    failures.push(`stdout carried ${mcp.frameViolations.length} non-protocol line(s): ${mcp.frameViolations[0]}`);
+  }
 
-    child.stdin.write(`${INIT}\n`);
-  });
-
-  const line = out.split('\n').find((l) => l.includes('"serverInfo"'));
-  const name = JSON.parse(line).result?.serverInfo?.name;
-  if (name !== 'mero-mcp') throw new Error(`unexpected serverInfo.name: ${name}`);
-  console.log(`ok - ${BIN} on PATH answered initialize as ${name}`);
+  if (!failures.length) console.log(`ok - mero-mcp on PATH answered initialize and listed ${tools.length} tools`);
 } catch (err) {
-  failure = err;
+  failures.push(err instanceof E2eError ? err.message : (err?.stack ?? String(err)));
 } finally {
-  rmSync(work, { recursive: true, force: true });
+  clearTimeout(deadline);
+  mcp?.close();
+  launcher?.cleanup();
 }
 
-if (failure) {
-  console.error(`FAIL - ${failure.message}`);
+if (failures.length) {
+  console.error('FAIL - the installed package does not start as a bin:');
+  for (const f of failures) console.error(`  - ${f}`);
   process.exit(1);
 }
