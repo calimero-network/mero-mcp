@@ -153,7 +153,7 @@ export class NodeApi {
   }
 
   async installBundle(mpkPath) {
-    return (await this.#post('/admin-api/install-dev-application', { path: mpkPath, metadata: [] })).data.applicationId;
+    return (await this.#post('/admin-api/install-dev-application', { path: mpkPath })).data.applicationId;
   }
 
   async applicationAbi(applicationId) {
@@ -172,11 +172,11 @@ export class NodeApi {
   }
 
   async createNamespace(applicationId) {
-    return (await this.#post('/admin-api/namespaces', { applicationId, upgradePolicy: 'Automatic' })).data.namespaceId;
+    return (await this.#post('/admin-api/namespaces', { applicationId })).data.namespaceId;
   }
 
   async createContext(applicationId, groupId) {
-    const body = { applicationId, groupId, protocol: 'none', initializationParams: [] };
+    const body = { applicationId, groupId, initializationParams: [] };
     return (await this.#post('/admin-api/contexts', body)).data.contextId;
   }
 

@@ -225,11 +225,11 @@ test('join_namespace advertises the invitation as an open object, declaring none
   }
 });
 
-test('delete_context is destructive, deletes by id, and names a requester only when given one', async () => {
+test('delete_context is destructive and deletes by id', async () => {
   const calls: unknown[][] = [];
   const admin = {
-    deleteContext: async (contextId: string, request?: { requester?: string }) => {
-      calls.push([contextId, request]);
+    deleteContext: async (contextId: string) => {
+      calls.push([contextId]);
       return { isDeleted: true };
     },
   };
@@ -239,11 +239,27 @@ test('delete_context is destructive, deletes by id, and names a requester only w
 
   const handler = tools.get('delete_context')!;
   assert.match(textOf(await handler({ context: 'Ctx111' })), /"isDeleted": true/);
-  await handler({ context: 'Ctx111', requester: 'Member111' });
-  assert.deepEqual(calls, [
-    ['Ctx111', undefined],
-    ['Ctx111', { requester: 'Member111' }],
-  ]);
+  assert.deepEqual(calls, [['Ctx111']]);
+});
+
+test('install_application splits package@version, and rejects a coordinate missing either half', async () => {
+  const calls: unknown[][] = [];
+  const admin = {
+    installApplication: async (request: Record<string, unknown>) => {
+      calls.push([request]);
+      return { applicationId: 'AppId111' };
+    },
+  };
+  const { server, tools } = fakeServer();
+  registerCoreTools(server, fakeSession(admin), loadConfig(env()));
+
+  const handler = tools.get('install_application')!;
+  assert.match(textOf(await handler({ coords: 'network.calimero.kv-store@1.0.0' })), /"applicationId": "AppId111"/);
+  assert.deepEqual(calls, [[{ package: 'network.calimero.kv-store', version: '1.0.0' }]]);
+
+  const bad = await handler({ coords: 'network.calimero.kv-store' });
+  assert.equal(bad.isError, true);
+  assert.match(textOf(bad), /Expected package@version/);
 });
 
 test('create_namespace and create_context resolve an application the way describe_app does', async () => {
@@ -264,11 +280,11 @@ test('create_namespace and create_context resolve an application the way describ
 
   // The package tail, the full package name, and the raw id all name the same application.
   await tools.get('create_namespace')!({ application: 'kv-store' });
-  await tools.get('create_namespace')!({ application: 'network.calimero.kv-store', upgradePolicy: 'LazyOnAccess' });
+  await tools.get('create_namespace')!({ application: 'network.calimero.kv-store' });
   await tools.get('create_context')!({ application: 'AppId111', namespace: 'Ns111' });
   assert.deepEqual(created, [
-    { applicationId: 'AppId111', upgradePolicy: 'Automatic', name: undefined },
-    { applicationId: 'AppId111', upgradePolicy: 'LazyOnAccess', name: undefined },
+    { applicationId: 'AppId111', name: undefined },
+    { applicationId: 'AppId111', name: undefined },
     { applicationId: 'AppId111', groupId: 'Ns111', name: undefined, serviceName: undefined },
   ]);
 
