@@ -82,7 +82,6 @@ Delete a context and its data. **Destructive.**
 | Argument | Type | Notes |
 | --- | --- | --- |
 | `context` | string | Context id or alias |
-| `requester` | string, optional | Member identity to delete as; needed only when the node holds several |
 
 Also the fix for a context stranded by deleting its namespace first — those contexts
 outlive the namespace and stay uncallable until removed.
@@ -113,10 +112,12 @@ install/uninstall live here.
 
 ### `install_application`
 
+Install a published application from the node's own configured registry, by
+`package@version` coordinates.
+
 | Argument | Type | Notes |
 | --- | --- | --- |
-| `url` | string | Where to fetch the application from |
-| `hash` | string, optional | Expected hash |
+| `coords` | string | `package@version`, e.g. `com.example.myapp@1.0.0` |
 
 ### `uninstall_application`
 
@@ -147,7 +148,6 @@ In `CALIMERO_MCP_TOOLSETS` by default.
 | Argument | Type | Notes |
 | --- | --- | --- |
 | `application` | string | Id, package name, or trailing segment |
-| `upgradePolicy` | `Automatic` \| `LazyOnAccess`, optional | Defaults to `Automatic` |
 | `name` | string, optional | |
 
 ### `delete_namespace`

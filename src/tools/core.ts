@@ -134,15 +134,10 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
     'delete_context',
     {
       description: 'Delete a context from this node, including its data. Use this to clear a context left behind by a deleted namespace.',
-      inputSchema: {
-        context: z.string(),
-        requester: z.string().optional().describe('Member identity to delete as; only needed when the node holds several.'),
-      },
+      inputSchema: { context: z.string() },
       annotations: { destructiveHint: true },
     },
-    wrap(async ({ context, requester }: { context: string; requester?: string }) =>
-      admin.deleteContext(context, requester ? { requester } : undefined),
-    ),
+    wrap(async ({ context }: { context: string }) => admin.deleteContext(context)),
   );
 
   server.registerTool(
@@ -172,8 +167,15 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
   if (cfg.toolsets.has('blobs')) {
     server.registerTool(
       'install_application',
-      { description: 'Install an application from a URL.', inputSchema: { url: z.string(), hash: z.string().optional() } },
-      wrap(async ({ url, hash }: { url: string; hash?: string }) => admin.installApplication({ url, hash, metadata: [] })),
+      {
+        description: "Install a published application from the node's registry, by package@version coordinates (e.g. com.example.myapp@1.0.0).",
+        inputSchema: { coords: z.string().describe('Coordinates of a published application: package@version.') },
+      },
+      wrap(async ({ coords }: { coords: string }) => {
+        const [pkg, version] = coords.split('@');
+        if (!pkg || !version) throw new Error(`Expected package@version, got "${coords}".`);
+        return admin.installApplication({ package: pkg, version });
+      }),
     );
 
     server.registerTool(
@@ -221,17 +223,11 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
         description: 'Create a namespace for an application.',
         inputSchema: {
           application: z.string().describe('Application id or package name.'),
-          upgradePolicy: z.enum(['Automatic', 'LazyOnAccess']).optional(),
           name: z.string().optional(),
         },
       },
-      wrap(
-        async ({ application, upgradePolicy, name }: { application: string; upgradePolicy?: 'Automatic' | 'LazyOnAccess'; name?: string }) =>
-          admin.createNamespace({
-            applicationId: (await resolveAppId(application)).id,
-            upgradePolicy: upgradePolicy ?? 'Automatic',
-            name,
-          }),
+      wrap(async ({ application, name }: { application: string; name?: string }) =>
+        admin.createNamespace({ applicationId: (await resolveAppId(application)).id, name }),
       ),
     );
 

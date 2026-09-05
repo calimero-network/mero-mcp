@@ -37,7 +37,7 @@ ABI — while every call against it fails.
    Call list_applications.
    ```
 
-   To add one, `install_application` takes a `url` and an optional `hash`.
+   To add one, `install_application` takes `coords` as `package@version`.
 
 2. **Create a namespace for it:**
 
@@ -45,8 +45,7 @@ ABI — while every call against it fails.
    Call create_namespace with application "kv-store".
    ```
 
-   `upgradePolicy` is `Automatic` unless you pass `LazyOnAccess`. The result carries
-   the namespace id.
+   The result carries the namespace id.
 
 3. **Create a context in that namespace:**
 
@@ -115,9 +114,6 @@ holding its data and showing up in `list_contexts`:
 
 If you already deleted the namespace first, `delete_context` is still the fix — it
 is what clears a context stranded that way.
-
-`delete_context` takes an optional `requester`, the member identity to delete as,
-needed only when the node holds several.
 
 `delete_context`, `delete_namespace`, `uninstall_application`, `delete_blob` and
 `leave_namespace` are all marked destructive, so a client that surfaces that hint
