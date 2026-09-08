@@ -64,25 +64,13 @@ jobs:
         run: node scripts/bin-smoke.mjs
 
   e2e:
-    name: E2E (vs merod built from core master)
+    name: E2E (vs released merod)
     runs-on: ubuntu-latest
     needs: validate
-    timeout-minutes: 40
+    timeout-minutes: 10
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      # Built from master rather than downloaded: no release carries
-      # GET /admin-api/applications/:id/abi yet (0.11.0-rc.18 predates the merge),
-      # and that endpoint is what every derived tool comes from. Switch to the
-      # released-binary path (mero-js's CI has one to copy) once a core release
-      # >= the first tag containing that route exists.
-      - name: Checkout core
-        uses: actions/checkout@v4
-        with:
-          repository: calimero-network/core
-          ref: master
-          path: core
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -93,31 +81,24 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install build dependencies
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libclang-dev
-
-      # core/rust-toolchain.toml pins the channel; rustup honours it inside core/.
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo build
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: core
-
-      - name: Build merod
+      # --limit 1 includes pre-releases on purpose: core publishes only release
+      # candidates, so GitHub resolves no "latest" and the newest tag is what ships.
+      - name: Download released merod
         env:
-          # Raises the anonymous rate limit on the admin-dashboard asset core's build.rs fetches.
-          CALIMERO_WEBUI_FETCH_TOKEN: ${{ github.token }}
-          CALIMERO_AUTH_FRONTEND_FETCH_TOKEN: ${{ github.token }}
-        run: cargo build -p merod --manifest-path core/Cargo.toml
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -o pipefail
+          TAG=$(gh release list --repo calimero-network/core --limit 1 --json tagName --jq '.[0].tagName')
+          echo "Latest core release: $TAG"
+          curl -fsSL "https://github.com/calimero-network/core/releases/download/$TAG/merod_x86_64-unknown-linux-gnu.tar.gz" | tar xz
+          chmod +x ./merod
 
       # Both scripts boot their own merod on 2571, provision it from the committed
       # fixtures, and tear it down in a finally - identical to how they run locally,
       # so there is nothing CI-only here to drift.
       - name: Protocol e2e
         env:
-          MEROD_BINARY: ${{ github.workspace }}/core/target/debug/merod
+          MEROD_BINARY: ${{ github.workspace }}/merod
           NO_COLOR: '1'
         run: |
           set -o pipefail
@@ -128,7 +109,7 @@ jobs:
 
       - name: Full-cycle e2e
         env:
-          MEROD_BINARY: ${{ github.workspace }}/core/target/debug/merod
+          MEROD_BINARY: ${{ github.workspace }}/merod
           NO_COLOR: '1'
         run: |
           set -o pipefail
