@@ -3,12 +3,8 @@ name: Dependency Check
 on:
   schedule:
     - cron: '0 0 * * 1'  # Run every Monday at midnight
+  # Unfiltered: a required check must report on every pull request.
   push:
-    paths:
-      # The lockfile pins the tree npm audit actually reads, so a lockfile-only
-      # bump (Dependabot, npm audit fix) has to trip this gate too.
-      - 'package.json'
-      - 'package-lock.json'
   workflow_dispatch:  # Allow manual triggering
 
 jobs:
