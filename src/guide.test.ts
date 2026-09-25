@@ -45,6 +45,13 @@ test('a leading UTF-8 BOM does not hide the first heading', () => {
   assert.deepEqual(procedures('﻿' + guide), procedures(guide));
 });
 
+test('leading tabs in a fence line are not valid per the registry rule', () => {
+  assert.deepEqual(procedures(lines('## Procedures', '### Real', '\t```', '### Still real')), [
+    'Real',
+    'Still real',
+  ]);
+});
+
 test('guideOf reads a non-empty string guide from JSON metadata, and nothing else', () => {
   assert.equal(guideOf(utf8Bytes(JSON.stringify({ guide: '## Overview' }))), '## Overview');
   assert.equal(guideOf(utf8Bytes(JSON.stringify({ guide: '' }))), undefined);

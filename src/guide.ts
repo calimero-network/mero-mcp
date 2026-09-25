@@ -1,4 +1,4 @@
-const FENCE = '```';
+const FENCE = /^ *```/;
 const PROCEDURES_HEADING = '## Procedures';
 
 /**
@@ -33,9 +33,9 @@ export function procedures(guide: string): string[] {
   const titles: string[] = [];
   let fenced = false;
   let inProcedures = false;
-  for (const raw of guide.replace(/^﻿/, '').split(/\r?\n/)) {
+  for (const raw of guide.replace(/^\ufeff/, '').split(/\r?\n/)) {
     const line = raw.trimEnd();
-    if (line.trimStart().startsWith(FENCE)) {
+    if (FENCE.test(line)) {
       fenced = !fenced;
     } else if (!fenced && line.startsWith('## ')) {
       inProcedures = line === PROCEDURES_HEADING;
@@ -53,3 +53,4 @@ export function listing(bytes: number[]): { metadata: unknown; procedures: strin
   const { guide, ...rest } = metadata;
   return { metadata: rest, procedures: typeof guide === 'string' ? procedures(guide) : [] };
 }
+
