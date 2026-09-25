@@ -6,6 +6,7 @@ import { discoverLocalNodes, listConfiguredNodes, resolveNode } from '../config.
 import type { NodeSession } from '../node.ts';
 import { createAbiLoader } from '../abi.ts';
 import { errorResult, textResult } from '../errors.ts';
+import { listing } from '../guide.ts';
 import { getSelection } from './app.ts';
 
 /** Runs an admin call and folds its result or throw into the MCP text-result convention. */
@@ -24,22 +25,6 @@ function wrap<Args>(fn: (args: Args) => Promise<unknown>) {
 const opaqueInvitation = z
   .record(z.string(), z.unknown())
   .describe('The invitation object returned by invite_to_namespace, passed through unchanged.');
-
-/**
- * An app's metadata rides the wire as raw bytes; for display, recover the JSON object it usually
- * encodes, fall back to the plain string, or drop it - never dump the byte array itself.
- */
-function displayMetadata(bytes: number[]): unknown {
-  if (bytes.length === 0) return undefined;
-  const buf = Buffer.from(bytes);
-  const text = buf.toString('utf8');
-  if (!Buffer.from(text, 'utf8').equals(buf)) return undefined; // not valid UTF-8: nothing readable to show
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
-}
 
 // Hex matches how this codebase already renders bytes for display (see schema.ts's bytesSchema).
 const toHex = (bytes: number[]) => Buffer.from(bytes).toString('hex');
@@ -91,7 +76,7 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
     { description: 'Applications installed on this node.', inputSchema: {}, annotations: { readOnlyHint: true } },
     wrap(async (_args: Record<string, never>) => {
       const { apps } = await admin.listApplications();
-      return { apps: apps.map((app: Application) => ({ ...app, metadata: displayMetadata(app.metadata) })) };
+      return { apps: apps.map((app: Application) => ({ ...app, appVersion: app.version ?? null, ...listing(app.metadata) })) };
     }),
   );
 

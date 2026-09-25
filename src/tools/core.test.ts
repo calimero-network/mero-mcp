@@ -149,6 +149,30 @@ test('list_applications decodes metadata for display: JSON object, plain string,
   assert.equal('metadata' in apps[3], false, 'an empty metadata array carries nothing worth showing');
 });
 
+test('list_applications adds appVersion, leaves the guide out and lists its procedures, an empty array when there is none', async () => {
+  const guide = ['## Overview', 'A store.', '## Procedures', '### Save a value', '### Read it back', '## Rules and limits', '### Not one'].join('\n');
+  const admin = {
+    listApplications: async () => ({
+      apps: [
+        { id: 'AppId1', package: 'pkg-guided', version: '0.1.0', metadata: utf8Bytes(JSON.stringify({ name: 'kv-store', guide })) },
+        { id: 'AppId2', package: 'pkg-plain', metadata: utf8Bytes(JSON.stringify({ name: 'notes' })) },
+        { id: 'AppId3', package: 'pkg-text', version: '0.1.0', metadata: utf8Bytes('plain text') },
+      ],
+    }),
+  };
+  const { server, tools } = fakeServer();
+  registerCoreTools(server, fakeSession(admin), loadConfig(env()));
+  const { apps } = jsonOf(await tools.get('list_applications')!({})) as unknown as { apps: Array<Record<string, unknown>> };
+
+  assert.deepEqual(apps[0].metadata, { name: 'kv-store' });
+  assert.deepEqual(apps[0].procedures, ['Save a value', 'Read it back']);
+  assert.equal(apps[0].appVersion, '0.1.0');
+  assert.equal(apps[1].appVersion, null);
+  assert.deepEqual(apps[1].procedures, []);
+  assert.equal(apps[2].metadata, 'plain text');
+  assert.deepEqual(apps[2].procedures, []);
+});
+
 test('list_contexts renders dagHeads as hex, keeping every head a multi-head context carries', async () => {
   const admin = {
     getContexts: async () => ({
