@@ -1,13 +1,22 @@
 import { createRequire } from 'node:module';
-import { McpServer } from '@modelcontextprotocol/server';
+import { McpServer, ResourceNotFoundError, ResourceTemplate } from '@modelcontextprotocol/server';
 import { createAbiLoader } from './abi.ts';
 import { createCatalog } from './catalog.ts';
 import type { Config } from './config.ts';
-import { createGate } from './gate.ts';
+import { createGate, packageKey } from './gate.ts';
+import { GUIDE_URI_TEMPLATE, guideUri } from './guide.ts';
 import type { NodeSession } from './node.ts';
 import { registerAppTools } from './tools/app.ts';
 import { registerCoreTools } from './tools/core.ts';
 import { registerGeneratedTools } from './tools/generated.ts';
+
+const INSTRUCTIONS =
+  'Calimero apps describe themselves. Do not read app source. ' +
+  'To use an app: list_applications, then describe_app to plan or select_app to act, ' +
+  'then pass the returned app_handle on every app tool call.';
+
+const LIST_CACHE = { ttlMs: 30_000, cacheScope: 'private' as const };
+const GUIDE_CACHE = { ttlMs: 86_400_000, cacheScope: 'private' as const };
 
 /** The published version, so a client's diagnostics name the build it is talking to. */
 function packageVersion(): string {
@@ -29,12 +38,41 @@ export function createServerFactory(session: NodeSession, cfg: Config) {
 
     const server = new McpServer(
       { name: 'mero-mcp', version: packageVersion() },
-      { debouncedNotificationMethods: ['notifications/tools/list_changed'] },
+      {
+        instructions: INSTRUCTIONS,
+        cacheHints: { 'tools/list': LIST_CACHE, 'resources/list': LIST_CACHE, 'resources/templates/list': LIST_CACHE, 'prompts/list': LIST_CACHE },
+        debouncedNotificationMethods: ['notifications/tools/list_changed', 'notifications/resources/list_changed'],
+      },
     );
     registerCoreTools(server, session, cfg, catalog);
     registerAppTools(server, session, loader, catalog, gate);
     const unsubscribeTools = registerGeneratedTools(server, catalog, gate, session, loader);
-    server.server.onclose = unsubscribeTools;
+    const unsubscribeResources = catalog.subscribe(() => server.sendResourceListChanged());
+
+    const guided = () => catalog.apps().filter((a) => a.guide && a.package && a.version);
+    server.registerResource(
+      'app-guide',
+      new ResourceTemplate(GUIDE_URI_TEMPLATE, {
+        list: async () => ({
+          resources: [...new Map(guided().map((a) => [guideUri(packageKey(a), a.version!), a])).entries()].map(([uri, a]) => ({
+            uri,
+            name: `${a.name ?? a.package} guide`,
+            mimeType: 'text/markdown',
+          })),
+        }),
+      }),
+      { mimeType: 'text/markdown', cacheHint: GUIDE_CACHE },
+      async (uri, { package: pkg, version }) => {
+        const app = guided().find((a) => a.package === pkg && a.version === version);
+        if (!app) throw new ResourceNotFoundError(uri.href);
+        return { contents: [{ uri: uri.href, mimeType: 'text/markdown', text: app.guide! }] };
+      },
+    );
+
+    server.server.onclose = () => {
+      unsubscribeTools();
+      unsubscribeResources();
+    };
     return server;
   };
 }
