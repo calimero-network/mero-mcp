@@ -161,7 +161,7 @@ Two harnesses drive the built server over real MCP stdio against a real node.
 Both boot their own `merod` on port 2571 in a temp home and tear it down on the way out, so neither touches `~/.calimero` or your real state directory.
 
 ```bash
-npm run e2e          # 16 assertions: the protocol, the ABI-derived tools, and a round trip verified out of band
+npm run e2e          # 17 assertions: the protocol, the ABI-derived tools, and a round trip verified out of band
 npm run e2e:cycle    # 8 assertions: admin login -> client key -> agent.json handoff, with zero credentials in the environment
 ```
 
