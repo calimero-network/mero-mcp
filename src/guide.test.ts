@@ -42,10 +42,10 @@ test('a guide without ## Procedures has no procedures', () => {
 
 test('a leading UTF-8 BOM does not hide the first heading', () => {
   const guide = lines('## Procedures', '### Save a value');
-  assert.deepEqual(procedures('﻿' + guide), procedures(guide));
+  assert.deepEqual(procedures('\ufeff' + guide), procedures(guide));
 });
 
-test('leading tabs in a fence line are not valid per the registry rule', () => {
+test('a tab-indented backtick line is not a fence, so later procedures still count', () => {
   assert.deepEqual(procedures(lines('## Procedures', '### Real', '\t```', '### Still real')), [
     'Real',
     'Still real',

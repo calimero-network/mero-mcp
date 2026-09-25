@@ -53,4 +53,3 @@ export function listing(bytes: number[]): { metadata: unknown; procedures: strin
   const { guide, ...rest } = metadata;
   return { metadata: rest, procedures: typeof guide === 'string' ? procedures(guide) : [] };
 }
-
