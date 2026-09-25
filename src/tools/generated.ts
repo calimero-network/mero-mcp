@@ -2,10 +2,11 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { McpServer, RegisteredTool } from '@modelcontextprotocol/server';
 import type { AbiMethod } from '@calimero-network/abi-codegen';
-import { AppNotFoundError, lastSegment, type AbiLoader, type ResolvedApp } from '../abi.ts';
+import { AppNotFoundError, byVersion, lastSegment, type AbiLoader, type ResolvedApp } from '../abi.ts';
 import type { Catalog } from '../catalog.ts';
 import { errorResult } from '../errors.ts';
 import { advertised, packageKey, type Gate } from '../gate.ts';
+import type { HandlePayload } from '../handle.ts';
 import type { NodeSession } from '../node.ts';
 import { inputShapeForMethod, renderMethodSignature, schemaBuilder } from '../schema.ts';
 
@@ -24,13 +25,19 @@ function baseSlug(app: ResolvedApp): string {
   return (app.serviceName ? `${base}_${sanitize(app.serviceName)}` : base).slice(0, MAX_SLUG);
 }
 
+const codeUnit = (x: string, y: string) => (x < y ? -1 : x > y ? 1 : 0);
+
+// A package's newest version names first, so the plain names are the ones select_app hands a default handle for.
+const namingOrder = (apps: readonly ResolvedApp[]) =>
+  [...apps].sort((a, b) => codeUnit(packageKey(a), packageKey(b)) || byVersion(b, a));
+
 const idTail = (app: ResolvedApp) => app.id.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, ID_TAIL);
 
 /** Slug per app, in catalog order; two apps that sanitise alike are told apart by their own id, never by order. */
 export function slugs(apps: readonly ResolvedApp[]): Map<ResolvedApp, string> {
   const out = new Map<ResolvedApp, string>();
   const taken = new Set<string>();
-  for (const app of apps) {
+  for (const app of namingOrder(apps)) {
     const base = baseSlug(app);
     let slug = base;
     if (taken.has(slug)) {
@@ -69,7 +76,7 @@ export function toolNamesByApp(apps: readonly ResolvedApp[], reserved: ReadonlyS
   const bySlug = slugs(apps);
   const taken = new Set(reserved);
   return new Map(
-    apps.map((app) => {
+    namingOrder(apps).map((app) => {
       const slug = bySlug.get(app)!;
       const names = new Map<string, string>();
       for (const { name: method } of toolMethods(app)) {
@@ -135,8 +142,10 @@ export function registerGeneratedTools(
       const upgraded = catalog.apps().find((a) => a.id === app.id && a.serviceName === app.serviceName);
       const same = upgraded && toolMethods(upgraded).find((m) => m.name === method.name);
       if (upgraded && same) [app, method] = [upgraded, same];
+      // The installed version dropped this method, so the tool leaves the list on this sync; never run it against the new one.
+      else return gate.refuse(current, gate.retryText(current)).refusal;
     }
-    const admitted = await gate.admit(current, args[HANDLE_PARAM], app.version ?? '');
+    const admitted = await gate.admit(current, args[HANDLE_PARAM], (payload) => sibling(app, method, payload));
     if ('refusal' in admitted) return admitted.refusal;
     const argsJson = z.object(inputShapeForMethod(method, app.manifest)).parse(args);
     const result = await session.mero.rpc.execute({ contextId: admitted.contextId, method: method.name, argsJson });
@@ -144,6 +153,17 @@ export function registerGeneratedTools(
       content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) ?? 'null' }],
       ...(method.returns ? { structuredContent: result as Record<string, unknown> } : {}),
     };
+  }
+
+  /** For a handle naming another installed version of this tool's package, the tool of that version for the same method. */
+  function sibling(app: ResolvedApp, method: AbiMethod, payload: HandlePayload) {
+    const toolVersion = app.version ?? '';
+    if (payload.p !== packageKey(app) || payload.v === toolVersion) return undefined;
+    const names = toolNamesByApp(catalog.apps(), reserved);
+    const owner = [...names.keys()].find(
+      (a) => packageKey(a) === payload.p && (a.version ?? '') === payload.v && (a.serviceName ?? null) === payload.s,
+    );
+    return owner && { toolVersion, tool: names.get(owner)!.get(method.name) };
   }
 
   function register() {

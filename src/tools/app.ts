@@ -39,8 +39,21 @@ const noContexts = (label: string) =>
 
 const contextsFor = (label: string, ids: string[]) => `Contexts for "${label}": ${ids.join(', ') || '(none)'}`;
 
+type VersionedContext = { id: string; version?: string };
+
+const contextsElsewhere = (label: string, version: string, elsewhere: VersionedContext[]) =>
+  `Application "${label}" ${version} has no contexts on this node; other installed versions do: ` +
+  `${elsewhere.map((c) => `${c.id} (${c.version ?? 'unversioned'})`).join(', ')}. ` +
+  `Pass context with one of them to act on that version, ` +
+  `or create one for ${version} in the Calimero desktop app or with create_context.`;
+
 const severalContexts = (label: string, ids: string[]) =>
   `Application "${label}" has ${ids.length} contexts; pass context with one of: ${ids.join(', ')}`;
+
+function noContextNote(label: string, version: string | undefined, ids: string[], elsewhere: VersionedContext[]) {
+  if (ids.length) return severalContexts(label, ids);
+  return elsewhere.length ? contextsElsewhere(label, version ?? 'unversioned', elsewhere) : noContexts(label);
+}
 
 /** A second content block onward, so the structured result in the first stays parseable JSON. */
 const withBlocks = (data: unknown, blocks: Array<{ type: string }>) =>
@@ -98,13 +111,21 @@ export function registerAppTools(
   /** With a context, the installed version whose application owns it (the handle binds that version); without, the newest. */
   async function chooseVersion(app: string, context?: string) {
     const versions = await loader.versionsOf(app);
-    if (!context) return { id: versions[0].id, contexts: await gate.contextsOf(versions[0].id), contextId: undefined };
-    const owners = await Promise.all(versions.map(async ({ id }) => ({ id, contexts: await gate.contextsOf(id) })));
-    const candidates = [...new Set(owners.flatMap((o) => o.contexts.map((c) => c.id)))];
+    const owners = async (of: typeof versions) =>
+      Promise.all(of.map(async ({ id, version }) => ({ id, version, contexts: await gate.contextsOf(id) })));
+    if (!context) {
+      const [newest] = await owners(versions.slice(0, 1));
+      // Without a context the newest version is bound; point at the others' contexts rather than suggest creating one.
+      const others = newest.contexts.length ? [] : await owners(versions.slice(1));
+      const elsewhere = others.flatMap((o) => o.contexts.map((c) => ({ id: c.id, version: o.version })));
+      return { ...newest, contextId: undefined, elsewhere };
+    }
+    const owned = await owners(versions);
+    const candidates = [...new Set(owned.flatMap((o) => o.contexts.map((c) => c.id)))];
     const contextId = await resolveContextValue(context, app, candidates);
-    const owner = owners.find((o) => o.contexts.some((c) => c.id === contextId));
+    const owner = owned.find((o) => o.contexts.some((c) => c.id === contextId));
     if (!owner) throw new Error(`Context "${context}" does not belong to "${app}". ${contextsFor(app, candidates)}`);
-    return { ...owner, contextId };
+    return { ...owner, contextId, elsewhere: [] };
   }
 
   /** The catalog entry `match` picks; a miss (node down at connect, or an install made elsewhere) syncs once first. */
@@ -115,7 +136,8 @@ export function registerAppTools(
     return catalog.apps().find(match);
   }
 
-  const sameUnit = (app: ResolvedApp) => (a: ResolvedApp) => a.id === app.id && a.serviceName === app.serviceName;
+  const sameUnit = (app: ResolvedApp) => (a: ResolvedApp) =>
+    a.id === app.id && a.serviceName === app.serviceName && a.version === app.version;
 
   /** The refusal for a call its handle does not cover, with the guide of the app `app` names when it names one. */
   async function refuseWithout(app: unknown) {
@@ -181,7 +203,7 @@ export function registerAppTools(
             tools,
             toolsNote: TOOLS_NOTE,
             context: contextId,
-            ...(contextId ? {} : { note: ids.length ? severalContexts(app, ids) : noContexts(app) }),
+            ...(contextId ? {} : { note: noContextNote(app, chosen.version, ids, chosen.elsewhere) }),
           },
           resolved.guide ? guideBlocks(resolved) : [],
         );

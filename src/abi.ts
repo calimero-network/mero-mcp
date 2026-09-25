@@ -27,7 +27,7 @@ export interface ResolvedApp {
 export class AppNotFoundError extends Error {}
 
 // Numeric, so 1.10.0 sorts after 1.9.0 and two installed versions of one package never fall back to node order.
-const byVersion = (a: { version?: string }, b: { version?: string }) =>
+export const byVersion = (a: { version?: string }, b: { version?: string }) =>
   (a.version ?? '').localeCompare(b.version ?? '', undefined, { numeric: true });
 
 /** Packages are reverse-DNS dotted; the trailing segment is the name people type and tool names are built from. */

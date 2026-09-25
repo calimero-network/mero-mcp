@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { fromJsonSchema } from '@modelcontextprotocol/server';
 import type { ResolvedApp } from './abi.ts';
 import { guideBlocks } from './guide.ts';
-import { guideHash, handles, type HandleKeeper } from './handle.ts';
+import { guideHash, handles, type HandleKeeper, type HandlePayload } from './handle.ts';
 import type { NodeSession } from './node.ts';
 
 interface AppContext {
@@ -26,6 +26,13 @@ export const advertisedObject = (schema: z.ZodObject) => {
   return advertised(json);
 };
 
+/** What a generated tool knows when a handle names another installed version of its package. */
+export interface Sibling {
+  toolVersion: string;
+  /** The tool of the handle's version for the same method, when that version has one. */
+  tool?: string;
+}
+
 export type Admission = { contextId: string } | { refusal: { isError: true; content: Block[] } };
 
 export const packageKey = (app: ResolvedApp) => app.package ?? app.id;
@@ -35,8 +42,13 @@ const retry = (app: ResolvedApp) => `Call select_app for ${packageKey(app)} and 
 const noContext = (app: ResolvedApp) =>
   `This app_handle names no context. Call select_app for ${packageKey(app)} with a context and retry with the returned app_handle.`;
 
-const otherVersion = (app: ResolvedApp, handleVersion: string, toolVersion: string) =>
-  `This app_handle is for ${packageKey(app)} ${handleVersion}, but this tool belongs to ${packageKey(app)} ${toolVersion}. ${retry(app)}`;
+/** Names the tool that takes this handle, and how to get a handle for this tool, so a crossed call ends in one retry. */
+function otherVersion(app: ResolvedApp, handleVersion: string, { toolVersion, tool }: Sibling): string {
+  const pkg = packageKey(app);
+  const select = `call select_app for ${pkg} with a context of ${pkg} ${toolVersion} and retry with the returned app_handle.`;
+  const redirect = tool ? `Pass it to ${tool} instead, or ${select}` : `${select.charAt(0).toUpperCase()}${select.slice(1)}`;
+  return `This app_handle is for ${pkg} ${handleVersion}, but this tool belongs to ${pkg} ${toolVersion}. ${redirect}`;
+}
 
 /** The handle select_app and describe_app give out for this app as installed right now. */
 export const handlePayload = (app: ResolvedApp, contextId: string | null) => ({
@@ -65,14 +77,13 @@ export function createGate(session: NodeSession, keeper: HandleKeeper = handles)
 
     /**
      * The context a call may run in, or the refusal: a handle must match the installed app, its guide and a live context.
-     * `toolVersion` is the version a generated tool was built from, so a handle for a sibling installed version says which.
+     * `sibling` answers for a readable handle naming another installed version, so the refusal says where it does work.
      */
-    async admit(app: ResolvedApp, handle: unknown, toolVersion?: string): Promise<Admission> {
+    async admit(app: ResolvedApp, handle: unknown, sibling?: (payload: HandlePayload) => Sibling | undefined): Promise<Admission> {
       const payload = keeper.read(handle);
       const expected = handlePayload(app, null);
-      if (payload && toolVersion !== undefined && payload.p === expected.p && payload.v !== toolVersion) {
-        return refuse(app, otherVersion(app, payload.v, toolVersion));
-      }
+      const other = payload && sibling?.(payload);
+      if (payload && other) return refuse(app, otherVersion(app, payload.v, other));
       if (!payload || (['p', 'v', 'g', 's'] as const).some((key) => payload[key] !== expected[key])) return refuse(app, retry(app));
       if (payload.c === null) return refuse(app, noContext(app), false);
       const target = (await contextsOf(app.id)).find((c) => c.id === payload.c);
