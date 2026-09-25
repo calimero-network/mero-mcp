@@ -18,6 +18,20 @@ const INSTRUCTIONS =
 const LIST_CACHE = { ttlMs: 30_000, cacheScope: 'private' as const };
 const GUIDE_CACHE = { ttlMs: 86_400_000, cacheScope: 'private' as const };
 
+/** Runs `register`, adding every tool name it registers on `server` to `names`, so generated names can steer around them. */
+function recordToolNames(server: McpServer, names: Set<string>, register: () => void): void {
+  const registerTool = server.registerTool;
+  server.registerTool = ((...args: unknown[]) => {
+    names.add(args[0] as string);
+    return (registerTool as (...a: unknown[]) => unknown).apply(server, args);
+  }) as typeof registerTool;
+  try {
+    register();
+  } finally {
+    server.registerTool = registerTool;
+  }
+}
+
 /** The published version, so a client's diagnostics name the build it is talking to. */
 function packageVersion(): string {
   return createRequire(import.meta.url)('../package.json').version as string;
@@ -44,9 +58,12 @@ export function createServerFactory(session: NodeSession, cfg: Config) {
         debouncedNotificationMethods: ['notifications/tools/list_changed', 'notifications/resources/list_changed'],
       },
     );
-    registerCoreTools(server, session, cfg, catalog);
-    registerAppTools(server, session, loader, catalog, gate);
-    const unsubscribeTools = registerGeneratedTools(server, catalog, gate, session, loader);
+    const reserved = new Set<string>();
+    recordToolNames(server, reserved, () => {
+      registerCoreTools(server, session, cfg, catalog);
+      registerAppTools(server, session, loader, catalog, gate, reserved);
+    });
+    const unsubscribeTools = registerGeneratedTools(server, catalog, gate, session, loader, reserved);
     const unsubscribeResources = catalog.subscribe(() => server.sendResourceListChanged());
 
     const guided = () => catalog.apps().filter((a) => a.guide && a.package && a.version);

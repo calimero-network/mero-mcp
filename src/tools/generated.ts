@@ -12,6 +12,8 @@ import { inputShapeForMethod, renderMethodSignature, schemaBuilder } from '../sc
 const MAX_SLUG = 20;
 const MAX_NAME = 49; // 64 minus Claude Code's 15-char `mcp__mero-mcp__` prefix
 const HASHED_KEEP = 42;
+const ID_TAIL = 6; // id alphanumerics that tell two same-named apps apart
+const NAME_HASH_HEX = 6; // sha256 hex that ends a shortened name
 const HANDLE_PARAM = 'app_handle';
 const APP_HANDLE_DOC = 'The app_handle select_app returned for this application; it names the context the call runs in.';
 
@@ -22,6 +24,8 @@ function baseSlug(app: ResolvedApp): string {
   return (app.serviceName ? `${base}_${sanitize(app.serviceName)}` : base).slice(0, MAX_SLUG);
 }
 
+const idTail = (app: ResolvedApp) => app.id.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, ID_TAIL);
+
 /** Slug per app, in catalog order; two apps that sanitise alike are told apart by their own id, never by order. */
 export function slugs(apps: readonly ResolvedApp[]): Map<ResolvedApp, string> {
   const out = new Map<ResolvedApp, string>();
@@ -30,7 +34,7 @@ export function slugs(apps: readonly ResolvedApp[]): Map<ResolvedApp, string> {
     const base = baseSlug(app);
     let slug = base;
     if (taken.has(slug)) {
-      const tail = app.id.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 6);
+      const tail = idTail(app);
       slug = `${base}_${tail}`;
       for (let n = 2; taken.has(slug); n++) slug = `${base}_${tail}_${n}`;
     }
@@ -43,7 +47,7 @@ export function slugs(apps: readonly ResolvedApp[]): Map<ResolvedApp, string> {
 export function toolName(slug: string, method: string): string {
   const full = `${slug}_${method}`;
   if (full.length <= MAX_NAME) return full;
-  return `${full.slice(0, HASHED_KEEP)}_${createHash('sha256').update(full).digest('hex').slice(0, 6)}`;
+  return `${full.slice(0, HASHED_KEEP)}_${createHash('sha256').update(full).digest('hex').slice(0, NAME_HASH_HEX)}`;
 }
 
 export function toolTitle(app: ResolvedApp, method: string): string {
@@ -57,10 +61,26 @@ const collides = (method: AbiMethod) => method.params.some((p) => p.name === HAN
 const toolMethods = (app: ResolvedApp) =>
   app.manifest.methods.filter((m) => !collides(m)).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 
-/** Every tool name the catalog yields, per app: what select_app reports and what tools/list shows. */
-export function toolNamesByApp(apps: readonly ResolvedApp[]): Map<ResolvedApp, string[]> {
+/**
+ * Tool name per method of every app, unique against `reserved` and each other: what select_app reports and tools/list shows.
+ * Slugs are unique, but a slug plus a method can still spell a built-in or another app's name, so a clash takes the id tail.
+ */
+export function toolNamesByApp(apps: readonly ResolvedApp[], reserved: ReadonlySet<string>): Map<ResolvedApp, Map<string, string>> {
   const bySlug = slugs(apps);
-  return new Map(apps.map((app) => [app, toolMethods(app).map((m) => toolName(bySlug.get(app)!, m.name))]));
+  const taken = new Set(reserved);
+  return new Map(
+    apps.map((app) => {
+      const slug = bySlug.get(app)!;
+      const names = new Map<string, string>();
+      for (const { name: method } of toolMethods(app)) {
+        let name = toolName(slug, method);
+        for (let n = 1; taken.has(name); n++) name = toolName(`${slug}_${idTail(app)}${n > 1 ? `_${n}` : ''}`, method);
+        taken.add(name);
+        names.set(method, name);
+      }
+      return [app, names];
+    }),
+  );
 }
 
 function toolConfig(app: ResolvedApp, method: AbiMethod) {
@@ -95,6 +115,7 @@ export function registerGeneratedTools(
   gate: Gate,
   session: NodeSession,
   loader: AbiLoader,
+  reserved: ReadonlySet<string>,
 ): () => void {
   let registered: RegisteredTool[] = [];
 
@@ -127,7 +148,7 @@ export function registerGeneratedTools(
 
   function register() {
     for (const tool of registered) tool.remove();
-    const names = toolNamesByApp(catalog.apps());
+    const names = toolNamesByApp(catalog.apps(), reserved);
     for (const app of catalog.apps()) {
       for (const m of app.manifest.methods.filter(collides)) {
         const where = `${packageKey(app)} ${app.version ?? ''} ${m.name}`;
@@ -135,8 +156,8 @@ export function registerGeneratedTools(
       }
     }
     registered = catalog.apps().flatMap((app) =>
-      toolMethods(app).map((method, i) =>
-        server.registerTool(names.get(app)![i], toolConfig(app, method), async (args: unknown) =>
+      toolMethods(app).map((method) =>
+        server.registerTool(names.get(app)!.get(method.name)!, toolConfig(app, method), async (args: unknown) =>
           invoke(app, method, args as Record<string, unknown>).catch(errorResult),
         ),
       ),

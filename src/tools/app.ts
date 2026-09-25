@@ -46,7 +46,14 @@ const severalContexts = (label: string, ids: string[]) =>
 const withBlocks = (data: unknown, blocks: Array<{ type: string }>) =>
   ({ content: [...textResult(data).content, ...blocks] }) as ReturnType<typeof textResult>;
 
-export function registerAppTools(server: McpServer, session: NodeSession, loader: AbiLoader, catalog: Catalog, gate: Gate): void {
+export function registerAppTools(
+  server: McpServer,
+  session: NodeSession,
+  loader: AbiLoader,
+  catalog: Catalog,
+  gate: Gate,
+  reserved: ReadonlySet<string>,
+): void {
   const aliases = new Map<string, string>();
 
   async function summarize(app: ResolvedApp, contextId: string | null) {
@@ -155,8 +162,8 @@ export function registerAppTools(server: McpServer, session: NodeSession, loader
         // A context belongs to one service, so the chosen context decides which service the handle binds.
         const contextService = chosen.contexts.find((c) => c.id === contextId)?.serviceName;
         const resolved = await loader.load(chosen.id, contextService ?? service);
-        const byApp = [...toolNamesByApp(catalog.apps()).entries()];
-        const tools = byApp.find(([a]) => a.id === resolved.id && a.serviceName === resolved.serviceName)?.[1] ?? [];
+        const byApp = [...toolNamesByApp(catalog.apps(), reserved).entries()];
+        const tools = [...(byApp.find(([a]) => a.id === resolved.id && a.serviceName === resolved.serviceName)?.[1].values() ?? [])];
         return withBlocks(
           {
             ...(await summarize(resolved, contextId)),

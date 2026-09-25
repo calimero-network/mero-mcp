@@ -650,3 +650,60 @@ test('a method with its own app_handle parameter gets no generated tool and is r
     await s.close();
   }
 });
+
+const tiny = (id: string, pkg: string, methods: string[]): FakeApp => ({
+  id,
+  package: pkg,
+  version: '1.0.0',
+  abi: manifest(methods.map((m) => method(m))),
+  contexts: [ctx(id.replace(/[^1-9A-HJ-NP-Za-km-z]/g, ''))],
+});
+
+test('a generated name that equals a built-in tool is disambiguated, and the server still connects', async () => {
+  const s = await setup([tiny('nodeapp-id', 'com.x.node', ['status'])]);
+  try {
+    const names = (await s.client.listTools()).tools.map((t) => t.name);
+    assert.equal(names.filter((n) => n === 'node_status').length, 1);
+    assert.ok(names.includes('node_nodeap_status'));
+    const { app_handle, tools } = await s.json('select_app', { app: 'node' });
+    assert.deepEqual(tools, ['node_nodeap_status']);
+    await s.call('node_nodeap_status', { app_handle });
+    assert.equal(s.executed[0].method, 'status');
+  } finally {
+    await s.close();
+  }
+});
+
+test("two apps whose names meet keep one tool each, and each reaches its own app", async () => {
+  const s = await setup([tiny('a-id', 'com.x.kv', ['store_get']), tiny('b-id', 'com.y.kv-store', ['get'])]);
+  try {
+    const names = (await s.client.listTools()).tools.map((t) => t.name);
+    assert.ok(names.includes('kv_store_get') && names.includes('kv_store_bid_get'), JSON.stringify(names));
+    const kvStore = await s.json('select_app', { app: 'com.y.kv-store' });
+    assert.deepEqual(kvStore.tools, ['kv_store_bid_get']);
+    await s.call('kv_store_bid_get', { app_handle: kvStore.app_handle });
+    const kvApp = await s.json('select_app', { app: 'com.x.kv' });
+    await s.call('kv_store_get', { app_handle: kvApp.app_handle });
+    assert.deepEqual(s.executed.map((e) => e.method), ['get', 'store_get']);
+  } finally {
+    await s.close();
+  }
+});
+
+test('an install whose tool name meets an existing one registers both, and the list keeps working', async () => {
+  const s = await setup([tiny('a-id', 'com.x.kv', ['store_get', 'ping'])]);
+  Object.assign(s.session.mero.admin, {
+    installApplication: async () => (s.apps.push(tiny('b-id', 'com.y.kv-store', ['get'])), { applicationId: 'b-id' }),
+  });
+  try {
+    const installed = await s.call('install_application', { coords: 'com.y.kv-store@1.0.0' });
+    assert.equal(installed.isError, undefined);
+    const names = (await s.client.listTools()).tools.map((t) => t.name);
+    assert.ok(['kv_store_get', 'kv_ping', 'kv_store_bid_get'].every((n) => names.includes(n)), JSON.stringify(names));
+    const { app_handle } = await s.json('select_app', { app: 'com.y.kv-store' });
+    await s.call('kv_store_bid_get', { app_handle });
+    assert.deepEqual(s.executed.map((e) => e.method), ['get']);
+  } finally {
+    await s.close();
+  }
+});
