@@ -213,7 +213,7 @@ When no context exists to read a service name from, a `serviceNote` says so: not
 
 ### `select_app`
 
-Choose an application and the context to act in.
+Choose an application and the context to act in. Read-only.
 
 | Argument | Type | Notes |
 | --- | --- | --- |
@@ -222,7 +222,12 @@ Choose an application and the context to act in.
 | `service` | string, optional | Only when no context is chosen; a chosen context decides the service |
 
 Returns everything `describe_app` does, plus the app's tool names (`tools`), the chosen `context`, and an `app_handle` bound to that context and its service.
+`tools` lists exactly the tools of the version and service the handle binds.
+With a context, the handle binds the installed version whose application owns it; without one, the highest installed version.
+For a bundle with one named service, a context created without a service name binds that service.
 With several contexts and none chosen, `context` is `null` and a `note` lists the ids.
+When the highest version has no contexts but other installed versions do, the `note` lists those contexts, each with its version.
+An app missing from the tool list, for example because the node was down at connect, makes `select_app`, `describe_app` and `call` read the list again first.
 
 ### `call`
 
@@ -239,8 +244,9 @@ An unknown `method` returns the list of methods that exist.
 
 ## Generated method tools
 
-One per method of every installed application version, sorted by package then method, for every client alike.
+One per method of every installed application version, sorted by package, then version, then service, then method, for every client alike.
 Named `<app>_<method>`, or `<app>_<service>_<method>` for a multi-service application, where `<app>` is the sanitised trailing package segment cut to 20 characters; a name longer than 49 characters keeps its first 42 and ends in `_` plus 6 hex of its sha256.
+A name never repeats a fixed tool's name or another app's: a clash adds `_` plus 6 alphanumerics of the application id (see [tool naming](/reference/abi-mapping/#tool-naming)).
 
 | Argument | Type | Notes |
 | --- | --- | --- |

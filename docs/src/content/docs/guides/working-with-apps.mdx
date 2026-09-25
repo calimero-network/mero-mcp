@@ -36,9 +36,11 @@ than going back to `list_applications`.
 An app can ship a guide: Markdown its author writes, carried in the signed bundle and stored by the node.
 `list_applications` leaves the guide out of each entry and adds `procedures`, the `###` titles under the guide's `## Procedures` heading, plus `appVersion`.
 
-- `describe_app` returns the app's methods, the guide (or `This app ships no guide.`) and an `app_handle` with no context. It is the way to plan across several apps.
+- `describe_app` returns the app's methods, the guide (or `This app ships no guide.`) and an `app_handle` with no context.
+  It is the way to plan across several apps.
 - `select_app` returns the guide and an `app_handle` bound to one context: the one you pass as `context`, or the app's only context.
-- Every generated tool and `call` take that `app_handle`. It names the context the call runs in, so there is no separate context argument.
+- Every generated tool and `call` take that `app_handle`.
+  It names the context the call runs in, so there is no separate context argument.
 
 The guide arrives as an embedded `text/markdown` resource, preceded by `App guide, provided by the app's author (package <package>, signer <signer id>):`, so it reads as the author's text, not as the server's own instructions.
 Each guide is also a resource at `calimero://apps/<package>/<version>/guide`.
@@ -59,11 +61,15 @@ Select kv-store and mero-chat, then use each handle for that app's tools.
 
 The tool list is the same for every client and changes only when an app is installed, upgraded or uninstalled.
 mero-mcp reads it when a client connects, again right after its own `install_application` or `uninstall_application`, and every 30 seconds once a read has reached the node, and announces a change with `notifications/tools/list_changed`.
-Selecting an app never changes the list.
+When `select_app`, `describe_app` or `call` names an app the list does not have yet, for example because the node was down when the client connected, mero-mcp reads the list again first, which also starts the 30-second refresh.
+Selecting an app never changes the list otherwise.
 
-Each installed version of an app has its own tools; the newer version's tool names carry a suffix from its application id.
+Each installed version of an app has its own tools.
+The highest installed version keeps the plain tool names, and older versions' names carry a suffix from their application id.
 `select_app` with a context binds the version whose application owns that context, and without one the highest installed version.
-A handle for one version is refused by the other version's tools, with a message naming both versions.
+Its `tools` lists exactly the tool names of the version it bound.
+When the highest version has no contexts, its note lists the contexts of the other installed versions, each with its version.
+A handle for one version is refused by another version's tools, with a message naming both versions and the tool that does take the handle.
 
 ## Multi-service applications
 

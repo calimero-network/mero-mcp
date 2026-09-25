@@ -1,5 +1,8 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
+const GUIDE_HASH_HEX = 16;
+const KEY_BYTES = 32;
+
 /** What an app_handle vouches for: package, app version, guide hash, the context it targets, and that context's service. */
 export interface HandlePayload {
   p: string;
@@ -9,8 +12,9 @@ export interface HandlePayload {
   s: string | null;
 }
 
-/** First 16 hex of sha256 over the guide text, or over "" for an app that ships none. */
-export const guideHash = (guide: string | undefined): string => createHash('sha256').update(guide ?? '').digest('hex').slice(0, 16);
+/** The first GUIDE_HASH_HEX hex of sha256 over the guide text, or over "" for an app that ships none. */
+export const guideHash = (guide: string | undefined): string =>
+  createHash('sha256').update(guide ?? '').digest('hex').slice(0, GUIDE_HASH_HEX);
 
 export function handleKeeper(key: Buffer) {
   const mac = (json: Buffer) => createHmac('sha256', key).update(json).digest();
@@ -36,4 +40,4 @@ export function handleKeeper(key: Buffer) {
 export type HandleKeeper = ReturnType<typeof handleKeeper>;
 
 // One key per process, never persisted: a restart invalidates every handle, which select_app reissues.
-export const handles = handleKeeper(randomBytes(32));
+export const handles = handleKeeper(randomBytes(KEY_BYTES));

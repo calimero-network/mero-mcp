@@ -88,3 +88,28 @@ test('the refresh poll starts with the first sync that reaches the node and runs
   assert.equal(listed, 2);
   assert.equal(changes, 2);
 });
+
+test('overlapping syncs run in order, so an older snapshot finishing late never replaces a newer one', async () => {
+  const node = fakeNode([app('a-id', 'org.a')]);
+  const loader = createAbiLoader(node.session);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  let calls = 0;
+  const loadAll = loader.loadAll;
+  loader.loadAll = async () => {
+    const first = calls++ === 0;
+    const snapshot = await loadAll();
+    if (first) await held;
+    return snapshot;
+  };
+  const catalog = createCatalog(loader);
+
+  const older = catalog.sync();
+  await new Promise((resolve) => setImmediate(resolve));
+  node.apps.push(app('b-id', 'org.b'));
+  const newer = catalog.sync();
+  await new Promise((resolve) => setImmediate(resolve));
+  release();
+  await Promise.all([older, newer]);
+  assert.deepEqual(catalog.apps().map((a) => a.package), ['org.a', 'org.b']);
+});

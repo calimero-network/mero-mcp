@@ -49,6 +49,31 @@ for (const era of Object.keys(ERAS) as Era[]) {
   });
 }
 
+test('guide resources are one per package version: a multi-service app lists once, two versions list side by side', async () => {
+  const drive: FakeApp = {
+    id: 'drive-id',
+    package: 'com.calimero.mero-drive',
+    version: '2.0.0',
+    metadata: { name: 'Mero Drive', guide: '## Overview\ndrive' },
+    abi: undefined,
+    services: { docs: manifest([method('create_doc')]), registry: manifest([method('register_folder')]) },
+  };
+  const newer = { ...guided('1.1.0'), id: 'kv-two', metadata: { name: 'KV Store', guide: '## Overview\nkv two' } };
+  const { client, close } = await connect(createServerFactory(fakeNode([guided(), newer, drive]).session, CFG));
+  try {
+    const { resources } = await client.listResources();
+    assert.deepEqual(resources.map((r) => r.uri), [
+      'calimero://apps/com.calimero.kv-store/1.0.0/guide',
+      'calimero://apps/com.calimero.kv-store/1.1.0/guide',
+      'calimero://apps/com.calimero.mero-drive/2.0.0/guide',
+    ]);
+    const read = await client.readResource({ uri: 'calimero://apps/com.calimero.kv-store/1.1.0/guide' });
+    assert.equal((read.contents[0] as { text: string }).text, '## Overview\nkv two');
+  } finally {
+    await close();
+  }
+});
+
 test('both eras list wire-identical tool, resource and resource-template definitions', async () => {
   const listedIn = async (era: Era) => {
     const { client, close } = await connect(createServerFactory(fakeNode([guided()]).session, CFG), era);
@@ -106,15 +131,18 @@ test('installing an app announces a tool and resource list change; selecting one
   });
   const { client, close } = await connect(createServerFactory(node.session, CFG));
   const seen: string[] = [];
-  client.setNotificationHandler('notifications/tools/list_changed', () => void seen.push('tools'));
-  client.setNotificationHandler('notifications/resources/list_changed', () => void seen.push('resources'));
+  const notified = (method: 'notifications/tools/list_changed' | 'notifications/resources/list_changed', label: string) =>
+    new Promise<void>((resolve) => client.setNotificationHandler(method, () => (seen.push(label), resolve())));
+  const toolsChanged = notified('notifications/tools/list_changed', 'tools');
+  const resourcesChanged = notified('notifications/resources/list_changed', 'resources');
   try {
     await client.callTool({ name: 'select_app', arguments: { app: 'kv-store' } });
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    // The transport keeps order, so once a later request answers, anything select_app sent has arrived.
+    await client.listTools();
     assert.deepEqual(seen, []);
 
     await client.callTool({ name: 'install_application', arguments: { coords: 'org.example.notes@1.0.0' } });
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await Promise.all([toolsChanged, resourcesChanged]);
     assert.deepEqual([...new Set(seen)].sort(), ['resources', 'tools']);
     assert.ok((await client.listTools()).tools.some((t) => t.name === 'notes_set'));
   } finally {

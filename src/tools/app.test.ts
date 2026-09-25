@@ -313,6 +313,8 @@ test('generated tools carry a title, explicit annotations, an icon only for a UR
     assert.deepEqual(get.icons, [{ src: 'https://example.com/kv.png' }]);
     assert.equal(add.icons, undefined);
     assert.deepEqual(get._meta, { package: 'com.calimero.kv-store', appVersion: '1.0.0', signerId: 'SignerKey1', intent: 'read_only' });
+    // select_app only reads the node and mints a handle, so clients need not confirm it.
+    assert.deepEqual(tools.find((t) => t.name === 'select_app')!.annotations, { readOnlyHint: true });
   } finally {
     await s.close();
   }

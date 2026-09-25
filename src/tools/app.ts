@@ -186,6 +186,7 @@ export function registerAppTools(
           .describe('Service name, for a multi-service app when no context is chosen; a chosen context decides it.'),
         context: z.string().optional().describe("Context id or alias; defaults to the application's only context."),
       },
+      annotations: { readOnlyHint: true },
     },
     async ({ app, service, context }) => {
       try {

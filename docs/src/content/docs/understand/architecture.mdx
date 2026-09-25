@@ -61,7 +61,8 @@ The factory makes one attempt to read the installed apps, which is the first req
 
 A node that is down does not stop the server: it leaves only the fixed tools, and the error goes to stderr.
 The first refresh that reaches the node adds the app tools and sends a list-changed notification.
-Because the 30-second poll starts only after a read has reached the node, that refresh is mero-mcp's own `install_application` or `uninstall_application`, or a reconnect.
+The 30-second poll starts with the first read that reaches the node.
+When the node was down at connect, that read is the first `select_app`, `describe_app` or `call` for an app the list lacks, or mero-mcp's own `install_application` or `uninstall_application`.
 
 Behind every node request sits a **lazy session**:
 

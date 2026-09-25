@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { AbiManifest } from '@calimero-network/abi-codegen';
-import { inputShapeForMethod, renderMethodSignature, schemaBuilder, zodForType } from './schema.ts';
+import { inputShapeForMethod, renderMethodSignature, schemaBuilder } from './schema.ts';
 import { z } from 'zod';
 
 function deepFreeze<T>(v: T): T {
@@ -15,56 +15,56 @@ const manifest = (over: Partial<AbiManifest> = {}): AbiManifest =>
 
 test('scalars map to their zod counterparts', () => {
   const m = manifest();
-  assert.equal(zodForType({ kind: 'string' }, m).safeParse('a').success, true);
-  assert.equal(zodForType({ kind: 'u32' }, m).safeParse(1).success, true);
-  assert.equal(zodForType({ kind: 'u32' }, m).safeParse(1.5).success, false);
-  assert.equal(zodForType({ kind: 'bool' }, m).safeParse(true).success, true);
-  assert.equal(zodForType({ kind: 'string' }, m).safeParse(3).success, false);
+  assert.equal(schemaBuilder(m).type({ kind: 'string' }).safeParse('a').success, true);
+  assert.equal(schemaBuilder(m).type({ kind: 'u32' }).safeParse(1).success, true);
+  assert.equal(schemaBuilder(m).type({ kind: 'u32' }).safeParse(1.5).success, false);
+  assert.equal(schemaBuilder(m).type({ kind: 'bool' }).safeParse(true).success, true);
+  assert.equal(schemaBuilder(m).type({ kind: 'string' }).safeParse(3).success, false);
 });
 
 test('a list of strings accepts an array and rejects a scalar', () => {
-  const s = zodForType({ kind: 'list', items: { kind: 'string' } }, manifest());
+  const s = schemaBuilder(manifest()).type({ kind: 'list', items: { kind: 'string' } });
   assert.equal(s.safeParse(['a', 'b']).success, true);
   assert.equal(s.safeParse('a').success, false);
 });
 
 test('a map becomes a record keyed by string', () => {
-  const s = zodForType({ kind: 'map', key: { kind: 'string' }, value: { kind: 'u32' } }, manifest());
+  const s = schemaBuilder(manifest()).type({ kind: 'map', key: { kind: 'string' }, value: { kind: 'u32' } });
   assert.equal(s.safeParse({ a: 1 }).success, true);
   assert.equal(s.safeParse({ a: 'x' }).success, false);
 });
 
 test('a $ref resolves through the manifest type table', () => {
   const m = manifest({ types: { Point: { kind: 'record', fields: [{ name: 'x', type: { kind: 'u32' } }] } } } as Partial<AbiManifest>);
-  const s = zodForType({ $ref: 'Point' }, m);
+  const s = schemaBuilder(m).type({ $ref: 'Point' });
   assert.equal(s.safeParse({ x: 1 }).success, true);
   assert.equal(s.safeParse({ x: 'no' }).success, false);
 });
 
 test('an unresolvable $ref degrades to unknown rather than throwing', () => {
-  assert.equal(zodForType({ $ref: 'NotDefined' }, manifest()).safeParse('anything').success, true);
+  assert.equal(schemaBuilder(manifest()).type({ $ref: 'NotDefined' }).safeParse('anything').success, true);
 });
 
 test('a record field marked nullable accepts null', () => {
   const m = manifest({ types: { R: { kind: 'record', fields: [{ name: 'a', type: { kind: 'string' }, nullable: true }] } } } as Partial<AbiManifest>);
-  assert.equal(zodForType({ $ref: 'R' }, m).safeParse({ a: null }).success, true);
+  assert.equal(schemaBuilder(m).type({ $ref: 'R' }).safeParse({ a: null }).success, true);
 });
 
 test('a unit-only variant becomes an enum of its names', () => {
   const m = manifest({ types: { S: { kind: 'variant', variants: [{ name: 'Open' }, { name: 'Done' }] } } } as Partial<AbiManifest>);
-  const s = zodForType({ $ref: 'S' }, m);
+  const s = schemaBuilder(m).type({ $ref: 'S' });
   assert.equal(s.safeParse('Open').success, true);
   assert.equal(s.safeParse('Nope').success, false);
 });
 
 test('an alias resolves to its target', () => {
   const m = manifest({ types: { Name: { kind: 'alias', target: { kind: 'string' } } } } as Partial<AbiManifest>);
-  assert.equal(zodForType({ $ref: 'Name' }, m).safeParse('x').success, true);
+  assert.equal(schemaBuilder(m).type({ $ref: 'Name' }).safeParse('x').success, true);
 });
 
 test('a self-referential type terminates instead of recursing forever', () => {
   const m = manifest({ types: { Node: { kind: 'record', fields: [{ name: 'next', type: { $ref: 'Node' }, nullable: true }] } } } as Partial<AbiManifest>);
-  assert.equal(zodForType({ $ref: 'Node' }, m).safeParse({ next: null }).success, true);
+  assert.equal(schemaBuilder(m).type({ $ref: 'Node' }).safeParse({ next: null }).success, true);
 });
 
 test('inputShapeForMethod makes a nullable param optional and nullable', () => {
@@ -83,7 +83,7 @@ test('renderMethodSignature marks read_only methods as view', () => {
 });
 
 test('a tuple accepts an exact-arity array and rejects a short one', () => {
-  const s = zodForType({ kind: 'tuple', elements: [{ kind: 'string' }, { kind: 'u32' }] }, manifest());
+  const s = schemaBuilder(manifest()).type({ kind: 'tuple', elements: [{ kind: 'string' }, { kind: 'u32' }] });
   assert.equal(s.safeParse(['a', 1]).success, true);
   assert.equal(s.safeParse(['a']).success, false);
   assert.equal(s.safeParse(['a', 'b']).success, false);
@@ -91,10 +91,12 @@ test('a tuple accepts an exact-arity array and rejects a short one', () => {
 
 test('a crdt record is transparent over its inner type', () => {
   // Real manifests wrap collections: {kind:'record', crdt_type:'unordered_map', inner_type:{kind:'map',...}}.
-  const s = zodForType(
-    { kind: 'record', fields: [], crdt_type: 'unordered_map', inner_type: { kind: 'map', key: { kind: 'string' }, value: { kind: 'u32' } } },
-    manifest(),
-  );
+  const s = schemaBuilder(manifest()).type({
+    kind: 'record',
+    fields: [],
+    crdt_type: 'unordered_map',
+    inner_type: { kind: 'map', key: { kind: 'string' }, value: { kind: 'u32' } },
+  });
   assert.equal(s.safeParse({ a: 1 }).success, true);
   assert.equal(s.safeParse({ a: 'x' }).success, false);
 });
@@ -103,7 +105,7 @@ test('a mixed variant accepts a bare name for unit members and a tagged object f
   const m = manifest({
     types: { Action: { kind: 'variant', variants: [{ name: 'Reset' }, { name: 'Set', payload: { kind: 'u32' } }] } },
   } as Partial<AbiManifest>);
-  const s = zodForType({ $ref: 'Action' }, m);
+  const s = schemaBuilder(m).type({ $ref: 'Action' });
   assert.equal(s.safeParse('Reset').success, true);
   assert.equal(s.safeParse({ Set: 7 }).success, true);
   assert.equal(s.safeParse({ Set: 'no' }).success, false);
@@ -112,7 +114,7 @@ test('a mixed variant accepts a bare name for unit members and a tagged object f
 
 test('bytes accepts a hex string and the byte array the node expects, decoding the former', () => {
   const m = manifest();
-  const s = zodForType({ kind: 'bytes' }, m);
+  const s = schemaBuilder(m).type({ kind: 'bytes' });
   assert.equal(s.safeParse('deadbeef').success, true);
   assert.equal(s.safeParse([1, 2, 3]).success, true);
   assert.equal(s.safeParse(1).success, false);
@@ -122,13 +124,13 @@ test('bytes accepts a hex string and the byte array the node expects, decoding t
 });
 
 test('bytes rejects a string that is not hex', () => {
-  const s = zodForType({ kind: 'bytes' }, manifest());
+  const s = schemaBuilder(manifest()).type({ kind: 'bytes' });
   assert.equal(s.safeParse('zzz').success, false);
   assert.equal(s.safeParse('dea').success, false, 'an odd digit count is half a byte');
 });
 
 test('a byte element outside 0..255 is rejected', () => {
-  const s = zodForType({ kind: 'bytes' }, manifest());
+  const s = schemaBuilder(manifest()).type({ kind: 'bytes' });
   assert.equal(s.safeParse([999, 1]).success, false);
   assert.equal(s.safeParse([-1]).success, false);
   assert.equal(s.safeParse([1.5]).success, false);
@@ -136,28 +138,28 @@ test('a byte element outside 0..255 is rejected', () => {
 
 test('an empty hex string is an empty byte array, but not a valid sized one', () => {
   // Vec<u8> can legitimately be empty; a declared size cannot be satisfied by nothing.
-  assert.deepEqual(zodForType({ kind: 'bytes' }, manifest()).parse(''), []);
-  assert.equal(zodForType({ kind: 'bytes', size: 2 }, manifest()).safeParse('').success, false);
+  assert.deepEqual(schemaBuilder(manifest()).type({ kind: 'bytes' }).parse(''), []);
+  assert.equal(schemaBuilder(manifest()).type({ kind: 'bytes', size: 2 }).safeParse('').success, false);
 });
 
 test('fixed-size bytes rejects a byte array of the wrong length', () => {
-  const s = zodForType({ kind: 'bytes', size: 2 }, manifest());
+  const s = schemaBuilder(manifest()).type({ kind: 'bytes', size: 2 });
   assert.equal(s.safeParse([1, 2]).success, true);
   assert.equal(s.safeParse([1, 2, 3]).success, false);
 });
 
 test('fixed-size bytes rejects hex of the wrong length', () => {
-  const s = zodForType({ kind: 'bytes', size: 2 }, manifest());
+  const s = schemaBuilder(manifest()).type({ kind: 'bytes', size: 2 });
   assert.deepEqual(s.parse('dead'), [222, 173]);
   assert.equal(s.safeParse('de').success, false);
   assert.equal(s.safeParse('deadbe').success, false);
   // The bug this pins: a 32-byte Hash used to accept any string at all.
-  assert.equal(zodForType({ kind: 'bytes', size: 32 }, manifest()).safeParse('dead').success, false);
+  assert.equal(schemaBuilder(manifest()).type({ kind: 'bytes', size: 32 }).safeParse('dead').success, false);
 });
 
 test('a named alias to a list resolves through the type table', () => {
   const m = manifest({ types: { Tags: { kind: 'alias', target: { kind: 'list', items: { kind: 'string' } } } } } as Partial<AbiManifest>);
-  const s = zodForType({ $ref: 'Tags' }, m);
+  const s = schemaBuilder(m).type({ $ref: 'Tags' });
   assert.equal(s.safeParse(['a']).success, true);
   assert.equal(s.safeParse('a').success, false);
 });

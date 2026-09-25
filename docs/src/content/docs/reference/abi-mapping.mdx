@@ -28,7 +28,9 @@ The slug, including a multi-service app's `_<service>`, is cut to 20 characters.
 A full name longer than 49 characters (64 minus the 15-character `mcp__mero-mcp__` prefix Claude Code adds) keeps its first 42 characters and ends in `_` plus the first 6 hex of its sha256.
 
 The slug is derived from the *resolved* application, not the string you typed, so one application always names its tools the same way.
-If two apps (or two installed versions of one app) sanitise to the same slug, the second gets `_` plus the first 6 alphanumerics of its application id, so names are stable across sessions.
+If two apps sanitise to the same slug, the second in package order gets `_` plus the first 6 alphanumerics of its application id, so names are stable across sessions.
+Of two installed versions of one app, the highest keeps the plain slug and the older one takes the suffix, so the plain names match the handle `select_app` gives without a context.
+A whole name is also kept unique: when a slug plus a method spells a fixed tool (`com.x.node` with `status` would be `node_status`) or another app's tool, that tool takes the application-id suffix too.
 
 ## Scalars
 

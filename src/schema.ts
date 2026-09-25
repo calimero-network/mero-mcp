@@ -149,8 +149,6 @@ export function schemaBuilder(m: AbiManifest, mode: SchemaMode = 'input') {
   };
 }
 
-export const zodForType = (t: AbiTypeRef, m: AbiManifest): z.ZodType => schemaBuilder(m).type(t);
-
 export const inputShapeForMethod = (method: AbiMethod, m: AbiManifest): Record<string, z.ZodType> => schemaBuilder(m).params(method);
 
 export function renderMethodSignature(method: AbiMethod): string {

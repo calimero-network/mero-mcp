@@ -16,16 +16,27 @@ export function createCatalog(loader: AbiLoader) {
   let print = '';
   let timer: NodeJS.Timeout | undefined;
   const listeners = new Set<() => void>();
+  let queue: Promise<void> = Promise.resolve();
 
-  async function sync(): Promise<void> {
+  async function refresh(): Promise<void> {
     const next = await loader.loadAll();
     // Armed by the first sync that reached the node, so startup and an absent node cost no polling.
-    timer ??= setInterval(() => sync().catch((err: unknown) => console.error('[mero-mcp] app list refresh failed:', err)), WATCH_INTERVAL_MS).unref();
+    timer ??= setInterval(
+      () => sync().catch((err: unknown) => console.error('[mero-mcp] app list refresh failed:', err)),
+      WATCH_INTERVAL_MS,
+    ).unref();
     const nextPrint = fingerprint(next);
     if (nextPrint === print) return;
     apps = next;
     print = nextPrint;
     for (const listener of listeners) listener();
+  }
+
+  /** One sync at a time, so a slow older read can never land after, and over, a newer one. */
+  function sync(): Promise<void> {
+    const run = queue.then(refresh);
+    queue = run.catch(() => {});
+    return run;
   }
 
   return {
