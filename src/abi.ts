@@ -132,16 +132,15 @@ export function createAbiLoader(session: NodeSession) {
           }),
         ),
       );
-      // Package, then version (numeric, so 9.0.0 sorts before 10.0.0), then service, then app id:
-      // two installed versions of one package must not tie on package+service and fall back to
-      // node-returned order.
+      // Numeric version order, so two installed versions of one package never fall back to node order.
+      const code = (x: string, y: string) => (x < y ? -1 : x > y ? 1 : 0);
       const compare = (a: ResolvedApp, b: ResolvedApp): number => {
-        const pkg = (a.package ?? a.id).localeCompare(b.package ?? b.id);
+        const pkg = code(a.package ?? a.id, b.package ?? b.id);
         if (pkg !== 0) return pkg;
         const version = (a.version ?? '').localeCompare(b.version ?? '', undefined, { numeric: true });
         if (version !== 0) return version;
-        const service = (a.serviceName ?? '').localeCompare(b.serviceName ?? '');
-        return service !== 0 ? service : a.id.localeCompare(b.id);
+        const service = code(a.serviceName ?? '', b.serviceName ?? '');
+        return service !== 0 ? service : code(a.id, b.id);
       };
       return loaded.filter((a): a is ResolvedApp => a !== undefined).sort(compare);
     },
