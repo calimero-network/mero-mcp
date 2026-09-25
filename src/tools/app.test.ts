@@ -152,22 +152,68 @@ test('a handle with no context is refused with a request to select one, and runs
 });
 
 test('a handle goes stale when the app version, its guide, or its context changes', async () => {
-  for (const change of [
-    (a: FakeApp) => (a.version = '1.1.0'),
-    (a: FakeApp) => (a.metadata = { ...a.metadata, guide: `${GUIDE}\n### Another` }),
-    (a: FakeApp) => (a.contexts = [ctx('newctx')]),
-  ]) {
+  const upgraded =
+    'This app_handle is for com.calimero.kv-store 1.0.0, but this tool belongs to com.calimero.kv-store 1.1.0. ' + RETRY;
+  for (const [change, toolText] of [
+    [(a: FakeApp) => (a.version = '1.1.0'), upgraded],
+    [(a: FakeApp) => (a.metadata = { ...a.metadata, guide: `${GUIDE}\n### Another` }), RETRY],
+    [(a: FakeApp) => (a.contexts = [ctx('newctx')]), RETRY],
+  ] as const) {
     const s = await setup();
     try {
       const { app_handle } = await s.json('select_app', { app: 'kv-store' });
       change(s.apps[0]);
+      const viaCall = await s.call('call', { app_handle, method: 'set', args: { key: 'k' } });
+      assert.equal(viaCall.isError, true);
+      assert.equal(viaCall.content.at(-1)!.text, RETRY);
       const res = await s.call('kv_store_set', { app_handle, key: 'k' });
       assert.equal(res.isError, true);
-      assert.equal(res.content.at(-1)!.text, RETRY);
+      assert.equal(res.content.at(-1)!.text, toolText);
       assert.deepEqual(s.executed, []);
     } finally {
       await s.close();
     }
+  }
+});
+
+test('after an in-place upgrade an old tool resyncs, then runs as the new version or refuses naming both', async () => {
+  const s = await setup([kv()]);
+  try {
+    s.apps[0].version = '1.1.0';
+    const fresh = await s.json('select_app', { app: 'kv-store' });
+    assert.equal(fresh.appVersion, '1.1.0');
+    await s.call('kv_store_set', { app_handle: fresh.app_handle, key: 'k' });
+    assert.deepEqual(s.executed, [{ contextId: ctx('kvctx'), method: 'set', argsJson: { key: 'k' } }]);
+    const listed = (await s.client.listTools()).tools.find((t) => t.name === 'kv_store_set');
+    assert.equal(listed?._meta?.appVersion, '1.1.0');
+
+    Object.assign(s.apps[0], { version: '1.2.0', abi: manifest([method('get', [{ name: 'key', type: { kind: 'string' } }])]) });
+    const next = await s.json('select_app', { app: 'kv-store' });
+    const gone = await s.call('kv_store_set', { app_handle: next.app_handle, key: 'k' });
+    assert.equal(gone.isError, true);
+    assert.equal(
+      gone.content.at(-1)!.text,
+      'This app_handle is for com.calimero.kv-store 1.2.0, but this tool belongs to com.calimero.kv-store 1.1.0. ' + RETRY,
+    );
+    assert.equal(s.executed.length, 1);
+    assert.ok(!(await s.client.listTools()).tools.some((t) => t.name === 'kv_store_set'));
+  } finally {
+    await s.close();
+  }
+});
+
+test('a tool whose app was uninstalled refuses with the retry line and the guide, runs nothing, and leaves the list', async () => {
+  const s = await setup();
+  try {
+    const { app_handle } = await s.json('select_app', { app: 'kv-store' });
+    s.apps.splice(0, 1);
+    const res = await s.call('kv_store_set', { app_handle, key: 'k' });
+    assert.equal(res.isError, true);
+    assert.deepEqual(res.content.map((b) => b.text ?? b.resource?.text), [LABEL, GUIDE, RETRY]);
+    assert.deepEqual(s.executed, []);
+    assert.ok(!(await s.client.listTools()).tools.some((t) => t.name.startsWith('kv_store_')));
+  } finally {
+    await s.close();
   }
 });
 
@@ -394,9 +440,11 @@ test("call refuses a handle for one app when app names another, with that app's 
     assert.deepEqual(s.executed, []);
 
     await s.call('call', { app_handle: kvHandle, method: 'set', args: { key: 'k' }, app: 'kv-store' });
+    await s.call('call', { app_handle: kvHandle, method: 'set', args: { key: 'k' }, app: 'no-such-app' });
     const docs = await s.json('select_app', { app: 'mero-drive', context: ctx('docsctx') });
     await s.call('call', { app_handle: docs.app_handle, method: 'create_doc', args: { title: 't' }, app: 'mero-drive' });
     assert.deepEqual(s.executed, [
+      { contextId: ctx('kvctx'), method: 'set', argsJson: { key: 'k' } },
       { contextId: ctx('kvctx'), method: 'set', argsJson: { key: 'k' } },
       { contextId: ctx('docsctx'), method: 'create_doc', argsJson: { title: 't' } },
     ]);
@@ -444,6 +492,43 @@ test('two installed versions of one package keep their own tools, and a handle f
       { contextId: ctx('kvv2'), method: 'set', argsJson: { key: 'k', ttl: 5 } },
       { contextId: ctx('kvv2'), method: 'set', argsJson: { key: 'k', ttl: 6 } },
     ]);
+  } finally {
+    await s.close();
+  }
+});
+
+test('select_app binds the installed version whose application owns the chosen context, and the newest without one', async () => {
+  const key = { name: 'key', type: { kind: 'string' } };
+  const s = await setup([kvAt('kv-one', '1.0.0', 'kvv1', [key]), kvAt('kv-two', '2.0.0', 'kvv2', [key, { name: 'ttl', type: { kind: 'u32' } }])]);
+  try {
+    const v2 = await s.json('select_app', { app: 'com.calimero.kv-store', context: ctx('kvv2') });
+    assert.deepEqual([v2.application, v2.appVersion, v2.context, v2.tools], ['kv-two', '2.0.0', ctx('kvv2'), ['kv_store_kvtwo_set']]);
+    await s.call('kv_store_kvtwo_set', { app_handle: v2.app_handle, key: 'k', ttl: 1 });
+
+    const v1 = await s.json('select_app', { app: 'kv-store', context: ctx('kvv1') });
+    assert.deepEqual([v1.application, v1.appVersion], ['kv-one', '1.0.0']);
+    await s.call('kv_store_set', { app_handle: v1.app_handle, key: 'k' });
+    assert.deepEqual(s.executed, [
+      { contextId: ctx('kvv2'), method: 'set', argsJson: { key: 'k', ttl: 1 } },
+      { contextId: ctx('kvv1'), method: 'set', argsJson: { key: 'k' } },
+    ]);
+
+    const newest = await s.json('select_app', { app: 'kv-store' });
+    assert.deepEqual([newest.appVersion, newest.context], ['2.0.0', ctx('kvv2')]);
+    assert.equal((await s.json('describe_app', { app: 'kv-store' })).appVersion, '2.0.0');
+  } finally {
+    await s.close();
+  }
+});
+
+test("select_app refuses a context of another app, by id or alias, naming the app's own contexts", async () => {
+  const s = await setup([kv(), plain()], '2025-11-25', { aliases: { theirs: ctx('notesctx') } });
+  try {
+    for (const context of [ctx('notesctx'), 'theirs']) {
+      const res = await s.call('select_app', { app: 'kv-store', context });
+      assert.equal(res.isError, true);
+      assert.equal(res.content[0].text, `Error: Context "${context}" does not belong to "kv-store". Contexts for "kv-store": ${ctx('kvctx')}`);
+    }
   } finally {
     await s.close();
   }

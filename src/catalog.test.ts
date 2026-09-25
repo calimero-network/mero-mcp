@@ -55,11 +55,13 @@ test('versions sort numerically, not lexically, so 9.0.0 comes before 10.0.0', a
   assert.deepEqual(catalog.apps().map((a) => a.version), ['9.0.0', '10.0.0']);
 });
 
-test('an app whose ABI cannot be read is left out, and the rest still load', async () => {
+test('an app whose ABI cannot be read is left out and reported, and the rest still load', async (t) => {
+  const logged = t.mock.method(console, 'error', () => {});
   const node = fakeNode([app('a-id', 'org.a'), { ...app('bad-id', 'org.bad'), abi: { schema_version: 'wasm-abi/1' } }]);
   const catalog = createCatalog(createAbiLoader(node.session));
   await catalog.sync();
   assert.deepEqual(catalog.apps().map((a) => a.package), ['org.a']);
+  assert.match(String(logged.mock.calls[0]?.arguments[0]), /^\[mero-mcp\] skipping org\.bad: /);
 });
 
 test('the refresh poll starts with the first sync that reaches the node and runs every 30 s', async (t) => {

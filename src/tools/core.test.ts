@@ -289,7 +289,8 @@ test('install_application splits package@version, and rejects a coordinate missi
   assert.match(textOf(bad), /Expected package@version/);
 });
 
-test('install and uninstall refresh the app list after the node answers, and a failed refresh keeps the answer', async () => {
+test('install and uninstall refresh the app list after the node answers, and a failed refresh keeps the answer', async (t) => {
+  const logged = t.mock.method(console, 'error', () => {});
   const order: string[] = [];
   const admin = {
     installApplication: async () => (order.push('install'), { applicationId: 'AppId111' }),
@@ -310,6 +311,7 @@ test('install and uninstall refresh the app list after the node answers, and a f
   assert.match(textOf(installed), /"applicationId": "AppId111"/);
   assert.match(textOf(removed), /"applicationId": "AppId111"/);
   assert.deepEqual(order, ['install', 'sync', 'uninstall', 'sync']);
+  assert.equal(logged.mock.callCount(), 2);
 });
 
 test('create_namespace and create_context resolve an application the way describe_app does', async () => {

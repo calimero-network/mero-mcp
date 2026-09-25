@@ -13,7 +13,9 @@ interface AppContext {
 type Block = ReturnType<typeof guideBlocks>[number] | { type: 'text'; text: string };
 
 // Tools behind the gate validate in their handler, after the app_handle check, so a missing handle is refused with the guide.
-const ACCEPT_ALL = { getValidator: () => (input: unknown) => ({ valid: true as const, data: input as never, errorMessage: undefined }) };
+const ACCEPT_ALL = {
+  getValidator: () => (input: unknown) => ({ valid: true as const, data: input as never, errorMessage: undefined }),
+};
 
 /** Advertises `json` as the tool's inputSchema while leaving validation to the handler. */
 export const advertised = (json: Record<string, unknown>) => fromJsonSchema(json, ACCEPT_ALL);

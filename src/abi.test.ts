@@ -94,6 +94,17 @@ test('an exact package name resolves even when its last segment is ambiguous', a
   assert.equal((await loader.resolveAppId('org.example.kv-store')).id, 'other');
 });
 
+test('several installed versions of one package resolve to the newest, by package or segment, never as ambiguous', async () => {
+  const apps = [
+    app({ id: 'v1-10', package: 'com.calimero.kv-store', version: '1.10.0' }),
+    app({ id: 'v1-9', package: 'com.calimero.kv-store', version: '1.9.0' }),
+  ];
+  const { loader } = fake({ apps });
+  assert.equal((await loader.resolveAppId('kv-store')).id, 'v1-10');
+  assert.equal((await loader.resolveAppId('com.calimero.kv-store')).id, 'v1-10');
+  assert.deepEqual(await loader.versionsOf('kv-store'), [{ id: 'v1-10', version: '1.10.0' }, { id: 'v1-9', version: '1.9.0' }]);
+});
+
 test('resolveAppId matches whole segments only, never a prefix of one', async () => {
   const { loader } = fake({ apps: [app({ package: 'com.calimero.mero-chat-v2' })] });
   await assert.rejects(loader.resolveAppId('mero-chat'), /not found\. Installed: com\.calimero\.mero-chat-v2/);

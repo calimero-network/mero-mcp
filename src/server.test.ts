@@ -11,7 +11,7 @@ const session = {
   url: 'http://localhost:2528',
   nodeName: 'test',
   authMode: 'none',
-  mero: { admin: { lookupContextAlias: async (name: string) => ({ value: name === 'work' ? 'Ctx111' : null }) }, rpc: {} },
+  mero: { admin: { listApplications: async () => ({ apps: [] }), lookupContextAlias: async (name: string) => ({ value: name === 'work' ? 'Ctx111' : null }) }, rpc: {} },
 } as unknown as NodeSession;
 
 const toolsIn = async (era: Era) => {

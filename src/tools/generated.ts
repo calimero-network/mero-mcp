@@ -2,12 +2,12 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { McpServer, RegisteredTool } from '@modelcontextprotocol/server';
 import type { AbiMethod } from '@calimero-network/abi-codegen';
-import { lastSegment, type AbiLoader, type ResolvedApp } from '../abi.ts';
+import { AppNotFoundError, lastSegment, type AbiLoader, type ResolvedApp } from '../abi.ts';
 import type { Catalog } from '../catalog.ts';
 import { errorResult } from '../errors.ts';
 import { advertised, packageKey, type Gate } from '../gate.ts';
 import type { NodeSession } from '../node.ts';
-import { renderMethodSignature, schemaBuilder } from '../schema.ts';
+import { inputShapeForMethod, renderMethodSignature, schemaBuilder } from '../schema.ts';
 
 const MAX_SLUG = 20;
 const MAX_NAME = 49; // 64 minus Claude Code's 15-char `mcp__mero-mcp__` prefix
@@ -50,7 +50,8 @@ export function toolTitle(app: ResolvedApp, method: string): string {
   return `${words.charAt(0).toUpperCase()}${words.slice(1)} (${app.name ?? packageKey(app)})`;
 }
 
-const sortedMethods = (app: ResolvedApp) => [...app.manifest.methods].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+const sortedMethods = (app: ResolvedApp) =>
+  [...app.manifest.methods].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 
 /** Every tool name the catalog yields, per app: what select_app reports and what tools/list shows. */
 export function toolNamesByApp(apps: readonly ResolvedApp[]): Map<ResolvedApp, string[]> {
@@ -67,43 +68,68 @@ function toolConfig(app: ResolvedApp, method: AbiMethod) {
   return {
     title: toolTitle(app, method.name),
     description: renderMethodSignature(method),
-    inputSchema: advertised(input.jsonSchema(z.object({ app_handle: input.describe(z.string(), APP_HANDLE_DOC), ...input.params(method) }))),
+    inputSchema: advertised(
+      input.jsonSchema(z.object({ app_handle: input.describe(z.string(), APP_HANDLE_DOC), ...input.params(method) })),
+    ),
     ...(returns ? { outputSchema: advertised(output.jsonSchema(returns)) } : {}),
     // destructiveHint stays false until the ABI can say otherwise; every hint is sent explicitly.
     annotations: { readOnlyHint: readOnly, destructiveHint: false, idempotentHint: readOnly, openWorldHint: false },
     ...(app.icon && URL.canParse(app.icon) ? { icons: [{ src: app.icon }] } : {}),
-    _meta: { package: packageKey(app), appVersion: app.version ?? null, signerId: app.signerId ?? null, intent: method.intent ?? 'unspecified' },
-    validator: z.object(input.params(method)),
+    _meta: {
+      package: packageKey(app),
+      appVersion: app.version ?? null,
+      signerId: app.signerId ?? null,
+      intent: method.intent ?? 'unspecified',
+    },
   };
 }
 
 /** Registers one tool per method of every catalog app and re-registers when the catalog changes. */
-export function registerGeneratedTools(server: McpServer, catalog: Catalog, gate: Gate, session: NodeSession, loader: AbiLoader): () => void {
+export function registerGeneratedTools(
+  server: McpServer,
+  catalog: Catalog,
+  gate: Gate,
+  session: NodeSession,
+  loader: AbiLoader,
+): () => void {
   let registered: RegisteredTool[] = [];
+
+  /** Runs one method as a tool; a tool built before an upgrade or uninstall resyncs the list and answers as it now stands. */
+  async function invoke(app: ResolvedApp, method: AbiMethod, args: Record<string, unknown>) {
+    // Judged against the app as installed now, so a handle goes stale the moment the app is upgraded.
+    const current = await loader.load(app.id, app.serviceName).catch((err: unknown) => {
+      if (err instanceof AppNotFoundError) return undefined;
+      throw err;
+    });
+    if (!current) {
+      await catalog.sync();
+      return gate.refuse(app, gate.retryText(app)).refusal;
+    }
+    if (current.version !== app.version) {
+      await catalog.sync();
+      const upgraded = catalog.apps().find((a) => a.id === app.id && a.serviceName === app.serviceName);
+      const same = upgraded?.manifest.methods.find((m) => m.name === method.name);
+      if (upgraded && same) [app, method] = [upgraded, same];
+    }
+    const admitted = await gate.admit(current, args.app_handle, app.version ?? '');
+    if ('refusal' in admitted) return admitted.refusal;
+    const argsJson = z.object(inputShapeForMethod(method, app.manifest)).parse(args);
+    const result = await session.mero.rpc.execute({ contextId: admitted.contextId, method: method.name, argsJson });
+    return {
+      content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) ?? 'null' }],
+      ...(method.returns ? { structuredContent: result as Record<string, unknown> } : {}),
+    };
+  }
 
   function register() {
     for (const tool of registered) tool.remove();
     const names = toolNamesByApp(catalog.apps());
     registered = catalog.apps().flatMap((app) =>
-      sortedMethods(app).map((method, i) => {
-        const { validator, ...config } = toolConfig(app, method);
-        return server.registerTool(names.get(app)![i], config, async (args: unknown) => {
-          try {
-            // Judged against the app as installed now, so a handle goes stale the moment the app is upgraded.
-            const current = await loader.load(app.id, app.serviceName);
-            const admitted = await gate.admit(current, (args as Record<string, unknown>).app_handle, app.version ?? '');
-            if ('refusal' in admitted) return admitted.refusal;
-            const argsJson = validator.parse(args);
-            const result = await session.mero.rpc.execute({ contextId: admitted.contextId, method: method.name, argsJson });
-            return {
-              content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) ?? 'null' }],
-              ...(method.returns ? { structuredContent: result as Record<string, unknown> } : {}),
-            };
-          } catch (err) {
-            return errorResult(err);
-          }
-        });
-      }),
+      sortedMethods(app).map((method, i) =>
+        server.registerTool(names.get(app)![i], toolConfig(app, method), async (args: unknown) =>
+          invoke(app, method, args as Record<string, unknown>).catch(errorResult),
+        ),
+      ),
     );
   }
 
