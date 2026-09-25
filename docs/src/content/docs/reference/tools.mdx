@@ -1,6 +1,6 @@
 ---
 title: Tool reference
-description: Every tool the server registers — core, blobs, governance and application — with its arguments and behaviour.
+description: Every tool the server registers - core, blobs, governance, application and generated - with its arguments and behaviour, plus the guide resources.
 sidebar:
   order: 1
 ---
@@ -28,8 +28,7 @@ Always registered, regardless of `CALIMERO_MCP_TOOLSETS`.
 Health and identity of the connected node. No arguments. Read-only.
 
 Returns node `health`, the `url` and `nodeName` in use, the
-[`discoverySource`](/understand/node-discovery/), the
-[`authMode`](/understand/authentication/), and the current `selected` applications.
+[`discoverySource`](/understand/node-discovery/), and the [`authMode`](/understand/authentication/).
 `nodeName` is `null` when nothing on this machine names the node.
 
 Because the session connects lazily, this is usually the first call that can fail —
@@ -49,6 +48,9 @@ Applications installed on this node. No arguments. Read-only.
 Application `metadata` rides the wire as raw bytes; it is decoded for display into
 the JSON object it usually encodes, or the plain string, or omitted — never dumped as
 a byte array.
+
+Each entry also carries `appVersion` and `procedures`: the `###` titles under `## Procedures` in the app's guide, or `[]` when it ships none.
+The guide itself is left out; `describe_app` returns it.
 
 ### `list_namespaces`
 
@@ -196,72 +198,61 @@ Always registered.
 
 ### `describe_app`
 
-Show an application's ABI without selecting it. Read-only.
+Show an application's methods and guide without choosing a context. Read-only.
 
 | Argument | Type | Notes |
 | --- | --- | --- |
 | `app` | string | Id, package name, or trailing segment |
 | `service` | string, optional | For an app bundling several services |
 
-Returns the application id, package, version, resolved `service`, the service names
-its existing contexts use (`contextServices`), and every method as a signature —
-`[view] get(key: string) -> string | null`.
+Returns, as JSON: `application`, `package`, `appVersion`, resolved `service`, `contextServices`, every method as a signature, and an `app_handle` with no context.
+Then the guide as an embedded `text/markdown` resource after an author label, or the line `This app ships no guide.`
 
-Omitting `service` on a multi-service app returns an error naming the available
-services. When no context exists to read a service name from, the result says so
-explicitly: nothing on the application record or in the ABI lists an app's services.
+Omitting `service` on a multi-service app returns an error naming the available services.
+When no context exists to read a service name from, a `serviceNote` says so: nothing on the application record or in the ABI lists an app's services.
 
 ### `select_app`
 
-Select an application: register one tool per ABI method and pin a default context.
+Choose an application and the context to act in.
 
 | Argument | Type | Notes |
 | --- | --- | --- |
 | `app` | string | Id, package name, or trailing segment |
-| `service` | string, optional | For an app bundling several services |
-| `context` | string, optional | Context id or alias to pin; defaults to the app's only context |
+| `context` | string, optional | Context id or alias; defaults to the app's only context |
+| `service` | string, optional | Only when no context is chosen; a chosen context decides the service |
 
-**Adds** to the selection — applications already selected keep their tools. Selecting
-one again refreshes it from a freshly fetched ABI.
-
-Returns everything `describe_app` does, plus the generated `tools`, the pinned
-`context`, the whole `selected` set, and `toolCount`. Past 80 total application tools
-it adds a `warning`; it never refuses the selection.
-
-### `deselect_app`
-
-Remove one application's tools and its pinned context. Other selections are untouched.
-Takes `app`.
+Returns everything `describe_app` does, plus the app's tool names (`tools`), the chosen `context`, and an `app_handle` bound to that context and its service.
+With several contexts and none chosen, `context` is `null` and a `note` lists the ids.
 
 ### `call`
 
-Call an application method by name, validated against its ABI. Use it when the
-generated per-method tools are not visible.
+Call an application method by name.
 
 | Argument | Type | Notes |
 | --- | --- | --- |
+| `app_handle` | string | From `select_app` |
 | `method` | string | ABI method name |
 | `args` | object, optional | Arguments keyed by parameter name |
-| `app` | string, optional | Required when several applications are selected |
-| `context` | string, optional | Context id or alias; defaults to that app's pin |
-| `service` | string, optional | Only used together with `app` |
+| `app` | string, optional | Shows that app's guide on a refusal; a handle for another app is refused |
 
-With nothing selected and no `app`, it errors. With one selected, `app` defaults to
-it. An unknown `method` returns the list of methods that exist.
+An unknown `method` returns the list of methods that exist.
 
 ## Generated method tools
 
-One per ABI method, for as long as the server process lives. Named
-`<app>_<method>`, or `<app>_<service>_<method>` for a multi-service application,
-where `<app>` is the sanitised trailing package segment — `com.calimero.kv-store`
-yields `kv_store_get`.
-
-Arguments are the method's declared parameters, typed from the ABI, plus:
+One per method of every installed application version, sorted by package then method, for every client alike.
+Named `<app>_<method>`, or `<app>_<service>_<method>` for a multi-service application, where `<app>` is the sanitised trailing package segment cut to 20 characters; a name longer than 49 characters keeps its first 42 and ends in `_` plus 6 hex of its sha256.
 
 | Argument | Type | Notes |
 | --- | --- | --- |
-| `_context` | string, optional | Context id or alias for this one call, overriding the pin |
+| `app_handle` | string | From `select_app`; names the context |
 
-`[view]` methods carry `readOnlyHint`. Only declared parameters are forwarded to the
-node, so `_context` can never reach the application. See
-[ABI mapping](/reference/abi-mapping/) for how each ABI type becomes a schema.
+plus the method's declared parameters, typed from the ABI ([ABI mapping](/reference/abi-mapping/)).
+
+Each tool carries a `title` (`Set blocks (Mero Blocks)`), the method's signature as its `description`, an `outputSchema` when the method returns something, and explicit `readOnlyHint`, `destructiveHint`, `idempotentHint` and `openWorldHint: false` annotations.
+It also carries `icons` when the app's `metadata.icon` is a URL, and `_meta` with the `package`, `appVersion`, `signerId` and method `intent`.
+Results carry `structuredContent` next to the JSON text.
+A contract call that fails returns `isError: true` with the node's message.
+
+## Resources
+
+`calimero://apps/{package}/{version}/guide` (`text/markdown`): one resource per installed app version that ships a guide.

@@ -24,10 +24,11 @@ Generated tools are named:
 every run of non-`[a-z0-9_]` characters collapsed to `_`. So `com.calimero.kv-store`
 gives `kv_store`, and its `get` method gives `kv_store_get`.
 
-The slug is derived from the *resolved* application, not the string you typed, so one
-application always names its tools the same way. If two packages sanitise to the same
-slug, the second gets a suffix from its application id — never from selection order,
-so names are stable across sessions.
+The slug, including a multi-service app's `_<service>`, is cut to 20 characters.
+A full name longer than 49 characters (64 minus the 15-character `mcp__mero-mcp__` prefix Claude Code adds) keeps its first 42 characters and ends in `_` plus the first 6 hex of its sha256.
+
+The slug is derived from the *resolved* application, not the string you typed, so one application always names its tools the same way.
+If two apps (or two installed versions of one app) sanitise to the same slug, the second gets `_` plus the first 6 alphanumerics of its application id, so names are stable across sessions.
 
 ## Scalars
 
@@ -82,8 +83,8 @@ representation:
 - **Unit variants** ride as bare names — `"Pending"`.
 - **Payload variants** ride as a single-key object — `{"Approved": {"by": "…"}}`.
 
-A variant with no payloads anywhere becomes a plain string enum. A mix becomes a union
-of the string enum and one object schema per payload variant.
+A variant with no payloads anywhere becomes a plain string `enum`.
+A mix becomes a `oneOf` of the string enum and one object schema per payload variant.
 
 ## CRDT collection wrappers
 
@@ -94,40 +95,27 @@ what the tool actually accepts.
 
 ## Type references and recursion
 
-A `$ref` is resolved through the manifest's type table. Two escape hatches:
-
-- A `$ref` naming a built-in absent from the type table degrades to `unknown` rather
-  than failing the whole application.
-- Recursion is capped at **depth 8**; beyond that the schema degrades to `unknown`.
-  Self-referential types would otherwise expand forever.
+Named ABI types are advertised once under `$defs` and referenced with `$ref`, so a recursive type is described exactly rather than degrading to `unknown`.
+A `$ref` naming a built-in absent from the type table degrades to `unknown` rather than failing the whole application.
 
 `unknown` means the argument is accepted unvalidated and passed through — the call can
 still succeed, it just is not checked locally.
 
-## The `_context` option
+## The `app_handle` argument
 
-Every generated tool gets one injected argument:
+Every generated tool takes one required argument besides the method's own:
 
 ```
-_context?: string   Context id or alias to execute against; defaults to the selected context.
+app_handle: string   The app_handle select_app returned for this application; it names the context the call runs in.
 ```
 
-The leading underscore is the whole trick: no ABI generator emits a parameter starting
-with `_`, so an application's own `context` parameter keeps its name.
-
-Two guarantees follow:
-
-1. **Declared parameters win.** If a method really does declare `_context`, the
-   declared parameter owns the key and targeting is unavailable for that method —
-   dropping its argument would break the call.
-2. **It never reaches the application.** Outgoing arguments are built by filtering the
-   input down to the method's *declared* parameters, so an injected option cannot leak
-   into the app by construction.
+The context a call runs in comes from the handle, so there is no separate context argument.
+The handle is the only argument mero-mcp adds, so an application's own `context` parameter is an ordinary parameter.
+Outgoing arguments are built by filtering the input down to the method's *declared* parameters, so the handle never reaches the application.
 
 ## Method signatures
 
-`describe_app` and `select_app` render each method as a signature, and it is also the
-tool's description:
+`describe_app` and `select_app` render each method as a signature, and it is also the tool's description:
 
 ```
 [view] get(key: string) -> string | null
@@ -144,3 +132,6 @@ tool's description:
 Type names in signatures follow the same rules as the schemas: `T[]` for lists,
 `map<K, V>` for maps, `(A, B)` for tuples, `$ref` names for referenced types, and CRDT
 wrappers unwrapped to their inner type.
+
+A method that returns something also gets an `outputSchema` derived from its return type, where `bytes` is a number array, since that is what the node returns.
+For 2025-11-25 clients the SDK wraps a return that is not an object as `{ result }`; 2026-07-28 clients get the return schema itself.

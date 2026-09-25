@@ -1,15 +1,12 @@
 ---
 title: Working with applications
-description: Naming applications, selecting several at once, multi-service apps, targeting contexts per call, and when to use `call` instead of a generated tool.
+description: Naming applications, app guides and app handles, when the tool list changes, multi-service apps, and when to use `call` instead of a generated tool.
 sidebar:
   order: 1
 ---
 
-import { Aside } from '@astrojs/starlight/components';
-
-Four tools cover the application side: `describe_app` to look, `select_app` to
-generate tools, `deselect_app` to take them away, and `call` as the fixed-name
-escape hatch.
+Every installed application's methods are tools from the start: one tool per method, listed for the whole session.
+`describe_app` and `select_app` hand over the app's guide and the `app_handle` those tools require, and `call` is the fixed-name route to the same methods.
 
 ## Naming an application
 
@@ -34,106 +31,55 @@ Pass the full package name or the application id.
 A name that matches nothing lists what *is* installed, which is usually faster
 than going back to `list_applications`.
 
-## Selecting several applications
+## App guides and app handles
 
-`select_app` **adds** to the selection. Applications already selected keep their
-tools, so one instruction can span two apps without losing the first:
+An app can ship a guide: Markdown its author writes, carried in the signed bundle and stored by the node.
+`list_applications` leaves the guide out of each entry and adds `procedures`, the `###` titles under the guide's `## Procedures` heading, plus `appVersion`.
 
-```text
-Select kv-store, then also select mero-chat.
-```
+- `describe_app` returns the app's methods, the guide (or `This app ships no guide.`) and an `app_handle` with no context. It is the way to plan across several apps.
+- `select_app` returns the guide and an `app_handle` bound to one context: the one you pass as `context`, or the app's only context.
+- Every generated tool and `call` take that `app_handle`. It names the context the call runs in, so there is no separate context argument.
 
-Each selection keeps its own pinned context, and its own tool-name prefix. Tool
-names come from the *resolved* application rather than the string you typed, so
-the same app always produces the same names no matter how you referred to it.
+The guide arrives as an embedded `text/markdown` resource, preceded by `App guide, provided by the app's author (package <package>, signer <signer id>):`, so it reads as the author's text, not as the server's own instructions.
+Each guide is also a resource at `calimero://apps/<package>/<version>/guide`.
 
-When two packages would sanitise to the same prefix, the second gets a short
-suffix derived from its application id — never from selection order, so the names
-are stable across sessions.
+A call without a valid handle runs nothing.
+It returns the guide (when the app has one) and `Call select_app for <package> and retry with the returned app_handle.`
+A handle stops being valid when the app is upgraded, when its guide changes, when its context is gone, or when the server restarts; `select_app` issues a fresh one.
+A handle from `describe_app` has no context, and app tools refuse it with a request to select one.
+Apps without a guide still need a handle.
 
-Selecting an application that is already selected **refreshes** it: the old tools
-are dropped and re-registered from a freshly fetched ABI. That is how you pick up
-an application you just upgraded.
-
-### Trimming the list
-
-`deselect_app` removes one application's tools and its pinned context, leaving
-every other selection untouched:
+Handles are per application, so holding several is how one instruction spans several apps:
 
 ```text
-Deselect mero-chat.
+Select kv-store and mero-chat, then use each handle for that app's tools.
 ```
 
-Past 80 generated tools, `select_app` adds a `warning` to its result — a long
-tool list gets hard for a model to work with, and `deselect_app` is how you cut it
-back. The server never refuses a selection over it.
+## When apps are installed
 
-<Aside type="note">
-The selection lives in the server process and lasts as long as it does. Restart the
-MCP client and you start from an empty selection again.
-</Aside>
+The tool list is the same for every client and changes only when an app is installed, upgraded or uninstalled.
+mero-mcp reads it when a client connects, again right after its own `install_application` or `uninstall_application`, and every 30 seconds once a read has reached the node, and announces a change with `notifications/tools/list_changed`.
+Selecting an app never changes the list.
+
+Each installed version of an app has its own tools; the newer version's tool names carry a suffix from its application id.
+`select_app` with a context binds the version whose application owns that context, and without one the highest installed version.
+A handle for one version is refused by the other version's tools, with a message naming both versions.
 
 ## Multi-service applications
 
-An application can bundle several services, and each has its own ABI. Pass
-`service` to reach one:
-
-```text
-Call describe_app with app "my-app" and service "Accounts".
-```
-
-Omitting `service` on a multi-service app returns an error from the node naming the
-services available. For a selected multi-service app the tool prefix includes the
-service, so `<app>_<service>_<method>` — that is what keeps two services'
-same-named methods apart.
-
-Service names are awkward to discover: nothing on the application record or in the
-ABI lists them. `describe_app` reports the service names any *existing* contexts
-use (`contextServices`), which is what `create_context` asks for. When there are no
-contexts yet, it says so explicitly and you take the name from the app's bundle or
-its docs.
-
-## Targeting a context per call
-
-Every generated tool accepts an optional **`_context`** argument — a context id or
-alias to run that one call against, overriding the pinned context:
-
-```text
-Call kv_store_entries with _context "staging".
-```
-
-The leading underscore is deliberate: no ABI generator emits a parameter starting
-with `_`, so an application's own `context` parameter keeps its name. In the
-pathological case where a method really does declare a parameter named `_context`,
-the declared parameter wins and targeting is unavailable for that method — dropping
-its argument would break the call outright.
-
-Context resolution goes: an explicit `_context`, then the pin for *that*
-application, then the application's only context if it has exactly one. With
-several and no pin, the error lists the ids.
-
-Aliases are resolved through the node and cached for the session. A value shaped
-like a base58 context id is passed through untouched; anything else is looked up as
-an alias.
+An application can bundle several services, each with its own ABI and its own tools, named `<app>_<service>_<method>`.
+A context belongs to one service, so `select_app` with a context binds that service into the handle, and the other service's tools refuse it.
+Without a context, pass `service` to `describe_app` or `select_app`; omitting it on a multi-service app returns an error from the node naming the services available.
+`describe_app` reports the service names any existing contexts use (`contextServices`), which is what `create_context` asks for.
 
 ## `call` vs generated tools
 
 `call` reaches the same methods through one fixed tool name:
 
 ```text
-Call the `call` tool with method "set" and args {"key": "greeting", "value": "hello"}.
+Call the `call` tool with the app_handle, method "set" and args {"key": "greeting", "value": "hello"}.
 ```
 
-Use it when:
-
-- **The generated tools are not visible.** Tools appearing mid-session is the
-  common cause — see [troubleshooting](/guides/troubleshooting/#the-generated-tools-do-not-appear).
-- **You have not selected anything.** `call` takes an optional `app` (and
-  `service`), so it can load an ABI and invoke a method in one step.
-
-With several applications selected, `call` requires `app` to disambiguate. With
-exactly one, it defaults to it.
-
-Arguments go under `args`, keyed by parameter name, and are validated against the
-same ABI-derived schema the generated tools use. An unknown method name returns the
-list of methods that do exist.
+Use it when the generated tools are not visible to your client (see [troubleshooting](/guides/troubleshooting/#the-generated-tools-do-not-appear)).
+Arguments go under `args`, keyed by parameter name, and are checked against the same ABI-derived schema the generated tools use, after the handle.
+Without a handle, pass `app` so the refusal can show that app's guide.
