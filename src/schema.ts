@@ -1,10 +1,7 @@
 import { z } from 'zod';
-import type { AbiField, AbiManifest, AbiMethod, AbiTypeDef, AbiTypeRef } from '@calimero-network/abi-codegen';
+import type { AbiField, AbiManifest, AbiMethod, AbiTypeDef, AbiTypeRef, AbiVariantDef } from '@calimero-network/abi-codegen';
 
-/** Depth cap for self-referential types; beyond it the schema degrades to unknown. */
-const MAX_DEPTH = 8;
-
-const SCALARS: Record<string, () => z.ZodTypeAny> = {
+const SCALARS: Record<string, () => z.ZodType> = {
   bool: () => z.boolean(),
   string: () => z.string(),
   unit: () => z.null(),
@@ -16,85 +13,145 @@ const SCALARS: Record<string, () => z.ZodTypeAny> = {
   f64: () => z.number(),
 };
 
-export function zodForType(t: AbiTypeRef, m: AbiManifest, depth = 0): z.ZodTypeAny {
-  if (depth > MAX_DEPTH) return z.unknown();
-  if ('$ref' in t) {
-    const def = m.types?.[t.$ref];
-    // A $ref may name a built-in absent from the type table; accept anything rather than failing the whole app.
-    return def ? zodForDef(def, m, depth + 1) : z.unknown();
-  }
-  const scalar = SCALARS[t.kind];
-  if (scalar) return scalar();
-  switch (t.kind) {
-    case 'bytes':
-      return bytesSchema('size' in t ? t.size : undefined);
-    case 'list':
-      return z.array(zodForType(t.items, m, depth + 1));
-    case 'map':
-      return z.record(z.string(), zodForType(t.value, m, depth + 1));
-    case 'record':
-      // A crdt collection is a transparent wrapper: the wire value is the inner type, not the fields.
-      if (t.crdt_type && t.inner_type) return zodForType(t.inner_type, m, depth + 1);
-      return recordSchema(t.fields, m, depth);
-    case 'tuple':
-      return z.tuple(t.elements.map((e) => zodForType(e, m, depth + 1)) as [z.ZodTypeAny, ...z.ZodTypeAny[]]);
-    default:
-      return z.unknown();
-  }
-}
+type Meta = { id?: string; description?: string };
 
-function zodForDef(def: AbiTypeDef, m: AbiManifest, depth: number): z.ZodTypeAny {
-  if (def.kind === 'alias') return zodForType(def.target, m, depth + 1);
-  if (def.kind === 'variant') {
-    // serde externally-tagged: unit variants ride as bare names, payload variants as {Name: payload}.
-    const units = def.variants.filter((v) => !v.payload).map((v) => v.name);
-    const tagged = def.variants
-      .filter((v) => v.payload)
-      .map((v) => z.object({ [v.name]: zodForType(v.payload!, m, depth + 1) }));
-    if (!tagged.length) return z.enum(units);
-    return z.union(units.length ? [z.enum(units), ...tagged] : tagged);
-  }
-  // record and bytes defs are shapes AbiTypeRef already covers.
-  return zodForType(def, m, depth);
-}
-
-function recordSchema(fields: AbiField[], m: AbiManifest, depth: number): z.ZodTypeAny {
-  const shape: Record<string, z.ZodTypeAny> = {};
-  for (const f of fields) {
-    const base = zodForType(f.type, m, depth + 1);
-    shape[f.name] = f.nullable ? base.nullable() : base;
-  }
-  return z.object(shape);
-}
+/** `input` accepts what an agent may send (bytes as hex too); `output` describes what the node returns. */
+export type SchemaMode = 'input' | 'output';
 
 /**
- * The node wants a JSON number array, and hex is the only string form the Calimero toolchain reads.
- * The size rides in the pattern so the advertised JSON Schema carries it, not just the validator.
+ * One manifest's zod schemas. Named ABI types are built once, lazily, and registered under their name,
+ * so recursion terminates and JSON Schema output carries them as `$defs` + `$ref`.
  */
-function bytesSchema(size?: number): z.ZodTypeAny {
-  const bytes = z.array(z.number().int().min(0).max(255));
-  const array = size === undefined ? bytes : bytes.length(size);
-  const hex = z
-    .string()
-    .regex(size === undefined ? /^(?:[0-9a-fA-F]{2})*$/ : new RegExp(`^[0-9a-fA-F]{${size * 2}}$`))
-    .transform((s) => Array.from(Buffer.from(s, 'hex')));
-  const label = size === undefined ? 'a byte array' : `a ${size}-byte array`;
-  return z.union([hex, array]).describe(`bytes: a hex string or ${label}`);
-}
+export function schemaBuilder(m: AbiManifest, mode: SchemaMode = 'input') {
+  const registry = z.registry<Meta>();
+  const named = new Map<string, z.ZodType>();
+  // Unions whose members can never both match, advertised as oneOf rather than zod's default anyOf.
+  const exclusive = new WeakSet<object>();
 
-/** The targeting option lives under a leading underscore, which no abi generator emits, so an app's own `context` parameter keeps its name. */
-export const CONTEXT_OPTION = '_context';
+  const note = <T extends z.ZodType>(schema: T, meta: Meta): T => {
+    registry.add(schema, meta);
+    return schema;
+  };
 
-export function inputShapeForMethod(method: AbiMethod, m: AbiManifest): Record<string, z.ZodTypeAny> {
-  const shape: Record<string, z.ZodTypeAny> = {};
-  shape[CONTEXT_OPTION] = z.string().optional().describe('Context id or alias to execute against; defaults to the selected context.');
-  // Params last: on the pathological collision the declared param still owns the key, since dropping its argument would break the call.
-  for (const p of method.params) {
-    const base = zodForType(p.type, m);
-    shape[p.name] = p.nullable ? base.nullable().optional() : base;
+  function ref(name: string): z.ZodType {
+    const known = named.get(name);
+    if (known) return known;
+    const def = m.types?.[name];
+    // A $ref may name a built-in absent from the type table; accept anything rather than failing the whole app.
+    if (!def) return z.unknown();
+    const schema = note(
+      z.lazy(() => fromDef(def)),
+      { id: name },
+    );
+    named.set(name, schema);
+    return schema;
   }
-  return shape;
+
+  function type(t: AbiTypeRef): z.ZodType {
+    if ('$ref' in t) return ref(t.$ref);
+    const scalar = SCALARS[t.kind];
+    if (scalar) return scalar();
+    switch (t.kind) {
+      case 'bytes':
+        return bytes('size' in t ? t.size : undefined);
+      case 'list':
+        return z.array(type(t.items));
+      case 'map':
+        return z.record(z.string(), type(t.value));
+      case 'record':
+        // A crdt collection is a transparent wrapper: the wire value is the inner type, not the fields.
+        if (t.crdt_type && t.inner_type) return type(t.inner_type);
+        return record(t.fields);
+      case 'tuple':
+        return z.tuple(t.elements.map(type) as [z.ZodType, ...z.ZodType[]]);
+      default:
+        return z.unknown();
+    }
+  }
+
+  function fromDef(def: AbiTypeDef): z.ZodType {
+    if (def.kind === 'alias') return type(def.target);
+    if (def.kind === 'variant') return variant(def);
+    return type(def);
+  }
+
+  /** Members that can never both match advertise as oneOf rather than zod's default anyOf. */
+  function union(members: z.ZodType[], isExclusive: boolean): z.ZodType {
+    if (members.length === 1) return members[0];
+    const schema = z.union(members as [z.ZodType, z.ZodType, ...z.ZodType[]]);
+    if (isExclusive) exclusive.add(schema);
+    return schema;
+  }
+
+  /** serde externally-tagged: unit variants ride as bare names, payload variants as {Name: payload}. */
+  function variant(def: AbiVariantDef): z.ZodType {
+    const units = def.variants.filter((v) => !v.payload).map((v) => v.name);
+    const unitSchemas = units.length ? [z.enum(units as [string, ...string[]])] : [];
+    const tagged = def.variants.filter((v) => v.payload).map((v) => z.object({ [v.name]: type(v.payload!) }).strict());
+    return union([...unitSchemas, ...tagged], true);
+  }
+
+  function record(fields: AbiField[]): z.ZodType {
+    const shape: Record<string, z.ZodType> = {};
+    for (const f of fields) {
+      const base = type(f.type);
+      shape[f.name] = f.nullable ? base.nullable() : base;
+    }
+    return z.object(shape);
+  }
+
+  /**
+   * The node wants a JSON number array, and hex is the only string form the Calimero toolchain reads.
+   * The size rides in the pattern so the advertised JSON Schema carries it, not just the validator.
+   */
+  function bytes(size?: number): z.ZodType {
+    const plain = z.array(z.number().int().min(0).max(255));
+    const array = size === undefined ? plain : plain.length(size);
+    const label = size === undefined ? 'a byte array' : `a ${size}-byte array`;
+    if (mode === 'output') return note(array, { description: `bytes: ${label}` });
+    const hex = z
+      .string()
+      .regex(size === undefined ? /^(?:[0-9a-fA-F]{2})*$/ : new RegExp(`^[0-9a-fA-F]{${size * 2}}$`))
+      .transform((s) => Array.from(Buffer.from(s, 'hex')));
+    return note(z.union([hex, array]), { description: `bytes: a hex string or ${label}` });
+  }
+
+  function params(method: AbiMethod): Record<string, z.ZodType> {
+    const shape: Record<string, z.ZodType> = {};
+    for (const p of method.params) {
+      const base = type(p.type);
+      shape[p.name] = p.nullable ? base.nullable().optional() : base;
+    }
+    return shape;
+  }
+
+  const jsonSchema = (schema: z.ZodType): Record<string, unknown> => {
+    const { $schema: _dialect, ...json } = z.toJSONSchema(schema, {
+      metadata: registry,
+      io: mode,
+      unrepresentable: 'any',
+      reused: 'inline',
+      cycles: 'ref',
+      override: ({ zodSchema, jsonSchema }) => {
+        if (!exclusive.has(zodSchema) || !jsonSchema.anyOf) return;
+        jsonSchema.oneOf = jsonSchema.anyOf;
+        delete jsonSchema.anyOf;
+      },
+    }) as Record<string, unknown>;
+    return json;
+  };
+
+  return {
+    type,
+    params,
+    jsonSchema,
+    describe: (schema: z.ZodType, description: string) => note(schema, { description }),
+  };
 }
+
+export const zodForType = (t: AbiTypeRef, m: AbiManifest): z.ZodType => schemaBuilder(m).type(t);
+
+export const inputShapeForMethod = (method: AbiMethod, m: AbiManifest): Record<string, z.ZodType> => schemaBuilder(m).params(method);
 
 export function renderMethodSignature(method: AbiMethod): string {
   const kind = method.intent === 'read_only' ? 'view' : 'mut';
@@ -113,7 +170,7 @@ function typeName(t: AbiTypeRef): string {
     case 'tuple':
       return `(${t.elements.map(typeName).join(', ')})`;
     case 'record':
-      // Must match zodForType's unwrap: the signature the agent reads is what it calls the tool by.
+      // Must match the schema's unwrap: the signature the agent reads is what it calls the tool by.
       return t.crdt_type && t.inner_type ? typeName(t.inner_type) : t.kind;
     default:
       return t.kind;

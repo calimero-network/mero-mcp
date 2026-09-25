@@ -4,10 +4,10 @@ import type { Application, ContextWithGroup, SignedGroupOpenInvitation } from '@
 import type { Config } from '../config.ts';
 import { discoverLocalNodes, listConfiguredNodes, resolveNode } from '../config.ts';
 import type { NodeSession } from '../node.ts';
+import type { Catalog } from '../catalog.ts';
 import { createAbiLoader } from '../abi.ts';
 import { errorResult, textResult } from '../errors.ts';
 import { listing } from '../guide.ts';
-import { getSelection } from './app.ts';
 
 /** Runs an admin call and folds its result or throw into the MCP text-result convention. */
 function wrap<Args>(fn: (args: Args) => Promise<unknown>) {
@@ -29,9 +29,11 @@ const opaqueInvitation = z
 // Hex matches how this codebase already renders bytes for display (see schema.ts's bytesSchema).
 const toHex = (bytes: number[]) => Buffer.from(bytes).toString('hex');
 
-export function registerCoreTools(server: McpServer, session: NodeSession, cfg: Config): void {
+export function registerCoreTools(server: McpServer, session: NodeSession, cfg: Config, catalog: Catalog): void {
   const admin = session.mero.admin;
   const { resolveAppId } = createAbiLoader(session);
+  // The install already happened; a failed refresh only delays the new tools until the next poll.
+  const refreshApps = () => catalog.sync().catch((err: unknown) => console.error('[mero-mcp] app list refresh failed:', err));
 
   // core: always registered, regardless of CALIMERO_MCP_TOOLSETS.
 
@@ -50,7 +52,6 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
         nodeName: session.nodeName ?? null,
         discoverySource: discovered.source,
         authMode: session.authMode,
-        ...getSelection(),
       };
     }),
   );
@@ -159,7 +160,9 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
       wrap(async ({ coords }: { coords: string }) => {
         const [pkg, version] = coords.split('@');
         if (!pkg || !version) throw new Error(`Expected package@version, got "${coords}".`);
-        return admin.installApplication({ package: pkg, version });
+        const installed = await admin.installApplication({ package: pkg, version });
+        await refreshApps();
+        return installed;
       }),
     );
 
@@ -170,7 +173,11 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
         inputSchema: { application: z.string() },
         annotations: { destructiveHint: true },
       },
-      wrap(async ({ application }: { application: string }) => admin.uninstallApplication(application)),
+      wrap(async ({ application }: { application: string }) => {
+        const removed = await admin.uninstallApplication(application);
+        await refreshApps();
+        return removed;
+      }),
     );
 
     server.registerTool(

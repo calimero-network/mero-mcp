@@ -1,15 +1,13 @@
 #!/usr/bin/env node
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { loadConfig } from './config.ts';
-import { createServer } from './server.ts';
+import { createServerFactory } from './server.ts';
 import { createLazySession } from './session.ts';
 
 function main() {
   const cfg = loadConfig();
-  const session = createLazySession(cfg);
-  // serveStdio reads the client's opening message, picks the protocol era, and builds one server for it.
-  serveStdio(() => createServer(session, cfg), { onerror: (err) => console.error('[mero-mcp]', err) });
-  console.error('[mero-mcp] ready on stdio; the node connects lazily on first tool call');
+  serveStdio(createServerFactory(createLazySession(cfg), cfg), { onerror: (err) => console.error('[mero-mcp]', err) });
+  console.error('[mero-mcp] ready on stdio; the node connects when a client opens the connection');
 }
 
 // Unconditional: npm links this file into .bin, and node reports the symlink path

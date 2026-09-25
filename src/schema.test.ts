@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { AbiManifest } from '@calimero-network/abi-codegen';
-import { CONTEXT_OPTION, inputShapeForMethod, zodForType, renderMethodSignature } from './schema.ts';
+import { inputShapeForMethod, renderMethodSignature, schemaBuilder, zodForType } from './schema.ts';
 import { z } from 'zod';
 
 function deepFreeze<T>(v: T): T {
@@ -76,13 +76,6 @@ test('inputShapeForMethod makes a nullable param optional and nullable', () => {
   assert.equal(obj.safeParse({ a: 'x' }).success, true);
   assert.equal(obj.safeParse({ a: 'x', b: null }).success, true);
   assert.equal(obj.safeParse({ b: 'y' }).success, false);
-});
-
-test('inputShapeForMethod adds an optional _context targeting option', () => {
-  const shape = inputShapeForMethod({ name: 'm', params: [] } as never, manifest());
-  assert.ok(CONTEXT_OPTION in shape);
-  assert.equal(z.object(shape).safeParse({}).success, true);
-  assert.equal(z.object(shape).safeParse({ [CONTEXT_OPTION]: 'ctx' }).success, true);
 });
 
 test('renderMethodSignature marks read_only methods as view', () => {
@@ -180,20 +173,10 @@ test('a nullable param is nullable at the param level, not inside its list', () 
   assert.equal(obj.safeParse({ xs: [null] }).success, false);
 });
 
-test('inputShapeForMethod does not let a param named context shadow the context option', () => {
-  const shape = inputShapeForMethod(
-    { name: 'm', params: [{ name: 'context', type: { kind: 'u32' } }] } as never,
-    manifest(),
-  );
-  const obj = z.object(shape);
-  // The param keeps its own name and its declared type: neither unioned with the option nor left optional.
+test('a param named context is an ordinary parameter now that the handle names the target', () => {
+  const obj = z.object(inputShapeForMethod({ name: 'm', params: [{ name: 'context', type: { kind: 'u32' } }] } as never, manifest()));
   assert.equal(obj.safeParse({ context: 1 }).success, true);
   assert.equal(obj.safeParse({ context: 'ctx' }).success, false);
-  assert.equal(obj.safeParse({}).success, false);
-  // And targeting survives alongside it, under the reserved name.
-  assert.ok(CONTEXT_OPTION in shape);
-  assert.equal(obj.safeParse({ context: 1, [CONTEXT_OPTION]: 'ctx' }).success, true);
-  assert.equal(obj.safeParse({ context: 1, [CONTEXT_OPTION]: 7 }).success, false);
 });
 
 test('renderMethodSignature shows nullability and defaults an absent return to unit', () => {
@@ -232,16 +215,31 @@ test('every derived shape converts to the json schema the mcp sdk advertises', (
     { name: 'pair', type: { kind: 'tuple', elements: [{ kind: 'string' }, { kind: 'f64' }] } },
     { name: 'nothing', type: { kind: 'unit' } },
   ];
-  const shape = inputShapeForMethod({ name: 'm', params } as never, m);
-  let json!: { properties: Record<string, { anyOf: unknown[] }> };
+  const builder = schemaBuilder(m);
+  let json!: { properties: Record<string, { anyOf?: unknown[]; $ref?: string }>; $defs: Record<string, { oneOf?: unknown[]; enum?: unknown[] }> };
   assert.doesNotThrow(() => {
-    json = z.toJSONSchema(z.object(shape), { target: 'draft-7', io: 'input' }) as typeof json;
+    json = builder.jsonSchema(z.object(builder.params({ name: 'm', params } as never))) as typeof json;
   });
-  // The hex decode is a transform, representable only on the input side the sdk asks for.
+  // The hex decode is a transform, representable only on the input side.
   assert.deepEqual(json.properties.blob.anyOf, [
     { type: 'string', pattern: '^[0-9a-fA-F]{64}$' },
     { minItems: 32, maxItems: 32, type: 'array', items: { type: 'integer', minimum: 0, maximum: 255 } },
   ]);
+  // Named types are $defs reached by $ref, recursion included; a variant's members are exclusive, so oneOf.
+  assert.equal(json.properties.node.$ref, '#/$defs/Node');
+  assert.ok(json.$defs.Action.oneOf);
+  assert.deepEqual(json.$defs.Status.enum, ['Open']);
+});
+
+test('output schemas describe bytes as the array the node returns, without the hex alternative', () => {
+  const out = schemaBuilder(manifest(), 'output');
+  assert.deepEqual(out.jsonSchema(out.type({ kind: 'bytes', size: 2 })), {
+    description: 'bytes: a 2-byte array',
+    minItems: 2,
+    maxItems: 2,
+    type: 'array',
+    items: { type: 'integer', minimum: 0, maximum: 255 },
+  });
 });
 
 test('renderMethodSignature unwraps a crdt record the same way the schema does', () => {

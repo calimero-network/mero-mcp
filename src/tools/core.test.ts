@@ -6,6 +6,10 @@ import * as meroJs from '@calimero-network/mero-js';
 import { loadConfig } from '../config.ts';
 import type { NodeSession } from '../node.ts';
 import { registerCoreTools } from './core.ts';
+import type { Catalog } from '../catalog.ts';
+
+/** Core tools only ask the catalog to refresh after an install or uninstall. */
+const CATALOG = { sync: async () => {} } as unknown as Catalog;
 
 const CORE = [
   'node_status',
@@ -58,7 +62,7 @@ const env = (over: Record<string, string> = {}) => ({ HOME: '/x', ...over }) as 
 /** Registers the core tools on a real server so the SDK's own input validation and JSON Schema conversion run. */
 async function realServer(admin: FakeAdmin, over: Record<string, string> = {}) {
   const server = new McpServer({ name: 'core-test', version: '0.0.0' });
-  registerCoreTools(server, fakeSession(admin), loadConfig(env(over)));
+  registerCoreTools(server, fakeSession(admin), loadConfig(env(over)), CATALOG);
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: 'core-test', version: '0.0.0' });
   await Promise.all([server.connect(serverSide), client.connect(clientSide)]);
@@ -85,14 +89,14 @@ const httpError = (status: number, message: string) =>
 
 test('default toolsets register core, blobs, and governance tools', () => {
   const { server, tools } = fakeServer();
-  registerCoreTools(server, fakeSession(), loadConfig(env()));
+  registerCoreTools(server, fakeSession(), loadConfig(env()), CATALOG);
   for (const name of [...CORE, ...BLOBS, ...GOVERNANCE]) assert.ok(tools.has(name), `${name} not registered`);
   assert.equal(tools.size, CORE.length + BLOBS.length + GOVERNANCE.length);
 });
 
 test('CALIMERO_MCP_TOOLSETS=core registers only the core group, and core registers even when the toolset set omits it', () => {
   const { server, tools } = fakeServer();
-  registerCoreTools(server, fakeSession(), loadConfig(env({ CALIMERO_MCP_TOOLSETS: 'core' })));
+  registerCoreTools(server, fakeSession(), loadConfig(env({ CALIMERO_MCP_TOOLSETS: 'core' })), CATALOG);
   for (const name of CORE) assert.ok(tools.has(name), `${name} not registered`);
   for (const name of [...BLOBS, ...GOVERNANCE]) assert.equal(tools.has(name), false, `${name} should not be registered`);
 
@@ -100,7 +104,7 @@ test('CALIMERO_MCP_TOOLSETS=core registers only the core group, and core registe
   // must not gate the core group behind cfg.toolsets.has('core').
   const bare = { ...loadConfig(env()), toolsets: new Set(['blobs']) };
   const { server: server2, tools: tools2 } = fakeServer();
-  registerCoreTools(server2, fakeSession(), bare);
+  registerCoreTools(server2, fakeSession(), bare, CATALOG);
   for (const name of CORE) assert.ok(tools2.has(name), `${name} not registered`);
   assert.equal(tools2.has('install_application'), true);
   assert.equal(tools2.has('create_namespace'), false);
@@ -119,7 +123,7 @@ test('list_contexts calls getContextsForApplication when given an application, e
     },
   };
   const { server, tools } = fakeServer();
-  registerCoreTools(server, fakeSession(admin), loadConfig(env()));
+  registerCoreTools(server, fakeSession(admin), loadConfig(env()), CATALOG);
   const handler = tools.get('list_contexts')!;
   await handler({});
   await handler({ application: 'app1' });
@@ -140,7 +144,7 @@ test('list_applications decodes metadata for display: JSON object, plain string,
     }),
   };
   const { server, tools } = fakeServer();
-  registerCoreTools(server, fakeSession(admin), loadConfig(env()));
+  registerCoreTools(server, fakeSession(admin), loadConfig(env()), CATALOG);
   const { apps } = jsonOf(await tools.get('list_applications')!({})) as unknown as { apps: Array<Record<string, unknown>> };
 
   assert.deepEqual(apps[0].metadata, { name: 'kv-store' });
@@ -161,7 +165,7 @@ test('list_applications adds appVersion, leaves the guide out and lists its proc
     }),
   };
   const { server, tools } = fakeServer();
-  registerCoreTools(server, fakeSession(admin), loadConfig(env()));
+  registerCoreTools(server, fakeSession(admin), loadConfig(env()), CATALOG);
   const { apps } = jsonOf(await tools.get('list_applications')!({})) as unknown as { apps: Array<Record<string, unknown>> };
 
   assert.deepEqual(apps[0].metadata, { name: 'kv-store' });
@@ -190,7 +194,7 @@ test('list_contexts renders dagHeads as hex, keeping every head a multi-head con
     }),
   };
   const { server, tools } = fakeServer();
-  registerCoreTools(server, fakeSession(admin), loadConfig(env()));
+  registerCoreTools(server, fakeSession(admin), loadConfig(env()), CATALOG);
   const { contexts } = jsonOf(await tools.get('list_contexts')!({})) as unknown as { contexts: Array<{ dagHeads: string[] }> };
   assert.deepEqual(contexts[0].dagHeads, ['010203', 'ff0080']);
 });
@@ -257,7 +261,7 @@ test('delete_context is destructive and deletes by id', async () => {
     },
   };
   const { server, tools, configs } = fakeServer();
-  registerCoreTools(server, fakeSession(admin), loadConfig(env()));
+  registerCoreTools(server, fakeSession(admin), loadConfig(env()), CATALOG);
   assert.equal(configs.get('delete_context')?.annotations?.destructiveHint, true);
 
   const handler = tools.get('delete_context')!;
@@ -274,7 +278,7 @@ test('install_application splits package@version, and rejects a coordinate missi
     },
   };
   const { server, tools } = fakeServer();
-  registerCoreTools(server, fakeSession(admin), loadConfig(env()));
+  registerCoreTools(server, fakeSession(admin), loadConfig(env()), CATALOG);
 
   const handler = tools.get('install_application')!;
   assert.match(textOf(await handler({ coords: 'network.calimero.kv-store@1.0.0' })), /"applicationId": "AppId111"/);
@@ -283,6 +287,29 @@ test('install_application splits package@version, and rejects a coordinate missi
   const bad = await handler({ coords: 'network.calimero.kv-store' });
   assert.equal(bad.isError, true);
   assert.match(textOf(bad), /Expected package@version/);
+});
+
+test('install and uninstall refresh the app list after the node answers, and a failed refresh keeps the answer', async () => {
+  const order: string[] = [];
+  const admin = {
+    installApplication: async () => (order.push('install'), { applicationId: 'AppId111' }),
+    uninstallApplication: async () => (order.push('uninstall'), { applicationId: 'AppId111' }),
+  };
+  const catalog = {
+    sync: async () => {
+      order.push('sync');
+      throw new Error('node went away');
+    },
+  } as unknown as Catalog;
+  const { server, tools } = fakeServer();
+  registerCoreTools(server, fakeSession(admin), loadConfig(env()), catalog);
+
+  const installed = await tools.get('install_application')!({ coords: 'network.calimero.kv-store@1.0.0' });
+  const removed = await tools.get('uninstall_application')!({ application: 'AppId111' });
+  assert.equal(installed.isError, undefined);
+  assert.match(textOf(installed), /"applicationId": "AppId111"/);
+  assert.match(textOf(removed), /"applicationId": "AppId111"/);
+  assert.deepEqual(order, ['install', 'sync', 'uninstall', 'sync']);
 });
 
 test('create_namespace and create_context resolve an application the way describe_app does', async () => {
@@ -299,7 +326,7 @@ test('create_namespace and create_context resolve an application the way describ
     },
   };
   const { server, tools } = fakeServer();
-  registerCoreTools(server, fakeSession(admin), loadConfig(env()));
+  registerCoreTools(server, fakeSession(admin), loadConfig(env()), CATALOG);
 
   // The package tail, the full package name, and the raw id all name the same application.
   await tools.get('create_namespace')!({ application: 'kv-store' });
@@ -319,7 +346,7 @@ test('create_namespace and create_context resolve an application the way describ
 test('create_alias confirms what it created instead of answering null', async () => {
   const admin = { createContextAlias: async () => null };
   const { server, tools } = fakeServer();
-  registerCoreTools(server, fakeSession(admin), loadConfig(env()));
+  registerCoreTools(server, fakeSession(admin), loadConfig(env()), CATALOG);
   assert.equal(textOf(await tools.get('create_alias')!({ alias: 'chat', contextId: 'Ctx111' })), 'Alias "chat" now resolves to context Ctx111.');
 });
 
@@ -327,7 +354,7 @@ test('lookup_alias names the context on a hit and says so on a miss, without cal
   // Core answers a miss with a null value, which on its own is indistinguishable from a failed call.
   const admin = { lookupContextAlias: async (name: string) => ({ value: name === 'chat' ? 'Ctx111' : null }) };
   const { server, tools } = fakeServer();
-  registerCoreTools(server, fakeSession(admin), loadConfig(env()));
+  registerCoreTools(server, fakeSession(admin), loadConfig(env()), CATALOG);
 
   const hit = await tools.get('lookup_alias')!({ name: 'chat' });
   assert.deepEqual(jsonOf(hit), { alias: 'chat', contextId: 'Ctx111' });
@@ -340,7 +367,7 @@ test('lookup_alias names the context on a hit and says so on a miss, without cal
 test('leave_namespace and add_group_members report what they did rather than returning null', async () => {
   const admin = { leaveNamespace: async () => undefined, addGroupMembers: async () => undefined };
   const { server, tools } = fakeServer();
-  registerCoreTools(server, fakeSession(admin), loadConfig(env()));
+  registerCoreTools(server, fakeSession(admin), loadConfig(env()), CATALOG);
 
   assert.equal(textOf(await tools.get('leave_namespace')!({ namespace: 'Ns111' })), 'Left namespace Ns111.');
   const added = await tools.get('add_group_members')!({
@@ -355,14 +382,14 @@ test('node_status reports the node name the session carries, and the discovery s
   // An explicit url keeps resolveNode off the network; its source is a source, never the name.
   const cfg = env({ CALIMERO_NODE_URL: 'http://localhost:2528', CALIMERO_NODE_NAME: 'default' });
   const { server, tools } = fakeServer();
-  registerCoreTools(server, fakeSession(admin, { nodeName: 'default' }), loadConfig(cfg));
+  registerCoreTools(server, fakeSession(admin, { nodeName: 'default' }), loadConfig(cfg), CATALOG);
   const named = jsonOf(await tools.get('node_status')!({}));
   assert.equal(named.nodeName, 'default');
   assert.equal(named.discoverySource, 'env');
 
   // Nothing named this node: an explicit null, not the label for how it was found.
   const { server: server2, tools: tools2 } = fakeServer();
-  registerCoreTools(server2, fakeSession(admin, { nodeName: undefined }), loadConfig(env({ CALIMERO_NODE_URL: 'http://localhost:2528' })));
+  registerCoreTools(server2, fakeSession(admin, { nodeName: undefined }), loadConfig(env({ CALIMERO_NODE_URL: 'http://localhost:2528' })), CATALOG);
   const nameless = jsonOf(await tools2.get('node_status')!({}));
   assert.equal(nameless.nodeName, null);
   assert.equal(nameless.discoverySource, 'env');
@@ -375,7 +402,7 @@ test('a throwing admin call yields isError: true carrying the message', async ()
     },
   };
   const { server, tools } = fakeServer();
-  registerCoreTools(server, fakeSession(admin), loadConfig(env()));
+  registerCoreTools(server, fakeSession(admin), loadConfig(env()), CATALOG);
   const result = await tools.get('list_applications')!({});
   assert.equal(result.isError, true);
   assert.match(result.content[0].text, /boom/);
@@ -394,7 +421,7 @@ test("a rejected admin call reaches the tool result as the node's own message, n
     },
   };
   const { server, tools } = fakeServer();
-  registerCoreTools(server, fakeSession(admin), loadConfig(env()));
+  registerCoreTools(server, fakeSession(admin), loadConfig(env()), CATALOG);
 
   const namespaced = await tools.get('create_namespace')!({ application: 'kv-store' });
   assert.equal(namespaced.isError, true);
@@ -415,7 +442,7 @@ test('a bodyless rejection still names the endpoint and the status, and an unrea
     },
   };
   const { server, tools } = fakeServer();
-  registerCoreTools(server, fakeSession(admin), loadConfig(env({ CALIMERO_NODE_URL: 'http://localhost:2528' })));
+  registerCoreTools(server, fakeSession(admin), loadConfig(env({ CALIMERO_NODE_URL: 'http://localhost:2528' })), CATALOG);
 
   const bodyless = await tools.get('list_blobs')!({});
   assert.equal(bodyless.isError, true);
