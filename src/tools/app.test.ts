@@ -25,11 +25,11 @@ const ctx = (label: string) => {
   return label.padEnd(44, 'z');
 };
 
-const KV = { id: 'kv-id', package: 'com.calimero.kv-store', version: '0.1.0', blob: { bytecode: 'kv-blob', compiled: 'c' } };
-const NOTES = { id: 'notes-id', package: 'notes', version: '0.2.0', blob: { bytecode: 'notes-blob', compiled: 'c' } };
+const KV = { id: 'kv-id', package: 'com.calimero.kv-store', version: '0.1.0', blob: { bytecode: 'kv-blob', compiled: 'c' }, metadata: [] as number[] };
+const NOTES = { id: 'notes-id', package: 'notes', version: '0.2.0', blob: { bytecode: 'notes-blob', compiled: 'c' }, metadata: [] as number[] };
 // Sanitising `kv_store` and `kv-store` lands on one slug, while whole-segment resolution keeps them distinct inputs.
-const TWIN = { id: 'twin-id', package: 'org.example.kv_store', version: '1.0.0', blob: { bytecode: 'twin-blob', compiled: 'c' } };
-const BARE = { id: 'RawApp42', package: undefined, version: '0.0.1', blob: { bytecode: 'bare-blob', compiled: 'c' } };
+const TWIN = { id: 'twin-id', package: 'org.example.kv_store', version: '1.0.0', blob: { bytecode: 'twin-blob', compiled: 'c' }, metadata: [] as number[] };
+const BARE = { id: 'RawApp42', package: undefined, version: '0.0.1', blob: { bytecode: 'bare-blob', compiled: 'c' }, metadata: [] as number[] };
 
 const ABIS: Record<string, unknown> = {
   'kv-id': manifest([method('get', [{ name: 'key', type: 'string' }], 'read_only'), method('set', [{ name: 'key', type: 'string' }])]),

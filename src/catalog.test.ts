@@ -48,6 +48,13 @@ test('two installed versions of one package are both kept, in version order, and
   assert.deepEqual(catalog.apps().map((a) => a.version), ['1.0.0']);
 });
 
+test('versions sort numerically, not lexically, so 9.0.0 comes before 10.0.0', async () => {
+  const node = fakeNode([app('v10-id', 'org.dup', '10.0.0'), app('v9-id', 'org.dup', '9.0.0')]);
+  const catalog = createCatalog(createAbiLoader(node.session));
+  await catalog.sync();
+  assert.deepEqual(catalog.apps().map((a) => a.version), ['9.0.0', '10.0.0']);
+});
+
 test('an app whose ABI cannot be read is left out, and the rest still load', async () => {
   const node = fakeNode([app('a-id', 'org.a'), { ...app('bad-id', 'org.bad'), abi: { schema_version: 'wasm-abi/1' } }]);
   const catalog = createCatalog(createAbiLoader(node.session));

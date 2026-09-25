@@ -97,16 +97,14 @@ export function createAbiLoader(session: NodeSession) {
 
   async function resolve(app: InstalledApp, serviceName?: string): Promise<ResolvedApp> {
     const blobId = app.blob.bytecode;
-    // A caller may omit metadata entirely (older fixtures, or an app with none) rather than send an empty array.
-    const metadata = app.metadata ?? [];
     return {
       id: app.id,
       package: app.package,
       version: app.version,
-      name: metadataField(metadata, 'name'),
-      icon: metadataField(metadata, 'icon'),
+      name: metadataField(app.metadata, 'name'),
+      icon: metadataField(app.metadata, 'icon'),
       signerId: app.signer_id,
-      guide: guideOf(metadata),
+      guide: guideOf(app.metadata),
       serviceName,
       blobId,
       manifest: await manifestFor(app, blobId, serviceName),
@@ -134,10 +132,18 @@ export function createAbiLoader(session: NodeSession) {
           }),
         ),
       );
-      // Package, then version, then service, then app id: two installed versions of one package
-      // must not tie on package+service and fall back to node-returned order.
-      const key = (a: ResolvedApp) => [a.package ?? a.id, a.version ?? '', a.serviceName ?? '', a.id].join('\u0000');
-      return loaded.filter((a): a is ResolvedApp => a !== undefined).sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0));
+      // Package, then version (numeric, so 9.0.0 sorts before 10.0.0), then service, then app id:
+      // two installed versions of one package must not tie on package+service and fall back to
+      // node-returned order.
+      const compare = (a: ResolvedApp, b: ResolvedApp): number => {
+        const pkg = (a.package ?? a.id).localeCompare(b.package ?? b.id);
+        if (pkg !== 0) return pkg;
+        const version = (a.version ?? '').localeCompare(b.version ?? '', undefined, { numeric: true });
+        if (version !== 0) return version;
+        const service = (a.serviceName ?? '').localeCompare(b.serviceName ?? '');
+        return service !== 0 ? service : a.id.localeCompare(b.id);
+      };
+      return loaded.filter((a): a is ResolvedApp => a !== undefined).sort(compare);
     },
   };
 }
