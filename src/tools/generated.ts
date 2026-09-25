@@ -12,6 +12,7 @@ import { inputShapeForMethod, renderMethodSignature, schemaBuilder } from '../sc
 const MAX_SLUG = 20;
 const MAX_NAME = 49; // 64 minus Claude Code's 15-char `mcp__mero-mcp__` prefix
 const HASHED_KEEP = 42;
+const HANDLE_PARAM = 'app_handle';
 const APP_HANDLE_DOC = 'The app_handle select_app returned for this application; it names the context the call runs in.';
 
 const sanitize = (s: string) => s.toLowerCase().replace(/[^a-z0-9_]+/g, '_');
@@ -50,13 +51,16 @@ export function toolTitle(app: ResolvedApp, method: string): string {
   return `${words.charAt(0).toUpperCase()}${words.slice(1)} (${app.name ?? packageKey(app)})`;
 }
 
-const sortedMethods = (app: ResolvedApp) =>
-  [...app.manifest.methods].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+// A method's own app_handle parameter would collide with the injected one, so only call reaches it, with args kept apart.
+const collides = (method: AbiMethod) => method.params.some((p) => p.name === HANDLE_PARAM);
+
+const toolMethods = (app: ResolvedApp) =>
+  app.manifest.methods.filter((m) => !collides(m)).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 
 /** Every tool name the catalog yields, per app: what select_app reports and what tools/list shows. */
 export function toolNamesByApp(apps: readonly ResolvedApp[]): Map<ResolvedApp, string[]> {
   const bySlug = slugs(apps);
-  return new Map(apps.map((app) => [app, sortedMethods(app).map((m) => toolName(bySlug.get(app)!, m.name))]));
+  return new Map(apps.map((app) => [app, toolMethods(app).map((m) => toolName(bySlug.get(app)!, m.name))]));
 }
 
 function toolConfig(app: ResolvedApp, method: AbiMethod) {
@@ -69,7 +73,7 @@ function toolConfig(app: ResolvedApp, method: AbiMethod) {
     title: toolTitle(app, method.name),
     description: renderMethodSignature(method),
     inputSchema: advertised(
-      input.jsonSchema(z.object({ app_handle: input.describe(z.string(), APP_HANDLE_DOC), ...input.params(method) })),
+      input.jsonSchema(z.object({ [HANDLE_PARAM]: input.describe(z.string(), APP_HANDLE_DOC), ...input.params(method) })),
     ),
     ...(returns ? { outputSchema: advertised(output.jsonSchema(returns)) } : {}),
     // destructiveHint stays false until the ABI can say otherwise; every hint is sent explicitly.
@@ -108,10 +112,10 @@ export function registerGeneratedTools(
     if (current.version !== app.version) {
       await catalog.sync();
       const upgraded = catalog.apps().find((a) => a.id === app.id && a.serviceName === app.serviceName);
-      const same = upgraded?.manifest.methods.find((m) => m.name === method.name);
+      const same = upgraded && toolMethods(upgraded).find((m) => m.name === method.name);
       if (upgraded && same) [app, method] = [upgraded, same];
     }
-    const admitted = await gate.admit(current, args.app_handle, app.version ?? '');
+    const admitted = await gate.admit(current, args[HANDLE_PARAM], app.version ?? '');
     if ('refusal' in admitted) return admitted.refusal;
     const argsJson = z.object(inputShapeForMethod(method, app.manifest)).parse(args);
     const result = await session.mero.rpc.execute({ contextId: admitted.contextId, method: method.name, argsJson });
@@ -124,8 +128,14 @@ export function registerGeneratedTools(
   function register() {
     for (const tool of registered) tool.remove();
     const names = toolNamesByApp(catalog.apps());
+    for (const app of catalog.apps()) {
+      for (const m of app.manifest.methods.filter(collides)) {
+        const where = `${packageKey(app)} ${app.version ?? ''} ${m.name}`;
+        console.error(`[mero-mcp] no tool for ${where}: its app_handle parameter would collide; use call`);
+      }
+    }
     registered = catalog.apps().flatMap((app) =>
-      sortedMethods(app).map((method, i) =>
+      toolMethods(app).map((method, i) =>
         server.registerTool(names.get(app)![i], toolConfig(app, method), async (args: unknown) =>
           invoke(app, method, args as Record<string, unknown>).catch(errorResult),
         ),

@@ -617,3 +617,36 @@ test('describe_app reads the service from contexts, and says when none can be re
     await s.close();
   }
 });
+
+test('a method with its own app_handle parameter gets no generated tool and is reached through call', async (t) => {
+  const logged = t.mock.method(console, 'error', () => {});
+  const app: FakeApp = {
+    ...plain(),
+    abi: manifest([method('ping'), method('store', [{ name: 'app_handle', type: { kind: 'string' } }])]),
+  };
+  const s = await setup([app]);
+  try {
+    const names = (await s.client.listTools()).tools.map((t) => t.name);
+    assert.ok(names.includes('notes_ping'));
+    assert.ok(!names.includes('notes_store'));
+    const lines = logged.mock.calls.map((c) => c.arguments.join(' '));
+    assert.ok(
+      lines.includes('[mero-mcp] no tool for org.example.notes 0.2.0 store: its app_handle parameter would collide; use call'),
+      `stderr was: ${JSON.stringify(lines)}`,
+    );
+
+    const { app_handle, tools } = await s.json('select_app', { app: 'notes' });
+    assert.deepEqual(tools, ['notes_ping']);
+    await s.call('call', { app_handle, method: 'store', args: { app_handle: 'x' } });
+    assert.deepEqual(s.executed, [{ contextId: ctx('notesctx'), method: 'store', argsJson: { app_handle: 'x' } }]);
+
+    // An in-place upgrade that gives ping an app_handle parameter must not run it through the old tool.
+    Object.assign(s.apps[0], { version: '0.3.0', abi: manifest([method('ping', [{ name: 'app_handle', type: { kind: 'string' } }])]) });
+    const fresh = await s.json('select_app', { app: 'notes' });
+    const refused = await s.call('notes_ping', { app_handle: fresh.app_handle });
+    assert.equal(refused.isError, true);
+    assert.equal(s.executed.length, 1);
+  } finally {
+    await s.close();
+  }
+});

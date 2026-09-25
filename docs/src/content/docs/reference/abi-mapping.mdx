@@ -111,6 +111,7 @@ app_handle: string   The app_handle select_app returned for this application; it
 
 The context a call runs in comes from the handle, so there is no separate context argument.
 The handle is the only argument mero-mcp adds, so an application's own `context` parameter is an ordinary parameter.
+A method that declares its own parameter named `app_handle` would collide with it, so it has no generated tool and is reached with `call`, whose `args` object keeps the two apart.
 Outgoing arguments are built by filtering the input down to the method's *declared* parameters, so the handle never reaches the application.
 
 ## Method signatures
