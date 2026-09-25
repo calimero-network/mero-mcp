@@ -14,10 +14,10 @@ const session = {
   mero: { admin: { lookupContextAlias: async (name: string) => ({ value: name === 'work' ? 'Ctx111' : null }) }, rpc: {} },
 } as unknown as NodeSession;
 
-const namesIn = async (era: Era) => {
+const toolsIn = async (era: Era) => {
   const { client, close } = await connect(() => createServer(session, CFG), era);
   try {
-    return (await client.listTools()).tools.map((t) => t.name);
+    return (await client.listTools()).tools;
   } finally {
     await close();
   }
@@ -37,6 +37,8 @@ for (const era of Object.keys(ERAS) as Era[]) {
   });
 }
 
-test('both eras list the same tools', async () => {
-  assert.deepEqual(await namesIn('2026-07-28'), await namesIn('2025-11-25'));
+test('both eras list wire-identical tool definitions', async () => {
+  const [modern, legacy] = await Promise.all([toolsIn('2026-07-28'), toolsIn('2025-11-25')]);
+  // JSON-normalize: legacy Tool carries an `execution: undefined` key the 2026 anchor type deleted, which JSON drops on both sides.
+  assert.deepEqual(JSON.parse(JSON.stringify(modern)), JSON.parse(JSON.stringify(legacy)));
 });
