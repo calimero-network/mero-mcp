@@ -1,5 +1,6 @@
 import { parseAbiManifest, type AbiManifest } from '@calimero-network/abi-codegen';
 import { isHttpError, nodeMessage } from './errors.ts';
+import { guideOf, metadataField } from './guide.ts';
 import type { NodeSession } from './node.ts';
 
 const UPGRADE_MEROD =
@@ -9,6 +10,12 @@ const UPGRADE_MEROD =
 export interface ResolvedApp {
   id: string;
   package?: string;
+  version?: string;
+  /** metadata.name from the bundle, the human name of the app. */
+  name?: string;
+  icon?: string;
+  signerId?: string;
+  guide?: string;
   manifest: AbiManifest;
   serviceName?: string;
   blobId: string;
@@ -22,7 +29,11 @@ export const lastSegment = (name: string) => name.split('.').pop() || name;
 interface InstalledApp {
   id: string;
   package?: string;
+  version?: string;
   blob: { bytecode: string };
+  metadata: number[];
+  signer_id?: string;
+  services?: Record<string, unknown>;
 }
 
 /**
@@ -39,14 +50,16 @@ function abiError(err: unknown): unknown {
 export function createAbiLoader(session: NodeSession) {
   const cache = new Map<string, AbiManifest>();
 
-  async function resolveAppId(nameOrId: string): Promise<{ id: string; package?: string; blobId: string }> {
-    let apps: InstalledApp[];
+  async function installed(): Promise<InstalledApp[]> {
     try {
-      ({ apps } = (await session.mero.admin.listApplications()) as { apps: InstalledApp[] });
+      return ((await session.mero.admin.listApplications()) as { apps: InstalledApp[] }).apps;
     } catch (err) {
       throw abiError(err);
     }
+  }
 
+  async function findApp(nameOrId: string): Promise<InstalledApp> {
+    const apps = await installed();
     const exact = apps.find((a) => a.id === nameOrId || a.package === nameOrId);
     // Whole segments only, never a prefix: "mero-chat" must not resolve to "mero-chat-v2".
     const matches = exact
@@ -59,34 +72,72 @@ export function createAbiLoader(session: NodeSession) {
     }
     const app = matches[0];
     if (!app) {
-      const installed = apps.map((a) => a.package || a.id).join(', ') || '(none)';
-      throw new Error(`Application "${nameOrId}" not found. Installed: ${installed}`);
+      const listed = apps.map((a) => a.package || a.id).join(', ') || '(none)';
+      throw new Error(`Application "${nameOrId}" not found. Installed: ${listed}`);
     }
-    return { id: app.id, package: app.package, blobId: app.blob.bytecode };
+    return app;
+  }
+
+  async function manifestFor(app: InstalledApp, blobId: string, serviceName?: string): Promise<AbiManifest> {
+    // Blob ids are content-addressed, so an upgraded app resolves to a new key.
+    const key = `${blobId}:${serviceName ?? ''}`;
+    const cached = cache.get(key);
+    if (cached) return cached;
+    let raw: unknown;
+    try {
+      raw = await session.mero.admin.getApplicationAbi(app.id, serviceName);
+    } catch (err) {
+      throw abiError(err);
+    }
+    // Cached only past every failure mode, so one bad fetch can't wedge the app.
+    const manifest = parseAbiManifest(raw);
+    cache.set(key, manifest);
+    return manifest;
+  }
+
+  async function resolve(app: InstalledApp, serviceName?: string): Promise<ResolvedApp> {
+    const blobId = app.blob.bytecode;
+    // A caller may omit metadata entirely (older fixtures, or an app with none) rather than send an empty array.
+    const metadata = app.metadata ?? [];
+    return {
+      id: app.id,
+      package: app.package,
+      version: app.version,
+      name: metadataField(metadata, 'name'),
+      icon: metadataField(metadata, 'icon'),
+      signerId: app.signer_id,
+      guide: guideOf(metadata),
+      serviceName,
+      blobId,
+      manifest: await manifestFor(app, blobId, serviceName),
+    };
   }
 
   return {
-    resolveAppId,
+    async resolveAppId(nameOrId: string): Promise<{ id: string; package?: string; blobId: string }> {
+      const app = await findApp(nameOrId);
+      return { id: app.id, package: app.package, blobId: app.blob.bytecode };
+    },
 
     async load(nameOrId: string, serviceName?: string): Promise<ResolvedApp> {
-      // Blob ids are content-addressed, so an upgraded app resolves to a new key.
-      const { id, package: pkg, blobId } = await resolveAppId(nameOrId);
-      const key = `${blobId}:${serviceName ?? ''}`;
+      return resolve(await findApp(nameOrId), serviceName);
+    },
 
-      const cached = cache.get(key);
-      if (cached) return { id, package: pkg, manifest: cached, serviceName, blobId };
-
-      let raw: unknown;
-      try {
-        raw = await session.mero.admin.getApplicationAbi(id, serviceName);
-      } catch (err) {
-        throw abiError(err);
-      }
-
-      // Cached only past every failure mode, so one bad fetch can't wedge the app.
-      const manifest = parseAbiManifest(raw);
-      cache.set(key, manifest);
-      return { id, package: pkg, manifest, serviceName, blobId };
+    /** Every installed app, one entry per service, skipping (and reporting) any whose ABI cannot be read. */
+    async loadAll(): Promise<ResolvedApp[]> {
+      const units = (await installed()).flatMap((app) => (app.services ? Object.keys(app.services).sort() : [undefined]).map((service) => ({ app, service })));
+      const loaded = await Promise.all(
+        units.map(({ app, service }) =>
+          resolve(app, service).catch((err: unknown) => {
+            console.error(`[mero-mcp] skipping ${app.package ?? app.id}${service ? `/${service}` : ''}: ${String(err)}`);
+            return undefined;
+          }),
+        ),
+      );
+      // Package, then version, then service, then app id: two installed versions of one package
+      // must not tie on package+service and fall back to node-returned order.
+      const key = (a: ResolvedApp) => [a.package ?? a.id, a.version ?? '', a.serviceName ?? '', a.id].join('\u0000');
+      return loaded.filter((a): a is ResolvedApp => a !== undefined).sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0));
     },
   };
 }
