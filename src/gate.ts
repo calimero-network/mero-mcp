@@ -76,7 +76,8 @@ export function createGate(session: NodeSession, keeper: HandleKeeper = handles)
       if (!payload || (['p', 'v', 'g', 's'] as const).some((key) => payload[key] !== expected[key])) return refuse(app, retry(app));
       if (payload.c === null) return refuse(app, noContext(app), false);
       const target = (await contextsOf(app.id)).find((c) => c.id === payload.c);
-      if (!target || (app.serviceName && target.serviceName !== app.serviceName)) return refuse(app, retry(app));
+      const service = target && (target.serviceName ?? app.soleService);
+      if (!target || (app.serviceName && service !== app.serviceName)) return refuse(app, retry(app));
       return { contextId: target.id };
     },
   };

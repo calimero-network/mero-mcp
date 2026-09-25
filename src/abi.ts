@@ -18,6 +18,8 @@ export interface ResolvedApp {
   guide?: string;
   manifest: AbiManifest;
   serviceName?: string;
+  /** A one-service bundle's service, which core runs for a context created without a service name. */
+  soleService?: string;
   blobId: string;
 }
 
@@ -108,8 +110,11 @@ export function createAbiLoader(session: NodeSession) {
     return manifest;
   }
 
-  async function resolve(app: InstalledApp, serviceName?: string): Promise<ResolvedApp> {
+  async function resolve(app: InstalledApp, requested?: string): Promise<ResolvedApp> {
     const blobId = app.blob.bytecode;
+    const services = Object.keys(app.services ?? {});
+    const soleService = services.length === 1 ? services[0] : undefined;
+    const serviceName = requested ?? soleService;
     return {
       id: app.id,
       package: app.package,
@@ -119,6 +124,7 @@ export function createAbiLoader(session: NodeSession) {
       signerId: app.signer_id,
       guide: guideOf(app.metadata),
       serviceName,
+      soleService,
       blobId,
       manifest: await manifestFor(app, blobId, serviceName),
     };

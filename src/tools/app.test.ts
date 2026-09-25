@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadConfig } from '../config.ts';
-import { handles } from '../handle.ts';
+import { WATCH_INTERVAL_MS } from '../catalog.ts';
+import { guideHash, handles } from '../handle.ts';
 import { createServerFactory } from '../server.ts';
 import { connect, type Era } from '../../test/support/connect.ts';
 import { ctx, fakeNode, manifest, method, type FakeApp } from '../../test/support/node.ts';
@@ -707,3 +708,67 @@ test('an install whose tool name meets an existing one registers both, and the l
     await s.close();
   }
 });
+
+const solo = (): FakeApp => ({
+  id: 'solo-id',
+  package: 'com.x.solo',
+  version: '1.0.0',
+  signer_id: 'SignerKey4',
+  metadata: { name: 'Solo' },
+  abi: undefined,
+  services: { main: manifest([method('ping')]) },
+  contexts: [ctx('soloctx')],
+});
+
+test('a context created without a service name belongs to the one service of a single-service bundle', async () => {
+  const s = await setup([solo()]);
+  try {
+    assert.equal((await s.json('describe_app', { app: 'solo' })).service, 'main');
+    const selected = await s.json('select_app', { app: 'solo' });
+    assert.deepEqual([selected.service, selected.context, selected.tools], ['main', ctx('soloctx'), ['solo_main_ping']]);
+    const viaTool = await s.call('solo_main_ping', { app_handle: selected.app_handle });
+    assert.equal(viaTool.isError, undefined);
+    await s.call('call', { app_handle: selected.app_handle, method: 'ping' });
+    assert.deepEqual(s.executed, [
+      { contextId: ctx('soloctx'), method: 'ping', argsJson: {} },
+      { contextId: ctx('soloctx'), method: 'ping', argsJson: {} },
+    ]);
+  } finally {
+    await s.close();
+  }
+});
+
+for (const entry of ['select_app', 'describe_app', 'call'] as const) {
+  test(`${entry} on a node that was down at connect brings up its app tools and starts the poll`, async (t) => {
+    const logged = t.mock.method(console, 'error', () => {});
+    t.mock.timers.enable({ apis: ['setInterval'] });
+    const node = fakeNode([kv()]);
+    const admin = node.session.mero.admin as { listApplications: () => Promise<unknown> };
+    const list = admin.listApplications;
+    let down = true;
+    let lists = 0;
+    admin.listApplications = async () => {
+      lists++;
+      if (down) throw new Error('connection refused');
+      return list();
+    };
+    const { client, close } = await connect(createServerFactory(node.session, CFG));
+    try {
+      assert.match(String(logged.mock.calls[0]?.arguments[0]), /app list unavailable at connect/);
+      down = false;
+      const handle = handles.issue({ p: 'com.calimero.kv-store', v: '1.0.0', g: guideHash(GUIDE), c: ctx('kvctx'), s: null });
+      const args = entry === 'call' ? { app_handle: handle, method: 'set', args: { key: 'k' } } : { app: 'kv-store' };
+      const res = (await client.callTool({ name: entry, arguments: args })) as { isError?: boolean; content: Array<{ text?: string }> };
+      assert.equal(res.isError, undefined, res.content[0].text);
+      if (entry === 'select_app') assert.deepEqual(JSON.parse(res.content[0].text!).tools, ['kv_store_get', 'kv_store_set']);
+      assert.ok((await client.listTools()).tools.some((tool) => tool.name === 'kv_store_set'));
+
+      const before = lists;
+      t.mock.timers.tick(WATCH_INTERVAL_MS);
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(lists, before + 1);
+    } finally {
+      await close();
+    }
+  });
+}

@@ -38,8 +38,10 @@ export function fakeNode(apps: FakeApp[], opts: { aliases?: Record<string, strin
         getApplicationAbi: async (id: string, service?: string) => {
           const app = apps.find((a) => a.id === id);
           if (!app?.services) return app?.abi;
-          // Mirrors core: a multi-service app needs a service name, and the message lists the choices.
-          if (!service) throw new Error(`application has multiple services; pass service_name (available: ${Object.keys(app.services).join(', ')})`);
+          // Mirrors core: a one-service bundle answers for its service; several need a name, and the message lists them.
+          const names = Object.keys(app.services);
+          if (!service && names.length === 1) return app.services[names[0]];
+          if (!service) throw new Error(`application has multiple services; pass service_name (available: ${names.join(', ')})`);
           return app.services[service];
         },
         getContextsForApplication: async (id: string) => ({

@@ -107,6 +107,16 @@ export function registerAppTools(
     return { ...owner, contextId };
   }
 
+  /** The catalog entry `match` picks; a miss (node down at connect, or an install made elsewhere) syncs once first. */
+  async function catalogued(match: (a: ResolvedApp) => boolean): Promise<ResolvedApp | undefined> {
+    const hit = catalog.apps().find(match);
+    if (hit) return hit;
+    await catalog.sync();
+    return catalog.apps().find(match);
+  }
+
+  const sameUnit = (app: ResolvedApp) => (a: ResolvedApp) => a.id === app.id && a.serviceName === app.serviceName;
+
   /** The refusal for a call its handle does not cover, with the guide of the app `app` names when it names one. */
   async function refuseWithout(app: unknown) {
     if (typeof app !== 'string') return { isError: true as const, content: [{ type: 'text' as const, text: NO_HANDLE }] };
@@ -132,6 +142,7 @@ export function registerAppTools(
     async ({ app, service }) => {
       try {
         const resolved = await loader.load(app, service);
+        await catalogued(sameUnit(resolved));
         return withBlocks(await summarize(resolved, null), describeBlocks(resolved));
       } catch (err) {
         return errorResult(err);
@@ -162,8 +173,8 @@ export function registerAppTools(
         // A context belongs to one service, so the chosen context decides which service the handle binds.
         const contextService = chosen.contexts.find((c) => c.id === contextId)?.serviceName;
         const resolved = await loader.load(chosen.id, contextService ?? service);
-        const byApp = [...toolNamesByApp(catalog.apps(), reserved).entries()];
-        const tools = [...(byApp.find(([a]) => a.id === resolved.id && a.serviceName === resolved.serviceName)?.[1].values() ?? [])];
+        const entry = await catalogued(sameUnit(resolved));
+        const tools = entry ? [...toolNamesByApp(catalog.apps(), reserved).get(entry)!.values()] : [];
         return withBlocks(
           {
             ...(await summarize(resolved, contextId)),
@@ -197,9 +208,9 @@ export function registerAppTools(
         const named = typeof app === 'string' ? await loader.resolveAppId(app).catch(() => undefined) : undefined;
         if (named && (named.package ?? named.id) !== payload.p) return await refuseWithout(app);
         // Installed versions of one package share its name, so the handle's version picks the entry to load.
-        const listed = catalog
-          .apps()
-          .find((a) => packageKey(a) === payload.p && (a.version ?? '') === payload.v && (a.serviceName ?? null) === payload.s);
+        const listed = await catalogued(
+          (a) => packageKey(a) === payload.p && (a.version ?? '') === payload.v && (a.serviceName ?? null) === payload.s,
+        );
         const resolved = await loader.load(listed?.id ?? payload.p, payload.s ?? undefined);
         const admitted = await gate.admit(resolved, app_handle);
         if ('refusal' in admitted) return admitted.refusal;
