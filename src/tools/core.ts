@@ -369,7 +369,7 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
     server.registerTool(
       'set_group_metadata',
       {
-        description: "Replace a group's metadata record: its name and string key/value data. Keys left out are removed.",
+        description: "Set a group's name and metadata. `data` replaces the whole record (keys left out are removed); an omitted `name` keeps the current one.",
         inputSchema: {
           group: z.string(),
           name: z.string().optional(),

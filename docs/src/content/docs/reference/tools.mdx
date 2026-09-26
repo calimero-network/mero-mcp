@@ -216,12 +216,12 @@ Takes `group` and `visibility` (`open`: namespace members can join; `restricted`
 
 ### `set_group_metadata`
 
-Replace a group's metadata record. The record is stored whole: keys left out of `data` are removed.
+Set a group's name and metadata. `data` is stored whole: keys left out of it are removed. An omitted `name` keeps the current one.
 
 | Argument | Type | Notes |
 | --- | --- | --- |
 | `group` | string | |
-| `name` | string, optional | |
+| `name` | string, optional | Omitted keeps the current name |
 | `data` | object of string values, optional | The complete key/value set; omitted means empty |
 
 ### `join_open_group`

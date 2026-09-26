@@ -573,6 +573,15 @@ test('create_group with a parent nests under it for the parent application, then
   ]);
 });
 
+test('create_group with a parent and no visibility creates the group and sets nothing', async () => {
+  const { tools, calls } = groupAdmin();
+  assert.deepEqual(jsonOf(await tools.get('create_group')!({ namespace: 'Ns111', parent: 'Grp111' })), { groupId: 'Grp222' });
+  assert.deepEqual(calls, [
+    ['getGroupInfo', 'Grp111'],
+    ['createGroup', { applicationId: 'AppId111', name: undefined, parentGroupId: 'Grp111' }],
+  ]);
+});
+
 test('create_group whose visibility step fails after creation is an error naming the created group', async () => {
   const { tools } = groupAdmin({ failVisibility: true });
   const res = await tools.get('create_group')!({ namespace: 'Ns111', visibility: 'open', parent: 'Grp111' });
