@@ -507,6 +507,7 @@ test('create_context rejects init args that violate the init signature and creat
   const { create, created } = initAdmin();
   const res = await create({ application: 'AppBlocks', namespace: 'Ns111', args: { name: 'world-1', seed: 'seven' } });
   assert.equal(res.isError, true);
+  assert.match(textOf(res), /seed/);
   assert.deepEqual(created, []);
 });
 
@@ -576,7 +577,10 @@ test('create_group whose visibility step fails after creation is an error naming
   const { tools } = groupAdmin({ failVisibility: true });
   const res = await tools.get('create_group')!({ namespace: 'Ns111', visibility: 'open', parent: 'Grp111' });
   assert.equal(res.isError, true);
-  assert.match(textOf(res), /^Error: Group Grp222 was created under Grp111 but its visibility was not set; retry set_group_visibility\./);
+  assert.match(
+    textOf(res),
+    /^Error: Group Grp222 was created under Grp111 but its visibility was not set; retry set_group_visibility\. .*not an admin of the group/,
+  );
 });
 
 test('set_group_visibility and set_group_metadata send what core expects, metadata as a whole record', async () => {

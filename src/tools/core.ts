@@ -7,7 +7,7 @@ import { discoverLocalNodes, listConfiguredNodes, resolveNode } from '../config.
 import type { NodeSession } from '../node.ts';
 import type { Catalog } from '../catalog.ts';
 import { createAbiLoader } from '../abi.ts';
-import { errorResult, textResult } from '../errors.ts';
+import { errorResult, textResult, toMessage } from '../errors.ts';
 import { listing } from '../guide.ts';
 import { inputShapeForMethod } from '../schema.ts';
 
@@ -341,7 +341,11 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
           try {
             await admin.setSubgroupVisibility(groupId, { subgroupVisibility: visibility });
           } catch (err) {
-            return errorResult(new Error(`Group ${groupId} was created under ${parent} but its visibility was not set; retry set_group_visibility.`, { cause: err }));
+            return errorResult(
+              new Error(`Group ${groupId} was created under ${parent} but its visibility was not set; retry set_group_visibility. ${toMessage(err)}`, {
+                cause: err,
+              }),
+            );
           }
           return textResult({ groupId });
         } catch (err) {
