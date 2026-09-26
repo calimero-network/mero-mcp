@@ -212,11 +212,10 @@ async function runChecks({ checks, mcp, api, kv, second }) {
 
       const msg = await mcp.callRaw(kvToolName(kv.slug, 'set'), { key, value: 123 });
       const text = toolText(msg);
-      assert(msg.result?.isError || msg.error, `a number for a string parameter was accepted: ${text}`);
-      // A validation failure and a node failure are unmistakably different: the server's own
-      // node errors come back as `Error: <message>` from errorResult, never as -32602.
-      assert(/Input validation error/.test(text) && /-32602/.test(text), `not a validation error: ${text}`);
-      assert(!/^Error: /.test(text), `the node was reached and answered instead: ${text}`);
+      assert(msg.result?.isError, `a number for a string parameter was accepted: ${text}`);
+      // The SDK rejects before the handler runs, under its own fixed prefix; the server's node errors start `Error: `.
+      const prefix = `Input validation error: Invalid arguments for tool ${kvToolName(kv.slug, 'set')}: `;
+      assert(text.startsWith(prefix), `not the SDK's input validation error: ${text}`);
 
       const seen = await api.execute(kv.context, 'get', { key });
       assertEqual(seen, 'untouched', 'the rejected call still changed state');

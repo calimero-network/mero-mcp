@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { z } from 'zod';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { Config } from '../config.ts';
 import type { NodeSession } from '../node.ts';
 import { getSelection, registerAppTools } from './app.ts';

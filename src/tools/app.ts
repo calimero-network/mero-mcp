@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { McpServer, RegisteredTool } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer, RegisteredTool } from '@modelcontextprotocol/server';
 import type { AbiMethod } from '@calimero-network/abi-codegen';
 import { createAbiLoader, lastSegment, type ResolvedApp } from '../abi.ts';
 import type { Config } from '../config.ts';
