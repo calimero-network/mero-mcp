@@ -31,6 +31,9 @@ const GOVERNANCE = [
   'leave_namespace',
   'list_group_members',
   'add_group_members',
+  'create_group',
+  'set_group_visibility',
+  'set_group_metadata',
 ];
 
 type FakeHandler = (args: Record<string, unknown>) => Promise<{ content: Array<{ type: 'text'; text: string }>; isError?: boolean }>;
@@ -517,4 +520,87 @@ test('create_context with args for an app that declares no init method says so a
   const res = await create({ application: 'AppNoInit', namespace: 'Ns111', args: { name: 'x' } });
   assert.equal(textOf(res), 'Error: Application "AppNoInit" declares no init method, so it takes no init args.');
   assert.deepEqual(created, []);
+});
+
+function groupAdmin(opts: { failVisibility?: boolean } = {}) {
+  const calls: Array<[string, ...unknown[]]> = [];
+  const admin = {
+    createGroupInNamespace: async (namespaceId: string, request: unknown) => {
+      calls.push(['createGroupInNamespace', namespaceId, request]);
+      return { groupId: 'Grp111' };
+    },
+    getGroupInfo: async (groupId: string) => {
+      calls.push(['getGroupInfo', groupId]);
+      return { groupId, targetApplicationId: 'AppId111' };
+    },
+    createGroup: async (request: unknown) => {
+      calls.push(['createGroup', request]);
+      return { groupId: 'Grp222' };
+    },
+    setSubgroupVisibility: async (groupId: string, request: unknown) => {
+      calls.push(['setSubgroupVisibility', groupId, request]);
+      if (opts.failVisibility) throw new Error('not an admin of the group');
+    },
+    setGroupMetadata: async (groupId: string, request: unknown) => {
+      calls.push(['setGroupMetadata', groupId, request]);
+    },
+    joinSubgroupInheritance: async (groupId: string) => {
+      calls.push(['joinSubgroupInheritance', groupId]);
+      return { groupId, memberPublicKey: 'Member111', wasInherited: true };
+    },
+  };
+  const { server, tools } = fakeServer();
+  registerCoreTools(server, fakeSession(admin), loadConfig(env()), CATALOG);
+  return { tools, calls };
+}
+
+test('create_group without a parent creates the group in the namespace with its name and visibility', async () => {
+  const { tools, calls } = groupAdmin();
+  assert.deepEqual(jsonOf(await tools.get('create_group')!({ namespace: 'Ns111', name: 'Design', visibility: 'open' })), { groupId: 'Grp111' });
+  assert.deepEqual(calls, [['createGroupInNamespace', 'Ns111', { groupName: 'Design', visibility: 'open' }]]);
+});
+
+test('create_group with a parent nests under it for the parent application, then sets the visibility', async () => {
+  const { tools, calls } = groupAdmin();
+  assert.deepEqual(jsonOf(await tools.get('create_group')!({ namespace: 'Ns111', name: 'Specs', visibility: 'open', parent: 'Grp111' })), { groupId: 'Grp222' });
+  assert.deepEqual(calls, [
+    ['getGroupInfo', 'Grp111'],
+    ['createGroup', { applicationId: 'AppId111', name: 'Specs', parentGroupId: 'Grp111' }],
+    ['setSubgroupVisibility', 'Grp222', { subgroupVisibility: 'open' }],
+  ]);
+});
+
+test('create_group whose visibility step fails after creation is an error naming the created group', async () => {
+  const { tools } = groupAdmin({ failVisibility: true });
+  const res = await tools.get('create_group')!({ namespace: 'Ns111', visibility: 'open', parent: 'Grp111' });
+  assert.equal(res.isError, true);
+  assert.match(textOf(res), /^Error: Group Grp222 was created under Grp111 but its visibility was not set; retry set_group_visibility\./);
+});
+
+test('set_group_visibility and set_group_metadata send what core expects, metadata as a whole record', async () => {
+  const { tools, calls } = groupAdmin();
+  assert.equal(textOf(await tools.get('set_group_visibility')!({ group: 'Grp111', visibility: 'restricted' })), 'Group Grp111 is now restricted.');
+  await tools.get('set_group_metadata')!({ group: 'Grp111', name: 'Design', data: { kind: 'board' } });
+  await tools.get('set_group_metadata')!({ group: 'Grp111', name: 'Renamed' });
+  assert.deepEqual(calls, [
+    ['setSubgroupVisibility', 'Grp111', { subgroupVisibility: 'restricted' }],
+    ['setGroupMetadata', 'Grp111', { name: 'Design', data: { kind: 'board' } }],
+    ['setGroupMetadata', 'Grp111', { name: 'Renamed', data: {} }],
+  ]);
+});
+
+test('an unknown visibility is rejected by the input schema before any admin call', async () => {
+  const calls: string[] = [];
+  const { client, close } = await realServer({
+    setSubgroupVisibility: async (groupId: string) => {
+      calls.push(groupId);
+    },
+  });
+  try {
+    const res = (await client.callTool({ name: 'set_group_visibility', arguments: { group: 'Grp111', visibility: 'public' } })) as { isError?: boolean };
+    assert.equal(res.isError, true);
+    assert.deepEqual(calls, []);
+  } finally {
+    await close();
+  }
 });
