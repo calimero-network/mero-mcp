@@ -233,3 +233,16 @@ test('a malformed manifest surfaces the parser error', async () => {
   const { loader } = fake({ abi: () => ({ schema_version: 'wasm-abi/1' }) });
   await assert.rejects(loader.load('kv-store'), /ABI schema validation failed/);
 });
+
+test('a manifest carrying the C1 doc keys parses, with the docs kept on the model', async () => {
+  const [set] = MANIFEST.methods;
+  const documented = {
+    ...MANIFEST,
+    methods: [{ ...set, doc: 'Store a value.', params: [{ ...set.params[0], doc: 'The key.' }], destructive: true, idempotent: true }],
+  };
+  const { loader } = fake({ abi: () => documented });
+  const [method] = (await loader.load('kv-store')).manifest.methods;
+  assert.equal(method.doc, 'Store a value.');
+  assert.equal(method.params[0].doc, 'The key.');
+  assert.equal(method.destructive, true);
+});
