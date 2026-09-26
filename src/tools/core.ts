@@ -1,13 +1,15 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import type { Application, ContextWithGroup, SignedGroupOpenInvitation } from '@calimero-network/mero-js';
+import type { AbiManifest } from '@calimero-network/abi-codegen';
 import type { Config } from '../config.ts';
 import { discoverLocalNodes, listConfiguredNodes, resolveNode } from '../config.ts';
 import type { NodeSession } from '../node.ts';
 import type { Catalog } from '../catalog.ts';
 import { createAbiLoader } from '../abi.ts';
-import { errorResult, textResult } from '../errors.ts';
+import { errorResult, textResult, toMessage } from '../errors.ts';
 import { listing } from '../guide.ts';
+import { inputShapeForMethod } from '../schema.ts';
 
 /** Runs an admin call and folds its result or throw into the MCP text-result convention. */
 function wrap<Args>(fn: (args: Args) => Promise<unknown>) {
@@ -29,9 +31,18 @@ const opaqueInvitation = z
 // Hex matches how this codebase already renders bytes for display (see schema.ts's bytesSchema).
 const toHex = (bytes: number[]) => Buffer.from(bytes).toString('hex');
 
+const VISIBILITY = z.enum(['open', 'restricted']).describe('open: namespace members can join; restricted: members must be added.');
+
+/** init takes the same JSON args object a method call does, so it is validated the way method calls are. */
+function initParams(manifest: AbiManifest, label: string, args: Record<string, unknown>): number[] {
+  const init = manifest.methods.find((m) => m.name === 'init');
+  if (!init) throw new Error(`Application "${label}" declares no init method, so it takes no init args.`);
+  return [...Buffer.from(JSON.stringify(z.object(inputShapeForMethod(init, manifest)).parse(args)), 'utf8')];
+}
+
 export function registerCoreTools(server: McpServer, session: NodeSession, cfg: Config, catalog: Catalog): void {
   const admin = session.mero.admin;
-  const { resolveAppId } = createAbiLoader(session);
+  const { resolveAppId, load } = createAbiLoader(session);
   // The install already happened; a failed refresh only delays the new tools until the next poll.
   const refreshApps = () => catalog.sync().catch((err: unknown) => console.error('[mero-mcp] app list refresh failed:', err));
 
@@ -103,17 +114,46 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
   server.registerTool(
     'create_context',
     {
-      description: 'Create a new context for an application under a namespace.',
+      description:
+        'Create a new context for an application under a namespace. ' +
+        "Pass `args` when the application's init method takes parameters; describe_app lists init with them.",
       inputSchema: {
         application: z.string().describe('Application id or package name.'),
         namespace: z.string(),
         name: z.string().optional(),
         service: z.string().optional(),
+        args: z.record(z.string(), z.unknown()).optional().describe("Arguments for the application's init method, keyed by parameter name."),
       },
     },
-    wrap(async ({ application, namespace, name, service }: { application: string; namespace: string; name?: string; service?: string }) =>
-      admin.createContext({ applicationId: (await resolveAppId(application)).id, groupId: namespace, name, serviceName: service }),
+    wrap(
+      async ({
+        application,
+        namespace,
+        name,
+        service,
+        args,
+      }: {
+        application: string;
+        namespace: string;
+        name?: string;
+        service?: string;
+        args?: Record<string, unknown>;
+      }) => {
+        const request = { groupId: namespace, name, serviceName: service };
+        if (!args) return admin.createContext({ ...request, applicationId: (await resolveAppId(application)).id });
+        const { id, manifest } = await load(application, service);
+        return admin.createContext({ ...request, applicationId: id, initializationParams: initParams(manifest, application, args) });
+      },
     ),
+  );
+
+  server.registerTool(
+    'join_context',
+    {
+      description: "Join a context this node is not yet a member of, such as one in a namespace or group it just joined. Returns the node's member key in it.",
+      inputSchema: { context: z.string().describe('Context id.') },
+    },
+    wrap(async ({ context }: { context: string }) => admin.joinContext(context)),
   );
 
   server.registerTool(
@@ -279,6 +319,78 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
         await admin.addGroupMembers(group, { members });
         return `Added ${members.map((m) => `${m.identity} (${m.role})`).join(', ')} to group ${group}.`;
       }),
+    );
+
+    server.registerTool(
+      'create_group',
+      {
+        description: 'Create a group (subgroup) inside a namespace, or nested under another group with `parent`. Returns its groupId.',
+        inputSchema: {
+          namespace: z.string(),
+          name: z.string().optional(),
+          visibility: VISIBILITY.optional(),
+          parent: z.string().optional().describe('Group id to nest under; omit to create directly in the namespace.'),
+        },
+      },
+      async ({ namespace, name, visibility, parent }: { namespace: string; name?: string; visibility?: 'open' | 'restricted'; parent?: string }) => {
+        try {
+          if (!parent) return textResult(await admin.createGroupInNamespace(namespace, { groupName: name, visibility }));
+          const { targetApplicationId } = await admin.getGroupInfo(parent);
+          const { groupId } = await admin.createGroup({ applicationId: targetApplicationId, name, parentGroupId: parent });
+          if (!visibility) return textResult({ groupId });
+          try {
+            await admin.setSubgroupVisibility(groupId, { subgroupVisibility: visibility });
+          } catch (err) {
+            return errorResult(
+              new Error(`Group ${groupId} was created under ${parent} but its visibility was not set; retry set_group_visibility. ${toMessage(err)}`, {
+                cause: err,
+              }),
+            );
+          }
+          return textResult({ groupId });
+        } catch (err) {
+          return errorResult(err);
+        }
+      },
+    );
+
+    server.registerTool(
+      'set_group_visibility',
+      {
+        description: 'Make a group open (namespace members can join it) or restricted (members must be added).',
+        inputSchema: { group: z.string(), visibility: VISIBILITY },
+      },
+      wrap(async ({ group, visibility }: { group: string; visibility: 'open' | 'restricted' }) => {
+        await admin.setSubgroupVisibility(group, { subgroupVisibility: visibility });
+        return `Group ${group} is now ${visibility}.`;
+      }),
+    );
+
+    server.registerTool(
+      'set_group_metadata',
+      {
+        description: "Set a group's name and metadata. `data` replaces the whole record (keys left out are removed); an omitted `name` keeps the current one.",
+        inputSchema: {
+          group: z.string(),
+          name: z.string().optional(),
+          data: z.record(z.string(), z.string()).optional().describe('The complete key/value set to store.'),
+        },
+      },
+      wrap(async ({ group, name, data }: { group: string; name?: string; data?: Record<string, string> }) => {
+        await admin.setGroupMetadata(group, { name, data: data ?? {} });
+        return `Metadata of group ${group} replaced.`;
+      }),
+    );
+
+    server.registerTool(
+      'join_open_group',
+      {
+        description:
+          'Join an open group through membership of its parent (join via inheritance). ' +
+          'Then join_context joins the contexts inside it.',
+        inputSchema: { group: z.string() },
+      },
+      wrap(async ({ group }: { group: string }) => admin.joinSubgroupInheritance(group)),
     );
   }
 }

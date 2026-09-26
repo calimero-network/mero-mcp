@@ -18,6 +18,7 @@ const CORE = [
   'list_namespaces',
   'list_contexts',
   'create_context',
+  'join_context',
   'delete_context',
   'create_alias',
   'lookup_alias',
@@ -31,6 +32,10 @@ const GOVERNANCE = [
   'leave_namespace',
   'list_group_members',
   'add_group_members',
+  'create_group',
+  'set_group_visibility',
+  'set_group_metadata',
+  'join_open_group',
 ];
 
 type FakeHandler = (args: Record<string, unknown>) => Promise<{ content: Array<{ type: 'text'; text: string }>; isError?: boolean }>;
@@ -456,4 +461,181 @@ test('a bodyless rejection still names the endpoint and the status, and an unrea
   const unreachable = await tools.get('node_status')!({});
   assert.equal(unreachable.isError, true);
   assert.equal(textOf(unreachable), 'Error: Cannot reach the node at http://localhost:2528/admin-api/health: fetch failed');
+});
+
+/** Two installed apps: one whose init takes (name, seed), one whose init takes nothing. */
+const INIT_ABIS: Record<string, unknown> = {
+  AppBlocks: {
+    schema_version: 'wasm-abi/1',
+    types: {},
+    methods: [{ name: 'init', params: [{ name: 'name', type: { kind: 'string' } }, { name: 'seed', type: { kind: 'u64' } }] }],
+    events: [],
+  },
+  AppPlain: { schema_version: 'wasm-abi/1', types: {}, methods: [{ name: 'init', params: [] }], events: [] },
+  AppNoInit: { schema_version: 'wasm-abi/1', types: {}, methods: [{ name: 'ping', params: [] }], events: [] },
+};
+
+function initAdmin() {
+  const created: Array<Record<string, unknown>> = [];
+  const abiFetches: string[] = [];
+  const admin = {
+    listApplications: async () => ({
+      apps: Object.keys(INIT_ABIS).map((id) => ({ id, package: `com.example.${id.toLowerCase()}`, metadata: [], blob: { bytecode: `${id}-blob` } })),
+    }),
+    getApplicationAbi: async (id: string) => {
+      abiFetches.push(id);
+      return INIT_ABIS[id];
+    },
+    createContext: async (request: Record<string, unknown>) => {
+      created.push(request);
+      return { contextId: 'Ctx111', memberPublicKey: 'Member111' };
+    },
+  };
+  const { server, tools } = fakeServer();
+  registerCoreTools(server, fakeSession(admin), loadConfig(env()), CATALOG);
+  return { create: tools.get('create_context')!, created, abiFetches };
+}
+
+test('create_context validates init args against the ABI and sends them as the JSON init input', async () => {
+  const { create, created } = initAdmin();
+  await create({ application: 'AppBlocks', namespace: 'Ns111', args: { name: 'world-1', seed: 7, stray: true } });
+  assert.equal(created.length, 1);
+  assert.deepEqual(JSON.parse(Buffer.from(created[0].initializationParams as number[]).toString('utf8')), { name: 'world-1', seed: 7 });
+});
+
+test('create_context rejects init args that violate the init signature and creates nothing', async () => {
+  const { create, created } = initAdmin();
+  const res = await create({ application: 'AppBlocks', namespace: 'Ns111', args: { name: 'world-1', seed: 'seven' } });
+  assert.equal(res.isError, true);
+  assert.match(textOf(res), /seed/);
+  assert.deepEqual(created, []);
+});
+
+test('create_context without args sends no init input and never fetches the ABI, as before', async () => {
+  const { create, created, abiFetches } = initAdmin();
+  await create({ application: 'AppPlain', namespace: 'Ns111' });
+  assert.deepEqual(created, [{ applicationId: 'AppPlain', groupId: 'Ns111', name: undefined, serviceName: undefined }]);
+  assert.deepEqual(abiFetches, []);
+});
+
+test('create_context with args for an app that declares no init method says so and creates nothing', async () => {
+  const { create, created } = initAdmin();
+  const res = await create({ application: 'AppNoInit', namespace: 'Ns111', args: { name: 'x' } });
+  assert.equal(textOf(res), 'Error: Application "AppNoInit" declares no init method, so it takes no init args.');
+  assert.deepEqual(created, []);
+});
+
+function groupAdmin(opts: { failVisibility?: boolean } = {}) {
+  const calls: Array<[string, ...unknown[]]> = [];
+  const admin = {
+    createGroupInNamespace: async (namespaceId: string, request: unknown) => {
+      calls.push(['createGroupInNamespace', namespaceId, request]);
+      return { groupId: 'Grp111' };
+    },
+    getGroupInfo: async (groupId: string) => {
+      calls.push(['getGroupInfo', groupId]);
+      return { groupId, targetApplicationId: 'AppId111' };
+    },
+    createGroup: async (request: unknown) => {
+      calls.push(['createGroup', request]);
+      return { groupId: 'Grp222' };
+    },
+    setSubgroupVisibility: async (groupId: string, request: unknown) => {
+      calls.push(['setSubgroupVisibility', groupId, request]);
+      if (opts.failVisibility) throw new Error('not an admin of the group');
+    },
+    setGroupMetadata: async (groupId: string, request: unknown) => {
+      calls.push(['setGroupMetadata', groupId, request]);
+    },
+    joinSubgroupInheritance: async (groupId: string) => {
+      calls.push(['joinSubgroupInheritance', groupId]);
+      return { groupId, memberPublicKey: 'Member111', wasInherited: true };
+    },
+  };
+  const { server, tools } = fakeServer();
+  registerCoreTools(server, fakeSession(admin), loadConfig(env()), CATALOG);
+  return { tools, calls };
+}
+
+test('create_group without a parent creates the group in the namespace with its name and visibility', async () => {
+  const { tools, calls } = groupAdmin();
+  assert.deepEqual(jsonOf(await tools.get('create_group')!({ namespace: 'Ns111', name: 'Design', visibility: 'open' })), { groupId: 'Grp111' });
+  assert.deepEqual(calls, [['createGroupInNamespace', 'Ns111', { groupName: 'Design', visibility: 'open' }]]);
+});
+
+test('create_group with a parent nests under it for the parent application, then sets the visibility', async () => {
+  const { tools, calls } = groupAdmin();
+  assert.deepEqual(jsonOf(await tools.get('create_group')!({ namespace: 'Ns111', name: 'Specs', visibility: 'open', parent: 'Grp111' })), { groupId: 'Grp222' });
+  assert.deepEqual(calls, [
+    ['getGroupInfo', 'Grp111'],
+    ['createGroup', { applicationId: 'AppId111', name: 'Specs', parentGroupId: 'Grp111' }],
+    ['setSubgroupVisibility', 'Grp222', { subgroupVisibility: 'open' }],
+  ]);
+});
+
+test('create_group with a parent and no visibility creates the group and sets nothing', async () => {
+  const { tools, calls } = groupAdmin();
+  assert.deepEqual(jsonOf(await tools.get('create_group')!({ namespace: 'Ns111', parent: 'Grp111' })), { groupId: 'Grp222' });
+  assert.deepEqual(calls, [
+    ['getGroupInfo', 'Grp111'],
+    ['createGroup', { applicationId: 'AppId111', name: undefined, parentGroupId: 'Grp111' }],
+  ]);
+});
+
+test('create_group whose visibility step fails after creation is an error naming the created group', async () => {
+  const { tools } = groupAdmin({ failVisibility: true });
+  const res = await tools.get('create_group')!({ namespace: 'Ns111', visibility: 'open', parent: 'Grp111' });
+  assert.equal(res.isError, true);
+  assert.match(
+    textOf(res),
+    /^Error: Group Grp222 was created under Grp111 but its visibility was not set; retry set_group_visibility\. .*not an admin of the group/,
+  );
+});
+
+test('set_group_visibility and set_group_metadata send what core expects, metadata as a whole record', async () => {
+  const { tools, calls } = groupAdmin();
+  assert.equal(textOf(await tools.get('set_group_visibility')!({ group: 'Grp111', visibility: 'restricted' })), 'Group Grp111 is now restricted.');
+  await tools.get('set_group_metadata')!({ group: 'Grp111', name: 'Design', data: { kind: 'board' } });
+  await tools.get('set_group_metadata')!({ group: 'Grp111', name: 'Renamed' });
+  assert.deepEqual(calls, [
+    ['setSubgroupVisibility', 'Grp111', { subgroupVisibility: 'restricted' }],
+    ['setGroupMetadata', 'Grp111', { name: 'Design', data: { kind: 'board' } }],
+    ['setGroupMetadata', 'Grp111', { name: 'Renamed', data: {} }],
+  ]);
+});
+
+test('an unknown visibility is rejected by the input schema before any admin call', async () => {
+  const calls: string[] = [];
+  const { client, close } = await realServer({
+    setSubgroupVisibility: async (groupId: string) => {
+      calls.push(groupId);
+    },
+  });
+  try {
+    const res = (await client.callTool({ name: 'set_group_visibility', arguments: { group: 'Grp111', visibility: 'public' } })) as { isError?: boolean };
+    assert.equal(res.isError, true);
+    assert.deepEqual(calls, []);
+  } finally {
+    await close();
+  }
+});
+
+test('join_context joins the named context and returns what the node answers', async () => {
+  const joined: string[] = [];
+  const admin = {
+    joinContext: async (contextId: string) => {
+      joined.push(contextId);
+      return { contextId, memberPublicKey: 'Member111' };
+    },
+  };
+  const { server, tools } = fakeServer();
+  registerCoreTools(server, fakeSession(admin), loadConfig(env()), CATALOG);
+  assert.deepEqual(jsonOf(await tools.get('join_context')!({ context: 'Ctx111' })), { contextId: 'Ctx111', memberPublicKey: 'Member111' });
+  assert.deepEqual(joined, ['Ctx111']);
+});
+
+test('join_open_group joins through inheritance and returns what the node answers', async () => {
+  const { tools, calls } = groupAdmin();
+  assert.deepEqual(jsonOf(await tools.get('join_open_group')!({ group: 'Grp111' })), { groupId: 'Grp111', memberPublicKey: 'Member111', wasInherited: true });
+  assert.deepEqual(calls, [['joinSubgroupInheritance', 'Grp111']]);
 });
