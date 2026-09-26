@@ -81,3 +81,27 @@ test('tracedFetch sends the traceparent header only from inside a traced call', 
     http.close();
   }
 });
+
+test('tracedFetch drops a malformed traceparent instead of forwarding it, and the call still succeeds', async () => {
+  const seen: Array<string | undefined> = [];
+  const http = createHttpServer((req, res) => {
+    seen.push(req.headers.traceparent as string | undefined);
+    res.end('ok');
+  });
+  await new Promise<void>((resolve) => http.listen(0, '127.0.0.1', resolve));
+  const url = `http://127.0.0.1:${(http.address() as AddressInfo).port}/`;
+  try {
+    const { client, close } = await connect(traced(async () => (await tracedFetch(url)).text()));
+    try {
+      const malformed = (await client.callTool({ name: 'probe', arguments: {}, _meta: { traceparent: '00-x\r\ny-00f067aa0ba902b7-01' } })) as { content: Array<{ text: string }> };
+      const allZero = (await client.callTool({ name: 'probe', arguments: {}, _meta: { traceparent: '00-00000000000000000000000000000000-0000000000000000-01' } })) as { content: Array<{ text: string }> };
+      assert.equal(malformed.content[0].text, 'ok');
+      assert.equal(allZero.content[0].text, 'ok');
+      assert.deepEqual(seen, [undefined, undefined]);
+    } finally {
+      await close();
+    }
+  } finally {
+    http.close();
+  }
+});

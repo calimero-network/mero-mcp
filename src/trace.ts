@@ -3,6 +3,9 @@ import { TRACEPARENT_META_KEY, type McpServer, type ServerContext } from '@model
 
 const current = new AsyncLocalStorage<string>();
 
+/** W3C trace-context format, excluding the all-zero trace/parent ids and the reserved `ff` version. */
+const TRACEPARENT_FORMAT = /^(?!ff-)[0-9a-f]{2}-(?!0{32}-)[0-9a-f]{32}-(?!0{16}-)[0-9a-f]{16}-[0-9a-f]{2}$/;
+
 /** The W3C traceparent of the MCP request being handled, if the client sent one. */
 export const currentTraceparent = (): string | undefined => current.getStore();
 
@@ -19,7 +22,7 @@ export function traceTools(server: McpServer): void {
 /** fetch for the node client: adds the current traceparent header to every request made inside a traced tool call. */
 export const tracedFetch: typeof fetch = (input, init) => {
   const traceparent = current.getStore();
-  if (!traceparent) return fetch(input, init);
+  if (!traceparent || !TRACEPARENT_FORMAT.test(traceparent)) return fetch(input, init);
   const headers = new Headers(init?.headers);
   headers.set('traceparent', traceparent);
   return fetch(input, { ...init, headers });
