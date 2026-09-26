@@ -70,8 +70,8 @@ test('listing drops any guide key from object metadata and passes other metadata
   assert.deepEqual(listing([]), { metadata: undefined, procedures: [] });
 });
 
-test('a guide of an app without a package or version is sent as text, since it has no readable resource uri', () => {
-  const app = { id: 'raw-id', guide: '## Overview', signerId: 'S' } as ResolvedApp;
+test('a guide of an app without a version is sent as text, since it has no readable resource uri', () => {
+  const app = { id: 'raw-id', package: 'org.x', guide: '## Overview', signerId: 'S' } as ResolvedApp;
   assert.deepEqual(guideBlocks(app).map((b) => b.type), ['text', 'text']);
-  assert.equal(guideBlocks({ ...app, package: 'org.x', version: '1.0.0' })[1].type, 'resource');
+  assert.equal(guideBlocks({ ...app, version: '1.0.0' })[1].type, 'resource');
 });

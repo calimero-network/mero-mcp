@@ -261,4 +261,5 @@ A contract call that fails returns `isError: true` with the node's message.
 
 ## Resources
 
-`calimero://apps/{package}/{version}/guide` (`text/markdown`): one resource per installed app that ships a guide.
+`calimero://apps/{applicationId}/{version}/guide` (`text/markdown`): one resource per installed app that ships a guide.
+The application id is core's hash of package and signer, so two signers of one package get separate guides; the embedded copy's `_meta` carries `package`, `appVersion` and `signerId`.

@@ -155,7 +155,7 @@ The same package from two signers is two apps; name either by its application id
 Those tools are named `<app>_<method>`, or `<app>_<service>_<method>` for a multi-service application, where `<app>` is that same trailing package segment: `com.calimero.kv-store` yields `kv_store_get`.
 The list changes only when an app is installed, upgraded or uninstalled.
 
-Each app's guide is also a resource at `calimero://apps/<package>/<version>/guide`.
+Each app's guide is also a resource at `calimero://apps/<application id>/<version>/guide`, keyed by application id so two signers of one package never share one.
 
 ## Verifying it works
 

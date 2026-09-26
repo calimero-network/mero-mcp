@@ -59,7 +59,7 @@ test('describe_app returns the author-labelled guide as an embedded resource, an
     assert.equal(typeof summary.app_handle, 'string');
     assert.equal(res.content[1].text, LABEL);
     assert.deepEqual(res.content[2].resource, {
-      uri: 'calimero://apps/com.calimero.kv-store/1.0.0/guide',
+      uri: 'calimero://apps/kv-id/1.0.0/guide',
       mimeType: 'text/markdown',
       text: GUIDE,
       _meta: { package: 'com.calimero.kv-store', appVersion: '1.0.0', signerId: 'SignerKey1' },

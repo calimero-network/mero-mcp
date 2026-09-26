@@ -43,7 +43,7 @@ An app can ship a guide: Markdown its author writes, carried in the signed bundl
   It names the context the call runs in, so there is no separate context argument.
 
 The guide arrives as an embedded `text/markdown` resource, preceded by `App guide, provided by the app's author (package <package>, signer <signer id>):`, so it reads as the author's text, not as the server's own instructions.
-Each guide is also a resource at `calimero://apps/<package>/<version>/guide`.
+Each guide is also a resource at `calimero://apps/<application id>/<version>/guide`, keyed by application id so two signers of one package never share one.
 
 A call without a valid handle runs nothing.
 It returns the guide (when the app has one) and `Call select_app for <package> and retry with the returned app_handle.`

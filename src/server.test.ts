@@ -33,23 +33,23 @@ for (const era of Object.keys(ERAS) as Era[]) {
     }
   });
 
-  test(`${era}: the guide is a resource template, listed per installed version and readable, and an unknown guide is -32602`, async () => {
+  test(`${era}: the guide is a resource template, listed per installed app and readable, and an unknown guide is -32602`, async () => {
     const { client, close } = await connect(createServerFactory(fakeNode([guided()]).session, CFG), era);
     try {
       const { resourceTemplates } = await client.listResourceTemplates();
-      assert.deepEqual(resourceTemplates.map((t) => [t.uriTemplate, t.mimeType]), [['calimero://apps/{package}/{version}/guide', 'text/markdown']]);
+      assert.deepEqual(resourceTemplates.map((t) => [t.uriTemplate, t.mimeType]), [['calimero://apps/{applicationId}/{version}/guide', 'text/markdown']]);
       const { resources } = await client.listResources();
-      assert.deepEqual(resources.map((r) => r.uri), ['calimero://apps/com.calimero.kv-store/1.0.0/guide']);
-      const read = await client.readResource({ uri: 'calimero://apps/com.calimero.kv-store/1.0.0/guide' });
+      assert.deepEqual(resources.map((r) => r.uri), ['calimero://apps/kv-id/1.0.0/guide']);
+      const read = await client.readResource({ uri: 'calimero://apps/kv-id/1.0.0/guide' });
       assert.equal((read.contents[0] as { text: string }).text, '## Overview\nkv');
-      await assert.rejects(client.readResource({ uri: 'calimero://apps/com.calimero.kv-store/9.9.9/guide' }), (err: { code?: number }) => err.code === -32602);
+      await assert.rejects(client.readResource({ uri: 'calimero://apps/kv-id/9.9.9/guide' }), (err: { code?: number }) => err.code === -32602);
     } finally {
       await close();
     }
   });
 }
 
-test('guide resources are one per package version: a multi-service app lists once, two versions list side by side', async () => {
+test('guide resources are one per app: a multi-service app lists once, two signers of one package and version list apart', async () => {
   const drive: FakeApp = {
     id: 'drive-id',
     package: 'com.calimero.mero-drive',
@@ -58,17 +58,20 @@ test('guide resources are one per package version: a multi-service app lists onc
     abi: undefined,
     services: { docs: manifest([method('create_doc')]), registry: manifest([method('register_folder')]) },
   };
-  const newer = { ...guided('1.1.0'), id: 'kv-two', metadata: { name: 'KV Store', guide: '## Overview\nkv two' } };
-  const { client, close } = await connect(createServerFactory(fakeNode([guided(), newer, drive]).session, CFG));
+  const fork = { ...guided(), id: 'kv-fork', signer_id: 'SignerKey2', metadata: { name: 'KV Store', guide: '## Overview\nfork' } };
+  const { client, close } = await connect(createServerFactory(fakeNode([guided(), fork, drive]).session, CFG));
   try {
     const { resources } = await client.listResources();
     assert.deepEqual(resources.map((r) => r.uri), [
-      'calimero://apps/com.calimero.kv-store/1.0.0/guide',
-      'calimero://apps/com.calimero.kv-store/1.1.0/guide',
-      'calimero://apps/com.calimero.mero-drive/2.0.0/guide',
+      'calimero://apps/kv-fork/1.0.0/guide',
+      'calimero://apps/kv-id/1.0.0/guide',
+      'calimero://apps/drive-id/2.0.0/guide',
     ]);
-    const read = await client.readResource({ uri: 'calimero://apps/com.calimero.kv-store/1.1.0/guide' });
-    assert.equal((read.contents[0] as { text: string }).text, '## Overview\nkv two');
+    const read = async (uri: string) => ((await client.readResource({ uri })).contents[0] as { text: string }).text;
+    assert.deepEqual(
+      [await read('calimero://apps/kv-id/1.0.0/guide'), await read('calimero://apps/kv-fork/1.0.0/guide')],
+      ['## Overview\nkv', '## Overview\nfork'],
+    );
   } finally {
     await close();
   }
@@ -99,7 +102,7 @@ test('2026-07-28: lists carry ttlMs 30000 and a guide read carries 86400000, bot
     assert.deepEqual([tools.ttlMs, tools.cacheScope], [30000, 'private']);
     const resources = (await client.listResources()) as { ttlMs?: number; cacheScope?: string };
     assert.deepEqual([resources.ttlMs, resources.cacheScope], [30000, 'private']);
-    const read = (await client.readResource({ uri: 'calimero://apps/com.calimero.kv-store/1.0.0/guide' })) as { ttlMs?: number; cacheScope?: string };
+    const read = (await client.readResource({ uri: 'calimero://apps/kv-id/1.0.0/guide' })) as { ttlMs?: number; cacheScope?: string };
     assert.deepEqual([read.ttlMs, read.cacheScope], [86400000, 'private']);
   } finally {
     await close();

@@ -2,7 +2,7 @@ import type { AppIdentity } from './abi.ts';
 
 const FENCE = /^ *```/;
 const PROCEDURES_HEADING = '## Procedures';
-export const GUIDE_URI_TEMPLATE = 'calimero://apps/{package}/{version}/guide';
+export const GUIDE_URI_TEMPLATE = 'calimero://apps/{applicationId}/{version}/guide';
 
 /**
  * An app's metadata rides the wire as raw bytes; for display, recover the JSON object it usually
@@ -57,9 +57,9 @@ export function listing(bytes: number[]): { metadata: unknown; procedures: strin
   return { metadata: rest, procedures: typeof guide === 'string' ? procedures(guide) : [] };
 }
 
-/** The guide resource uri, which only an app with a package and a version has. */
-export const guideUri = ({ package: pkg, version }: Pick<AppIdentity, 'package' | 'version'>) =>
-  pkg && version ? `calimero://apps/${encodeURIComponent(pkg)}/${encodeURIComponent(version)}/guide` : undefined;
+/** The guide resource uri, keyed by application id so two signers of one package never share it; needs a version. */
+export const guideUri = ({ id, version }: Pick<AppIdentity, 'id' | 'version'>) =>
+  version ? `calimero://apps/${encodeURIComponent(id)}/${encodeURIComponent(version)}/guide` : undefined;
 
 /** The guide as an embedded resource, labelled so the agent reads it as the author's text, never as this server's. */
 export function guideBlocks(app: AppIdentity) {

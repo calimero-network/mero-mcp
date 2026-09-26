@@ -3,7 +3,7 @@ import { McpServer, ResourceNotFoundError, ResourceTemplate } from '@modelcontex
 import { createAbiLoader } from './abi.ts';
 import { createCatalog } from './catalog.ts';
 import type { Config } from './config.ts';
-import { createGate } from './gate.ts';
+import { createGate, packageKey } from './gate.ts';
 import { GUIDE_URI_TEMPLATE, guideUri } from './guide.ts';
 import type { NodeSession } from './node.ts';
 import { registerAppTools } from './tools/app.ts';
@@ -73,14 +73,14 @@ export function createServerFactory(session: NodeSession, cfg: Config) {
         list: async () => ({
           resources: [...new Map(guided().map((a) => [guideUri(a)!, a])).entries()].map(([uri, a]) => ({
             uri,
-            name: `${a.name ?? a.package} guide`,
+            name: `${a.name ?? packageKey(a)} guide`,
             mimeType: 'text/markdown',
           })),
         }),
       }),
       { mimeType: 'text/markdown', cacheHint: GUIDE_CACHE },
-      async (uri, { package: pkg, version }) => {
-        const app = guided().find((a) => a.package === pkg && a.version === version);
+      async (uri, { applicationId, version }) => {
+        const app = guided().find((a) => a.id === applicationId && a.version === version);
         if (!app) throw new ResourceNotFoundError(uri.href);
         return { contents: [{ uri: uri.href, mimeType: 'text/markdown', text: app.guide! }] };
       },
