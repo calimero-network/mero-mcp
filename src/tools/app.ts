@@ -9,8 +9,8 @@ import type { NodeSession } from '../node.ts';
 import { inputShapeForMethod, renderMethodSignature } from '../schema.ts';
 import { toolNamesByApp } from './generated.ts';
 
-/** Base58 of 32 bytes always lands in 32..45 chars, so this never misreads an id; a base58-only alias that long is the cost. */
-const CONTEXT_ID = /^[1-9A-HJ-NP-Za-km-z]{32,45}$/;
+/** Core hex-encodes every 32-byte id (context, group, namespace), always 64 lowercase hex chars. */
+const CONTEXT_ID = /^[0-9a-f]{64}$/;
 
 const NO_GUIDE = 'This app ships no guide.';
 
@@ -89,8 +89,9 @@ export function registerAppTools(
       found = null;
     }
     if (!found) {
+      // A candidate equal to the rejected value would tell the caller to retry the very thing just refused.
       throw new Error(
-        `Context "${value}" not found: it is neither a context id nor an alias on this node. ${contextsFor(label, candidates)}`,
+        `Context "${value}" not found: it is neither a context id nor an alias on this node. ${contextsFor(label, candidates.filter((c) => c !== value))}`,
       );
     }
     aliases.set(value, found);

@@ -27,7 +27,7 @@ import {
   toolText,
 } from './e2e-lib.mjs';
 
-const PLANNED = 17;
+const PLANNED = 18;
 
 const { values: opts } = parseArgs({
   options: { node: { type: 'string' }, app: { type: 'string' } },
@@ -169,6 +169,7 @@ async function runChecks({ checks, mcp, api, kv, second }) {
   if (!api) {
     for (const label of [
       'the derived schema matches the ABI: set(key, value)',
+      "select_app resolves the node's own context id directly, without mistaking it for an alias",
       'a round trip through MCP is visible to a direct /jsonrpc read',
       'the generic call tool reaches the same method',
       'a schema-violating argument is a validation error and changes nothing',
@@ -186,6 +187,12 @@ async function runChecks({ checks, mcp, api, kv, second }) {
       assertEqual(Object.keys(set.inputSchema.properties).sort(), ['app_handle', 'key', 'value'], 'set advertises the wrong properties');
       assertEqual([...(set.inputSchema.required ?? [])].sort(), ['app_handle', 'key', 'value'], 'set does not require exactly its handle, key and value');
       return 'app_handle, key and value, all required';
+    });
+
+    await checks.check("select_app resolves the node's own context id directly, without mistaking it for an alias", async () => {
+      const withContext = await mcp.call('select_app', { app: kv.name, context: kv.context });
+      assertEqual(withContext.context, kv.context, 'select_app did not resolve the context id the node itself issued');
+      return `context ${kv.context} accepted straight off`;
     });
 
     await checks.check('a round trip through MCP is visible to a direct /jsonrpc read', async () => {

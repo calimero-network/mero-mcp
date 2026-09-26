@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { NodeSession } from '../../src/node.ts';
 
 export interface FakeApp {
@@ -60,8 +61,8 @@ export function fakeNode(apps: FakeApp[], opts: { aliases?: Record<string, strin
   return { session, executed, apps };
 }
 
-/** Context ids are base58 32-byte hashes and the alias path keys on that shape, so a fixture id must have it too. */
-export const ctx = (label: string) => label.padEnd(44, 'z');
+/** Context ids are 64-char lowercase hex and the alias path keys on that shape, so a fixture id must have it too. */
+export const ctx = (label: string) => createHash('sha256').update(label).digest('hex');
 
 export const method = (name: string, params: Array<{ name: string; type: unknown; nullable?: boolean; doc?: string }> = [], extra: Record<string, unknown> = {}) => ({
   name,

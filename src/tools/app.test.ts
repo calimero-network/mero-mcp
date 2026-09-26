@@ -638,6 +638,38 @@ test('a context that is neither an id nor an alias is named with the candidates,
   }
 });
 
+test('select_app accepts a real hex context id straight off, without treating it as an alias', async () => {
+  const s = await setup([kv()], '2025-11-25', { aliases: { core: ctx('kvctx') } });
+  const admin = s.session.mero.admin as { lookupContextAlias: (name: string) => Promise<unknown> };
+  const lookups: string[] = [];
+  const lookup = admin.lookupContextAlias;
+  admin.lookupContextAlias = (name) => (lookups.push(name), lookup(name));
+  try {
+    const selected = await s.json('select_app', { app: 'kv-store', context: ctx('kvctx') });
+    assert.equal(selected.context, ctx('kvctx'));
+    assert.deepEqual(lookups, []);
+  } finally {
+    await s.close();
+  }
+});
+
+test('the not-found refusal never lists the value it just rejected, even if that shape reappears among the candidates', async () => {
+  // Core's own ids are always 64-char hex; this fixture id is not, so it can never resolve as
+  // an id or an alias - it exercises the guard even if a future id format slips past CONTEXT_ID.
+  const oddShaped = 'not-a-real-id-shape';
+  const s = await setup([{ ...kv(), contexts: [oddShaped] }]);
+  try {
+    const missing = await s.call('select_app', { app: 'kv-store', context: oddShaped });
+    assert.equal(missing.isError, true);
+    assert.equal(
+      missing.content[0].text,
+      `Error: Context "${oddShaped}" not found: it is neither a context id nor an alias on this node. Contexts for "kv-store": (none)`,
+    );
+  } finally {
+    await s.close();
+  }
+});
+
 test('call on an unknown method lists what the app exposes, and runs nothing', async () => {
   const s = await setup();
   try {
@@ -706,7 +738,7 @@ const tiny = (id: string, pkg: string, methods: string[]): FakeApp => ({
   package: pkg,
   version: '1.0.0',
   abi: manifest(methods.map((m) => method(m))),
-  contexts: [ctx(id.replace(/[^1-9A-HJ-NP-Za-km-z]/g, ''))],
+  contexts: [ctx(id)],
 });
 
 test('a generated name that equals a built-in tool is disambiguated, and the server still connects', async () => {
