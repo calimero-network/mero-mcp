@@ -4,9 +4,10 @@ import type { Application, ContextWithGroup, SignedGroupOpenInvitation } from '@
 import type { Config } from '../config.ts';
 import { discoverLocalNodes, listConfiguredNodes, resolveNode } from '../config.ts';
 import type { NodeSession } from '../node.ts';
+import type { Catalog } from '../catalog.ts';
 import { createAbiLoader } from '../abi.ts';
 import { errorResult, textResult } from '../errors.ts';
-import { getSelection } from './app.ts';
+import { listing } from '../guide.ts';
 
 /** Runs an admin call and folds its result or throw into the MCP text-result convention. */
 function wrap<Args>(fn: (args: Args) => Promise<unknown>) {
@@ -25,28 +26,14 @@ const opaqueInvitation = z
   .record(z.string(), z.unknown())
   .describe('The invitation object returned by invite_to_namespace, passed through unchanged.');
 
-/**
- * An app's metadata rides the wire as raw bytes; for display, recover the JSON object it usually
- * encodes, fall back to the plain string, or drop it - never dump the byte array itself.
- */
-function displayMetadata(bytes: number[]): unknown {
-  if (bytes.length === 0) return undefined;
-  const buf = Buffer.from(bytes);
-  const text = buf.toString('utf8');
-  if (!Buffer.from(text, 'utf8').equals(buf)) return undefined; // not valid UTF-8: nothing readable to show
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
-}
-
 // Hex matches how this codebase already renders bytes for display (see schema.ts's bytesSchema).
 const toHex = (bytes: number[]) => Buffer.from(bytes).toString('hex');
 
-export function registerCoreTools(server: McpServer, session: NodeSession, cfg: Config): void {
+export function registerCoreTools(server: McpServer, session: NodeSession, cfg: Config, catalog: Catalog): void {
   const admin = session.mero.admin;
   const { resolveAppId } = createAbiLoader(session);
+  // The install already happened; a failed refresh only delays the new tools until the next poll.
+  const refreshApps = () => catalog.sync().catch((err: unknown) => console.error('[mero-mcp] app list refresh failed:', err));
 
   // core: always registered, regardless of CALIMERO_MCP_TOOLSETS.
 
@@ -65,7 +52,6 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
         nodeName: session.nodeName ?? null,
         discoverySource: discovered.source,
         authMode: session.authMode,
-        ...getSelection(),
       };
     }),
   );
@@ -91,7 +77,7 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
     { description: 'Applications installed on this node.', inputSchema: {}, annotations: { readOnlyHint: true } },
     wrap(async (_args: Record<string, never>) => {
       const { apps } = await admin.listApplications();
-      return { apps: apps.map((app: Application) => ({ ...app, metadata: displayMetadata(app.metadata) })) };
+      return { apps: apps.map((app: Application) => ({ ...app, appVersion: app.version ?? null, ...listing(app.metadata) })) };
     }),
   );
 
@@ -174,7 +160,9 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
       wrap(async ({ coords }: { coords: string }) => {
         const [pkg, version] = coords.split('@');
         if (!pkg || !version) throw new Error(`Expected package@version, got "${coords}".`);
-        return admin.installApplication({ package: pkg, version });
+        const installed = await admin.installApplication({ package: pkg, version });
+        await refreshApps();
+        return installed;
       }),
     );
 
@@ -185,7 +173,11 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
         inputSchema: { application: z.string() },
         annotations: { destructiveHint: true },
       },
-      wrap(async ({ application }: { application: string }) => admin.uninstallApplication(application)),
+      wrap(async ({ application }: { application: string }) => {
+        const removed = await admin.uninstallApplication(application);
+        await refreshApps();
+        return removed;
+      }),
     );
 
     server.registerTool(

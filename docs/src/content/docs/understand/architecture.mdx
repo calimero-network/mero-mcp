@@ -1,6 +1,6 @@
 ---
 title: Architecture
-description: How the server is put together — stdio transport, the lazy session, the ABI loader and its cache, and how a selection becomes a live set of MCP tools.
+description: How the server is put together - stdio transport and protocol eras, the lazy session, the ABI loader and the catalog of installed apps, app handles, and how a call executes.
 sidebar:
   order: 1
 ---
@@ -27,14 +27,20 @@ session multiplexing: the client owns the process lifetime, and stdout is the
 protocol channel — which is why every diagnostic goes to **stderr**.
 
 <Aside type="note">
-The server exposes MCP **tools** only. It registers no resources and no prompts.
+The server exposes MCP **tools** and one **resource template**, for app guides.
+It registers no prompts.
 </Aside>
 
 ## Source layout
 
 <FileTree>
 - src/
-  - index.ts        entrypoint: build the server, register tools, connect stdio
+  - index.ts        entrypoint: serveStdio over the server factory
+  - server.ts       the server factory: catalog, tools, guide resources, cache hints
+  - catalog.ts      installed apps, refreshed on install and every 30 s
+  - handle.ts       HMAC app handles
+  - gate.ts         handle checks and refusals
+  - guide.ts        guide parsing and delivery
   - config.ts       env parsing, node discovery, the handoff file
   - node.ts         session creation, auth mode, the token store
   - session.ts      the lazy session proxy
@@ -43,26 +49,31 @@ The server exposes MCP **tools** only. It registers no resources and no prompts.
   - errors.ts       node/guest error decoding, MCP result envelopes
   - tools/
     - core.ts       node, context, namespace and blob tools
-    - app.ts        describe/select/deselect/call + generated method tools
+    - app.ts        describe/select/call
+    - generated.ts  one tool per installed app method
 </FileTree>
 
-## Startup does not touch the network
+## Connecting
 
-`index.ts` loads config, builds a **lazy session**, registers every tool, and
-connects the transport. Nothing has contacted the node yet.
+The process starts without contacting the node.
+`serveStdio` reads the client's opening message, picks the 2025-11-25 or 2026-07-28 protocol era from it, and builds one server from the factory.
+The factory makes one attempt to read the installed apps, which is the first request to the node.
 
-That is deliberate. If the server connected eagerly, a node that happens to be down
-would make the whole server fail to start, and the client would show it as broken
-rather than as a node problem. Instead:
+A node that is down does not stop the server: it leaves only the fixed tools, and the error goes to stderr.
+The first refresh that reaches the node adds the app tools and sends a list-changed notification.
+The 30-second poll starts with the first read that reaches the node.
+When the node was down at connect, that read is the first `select_app`, `describe_app` or `call` for an app the list lacks, or mero-mcp's own `install_application` or `uninstall_application`.
 
-- The first tool call triggers the real connection.
+Behind every node request sits a **lazy session**:
+
+- The first request triggers the real connection.
 - On success, the session is memoised for the process lifetime.
-- On failure, **only that call fails** and the memo is cleared, so the next call
+- On failure, **only that request fails** and the memo is cleared, so the next one
   tries again. Starting the node afterwards needs no restart of the server.
 
 The lazy session is a `Proxy` over the `admin` and `rpc` namespaces: any method call
 on it awaits the real session, then forwards to the same-named method. Until the
-first call resolves, `url`, `nodeName` and `authMode` hold placeholders — which is
+first call resolves, `url`, `nodeName` and `authMode` hold placeholders, which is
 why `node_status` reads them *after* forcing a connection.
 
 ## Resolving a node and an identity
@@ -83,8 +94,7 @@ inventing one.
 
 ## The ABI loader
 
-`describe_app`, `select_app` and `call` all go through one loader, which does two
-jobs.
+The catalog, `describe_app`, `select_app`, `call` and every generated tool go through one loader, which does two jobs.
 
 **Resolve the application.** An id, a full package name, or an unambiguous trailing
 package segment all resolve to one installed application — or to an error that names
@@ -99,40 +109,43 @@ to a new key and gets a fresh ABI automatically; there is no staleness to invali
 The manifest is only cached *after* it parses, so one malformed response cannot wedge
 an application for the rest of the session.
 
-## Selection and tool lifecycle
+## The catalog
 
-A selection is a process-wide map from application id to:
+The catalog is the list of installed apps every tool list is built from, one entry per app and service.
+An app is a package from one signer: core derives the application id from both, so an upgrade replaces the app in place and a node never holds two versions of it.
+It is server-global, so no list varies by connection, and it is sorted by package, then application id, then service.
+It changes only when its fingerprint of (application id, blob id, version, service, guide hash) changes, which re-registers the generated tools and sends debounced list-changed notifications for tools and resources.
+An app whose ABI cannot be read is left out, with the reason on stderr.
 
-- the resolved application (id, package, manifest, service),
-- a **slug** — the tool-name prefix,
-- an optional pinned context,
-- the handles of the tools it registered.
+Slugs are derived from the resolved application rather than the string you typed, so one application always names its tools the same way.
+On a collision (two packages sanitising to one slug, or one package from two signers) the suffix comes from the application id, never from list order, keeping names stable.
 
-`select_app` holds those handles precisely so the set can be taken away again.
-`deselect_app` calls `.remove()` on each, and re-selecting the same application
-removes the old handles *before* registering new ones — which is why refreshing an
-upgraded app neither duplicates tools nor collides with itself.
+## App handles
 
-Ordering matters in one more place: `select_app` resolves an explicitly passed
-context **before** touching the selection, so a context name that resolves to
-nothing leaves your current tools alone instead of half-replacing them.
+An `app_handle` is `base64url(payload) + "." + base64url(HMAC-SHA256(key, payload))`, with the payload:
 
-Slugs are derived from the resolved application rather than the string you typed, so
-one application always names its tools the same way. On a collision — two packages
-sanitising to one slug — the suffix comes from the application id, never from
-selection order, keeping names stable.
+| Key | Meaning |
+| --- | --- |
+| `a` | application id, which binds the package and its signer |
+| `p` | package |
+| `v` | app version |
+| `g` | first 16 hex of sha256 of the guide, or of `""` when there is none |
+| `c` | context id, or `null` for a `describe_app` handle |
+| `s` | service name, or `null` |
+
+The key is 32 random bytes generated at process start and never persisted, so a restart invalidates every handle.
+A handle is checked against the app as installed at call time, not against the catalog the tool was built from, so an upgrade makes old handles stale at once.
+The checks run in order: the app as installed now, then the handle, then the arguments, then execution.
+A missing handle therefore gets the refusal with the guide even when the arguments are wrong too.
 
 ## Executing a call
 
 For a generated tool:
 
-1. Split the input: only **declared ABI parameters** are forwarded as arguments. The
-   injected `_context` option is filtered out by construction, so it can never reach
-   the application.
-2. Resolve the context: explicit `_context` → this application's pin → its only
-   context → an error listing the candidates.
-3. `rpc.execute({ contextId, method, argsJson })`.
-4. Fold the result, or the throw, into an MCP text result.
+1. Check the `app_handle` against the app as installed now; refuse with the guide if it does not match.
+2. Validate the arguments: only **declared ABI parameters** are forwarded, so the `app_handle` never reaches the application.
+3. `rpc.execute({ contextId, method, argsJson })`, with the context from the handle.
+4. Fold the result into the JSON text plus, when the method returns something, `structuredContent`; or fold the throw into `isError: true`.
 
 Read-only ABI methods carry `readOnlyHint`; destructive core tools carry
 `destructiveHint`, so clients that gate on those annotations can.

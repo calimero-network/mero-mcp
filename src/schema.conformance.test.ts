@@ -36,6 +36,8 @@ function unknownPaths(schema: unknown, path: string, seen = new Set<unknown>()):
   if (!def || seen.has(schema)) return [];
   seen.add(schema);
   if (def.type === 'unknown') return [path];
+  // A named ABI type is a lazy schema; its body is where an unknown would hide.
+  if (def.type === 'lazy') return unknownPaths((schema as { _zod: { innerType: unknown } })._zod.innerType, path, seen);
 
   const out: string[] = [];
   const visit = (child: unknown, key: string) => out.push(...unknownPaths(child, `${path}.${key}`, seen));
@@ -55,18 +57,17 @@ const degradedMethods = (m: AbiManifest): string[] =>
     )
     .map((method) => method.name);
 
-test('the unknown-detector fires on a construct the deriver cannot represent', () => {
+test('the unknown-detector fires on a construct the deriver cannot represent, even inside a named type', () => {
   // Control case: without it, "zero degraded methods" would also hold if the walker simply never looked.
-  // A self-referential record is the reachable one - parseAbiManifest rejects dangling $refs outright.
-  const recursive = parseAbiManifest({
+  // Built by hand: parseAbiManifest would reject the unknown kind before the deriver ever saw it.
+  const m = {
     schema_version: 'wasm-abi/1',
-    types: { Node: { kind: 'record', fields: [{ name: 'next', type: { $ref: 'Node' } }] } },
-    methods: [{ name: 'takes_deep', params: [{ name: 'p', type: { $ref: 'Node' } }], intent: 'mutating' }],
+    types: { Holder: { kind: 'record', fields: [{ name: 'inner', type: { kind: 'future_kind' } }] } },
+    methods: [{ name: 'takes_future', params: [{ name: 'p', type: { $ref: 'Holder' } }], intent: 'mutating' }],
     events: [],
-  });
-  assert.deepEqual(degradedMethods(recursive), ['takes_deep']);
-  // Nested, not top-level: the walker has to descend past the depth cap to see it.
-  assert.deepEqual(unknownPaths(inputShapeForMethod(recursive.methods[0], recursive)['p'], 'p'), ['p.next.next.next.next']);
+  } as unknown as AbiManifest;
+  assert.deepEqual(degradedMethods(m), ['takes_future']);
+  assert.deepEqual(unknownPaths(inputShapeForMethod(m.methods[0], m)['p'], 'p'), ['p.inner']);
 });
 
 for (const [name, count] of Object.entries(EXPECTED_METHOD_COUNTS)) {
@@ -148,7 +149,7 @@ test('kv-store: set(key, value) advertises exactly those two required properties
   try {
     const { tools } = await client.listTools();
     const schema = tools[0].inputSchema as { properties: Record<string, unknown>; required?: string[] };
-    assert.deepEqual(Object.keys(schema.properties).sort(), ['_context', 'key', 'value']);
+    assert.deepEqual(Object.keys(schema.properties).sort(), ['key', 'value']);
     assert.deepEqual([...(schema.required ?? [])].sort(), ['key', 'value']);
   } finally {
     await client.close();

@@ -1,6 +1,6 @@
 ---
 title: Troubleshooting
-description: The failures that actually come up — no node found, several nodes, missing ABI endpoint, invisible generated tools, ambiguous names, and how to read the server's error messages.
+description: The failures that actually come up - no node found, several nodes, missing ABI endpoint, invisible generated tools, refused app handles, ambiguous names, and how to read the server's error messages.
 sidebar:
   order: 3
 ---
@@ -16,13 +16,13 @@ The server writes to **stderr**, and MCP clients hide stderr by default. On star
 it logs:
 
 ```
-[mero-mcp] ready on stdio; the node connects lazily on first tool call
+[mero-mcp] ready on stdio; the node connects when a client opens the connection
 ```
 
-Since it connects lazily, a down node or bad credentials do not fail at startup —
-they fail on the **first tool call**, and only that call. The next call retries. If
-tools fail and you cannot see why, find your client's MCP server log (in Claude Code,
-`claude --debug`, or the MCP output panel in editors) and read the stderr.
+A down node or bad credentials do not fail at startup.
+When the client connects, the server tries once to read the installed apps; if that fails it logs `[mero-mcp] app list unavailable at connect: <error>` and serves only the fixed tools until a later read reaches the node.
+After that a failure hits only the tool call that met it, and the next call retries.
+If tools fail and you cannot see why, find your client's MCP server log (in Claude Code, `claude --debug`, or the MCP output panel in editors) and read the stderr.
 
 ## `No Calimero node found`
 
@@ -70,8 +70,8 @@ the current `merod` release, so until a release carries it, build `merod` from
 cd core && cargo build -p merod
 ```
 
-Every other tool works without it — only `describe_app`, `select_app` and `call`
-need an ABI.
+Every other tool works without it: only the app tools (`describe_app`, `select_app`, `call` and the generated tools) need an ABI.
+An app whose ABI cannot be read is left out of the tool list, and stderr says why.
 
 <Aside type="note">
 This message means the route was missing (a bodyless 404). A 4xx *with* a message —
@@ -81,8 +81,11 @@ and the server passes that through verbatim rather than blaming the version.
 
 ## The generated tools do not appear
 
-`select_app` registers tools **mid-session**, and it announces them in its own
-result along with a note:
+The generated tools are listed from the moment the client connects, one per method of every installed app.
+If an app was installed after that and its tools are missing, wait for the 30-second refresh or reconnect.
+If the node was down when the client connected, the first `select_app`, `describe_app` or `call` that reaches the node reads the list again, adds the app tools and starts the 30-second refresh.
+
+`select_app` names the tools in its result along with a note:
 
 > These are the server-side tool names. An MCP client may expose them under a prefix
 > of its own (commonly `mcp__<server>__<tool>`), so if a name does not resolve, look
@@ -94,12 +97,27 @@ Two separate things go wrong here:
    `mcp__calimero__kv_store_get`. Look for the prefixed form before concluding it is
    missing.
 2. **The client did not pick up the new tool list.** Not every client refreshes on
-   a `tools/list_changed` notification. The `call` tool exists for exactly this — it
-   is registered at startup, so it is always visible, and it reaches every method:
+   a `tools/list_changed` notification. The `call` tool exists for exactly this: it
+   is registered at startup, so it is always visible, and it reaches every method with the same handle:
 
    ```text
-   Call the `call` tool with method "get" and args {"key": "greeting"}.
+   Call the `call` tool with the app_handle, method "get" and args {"key": "greeting"}.
    ```
+
+## `Call select_app for <package> and retry with the returned app_handle.`
+
+An app tool or `call` refused the `app_handle` and ran nothing.
+The refusal carries the app's guide when it has one, so read it before retrying.
+Either the handle is missing or was not issued by this server, or it has gone stale for one of four reasons:
+
+1. **The app was upgraded.** A handle names the app version it was issued for.
+2. **The app's guide changed.** A handle carries a hash of the guide it was issued with.
+3. **The context is gone.** The handle names a context that no longer exists for that app.
+4. **The server restarted.** Handles are signed with a key that lives only as long as the process.
+
+In every case, call `select_app` again and use the handle it returns.
+A handle from `describe_app` names no context, so app tools refuse it with a request to call `select_app` with a context.
+A handle binds one application, so the tools of the same package from another signer refuse it.
 
 ## `Application "x" has no contexts on this node`
 
@@ -113,15 +131,19 @@ failure — see [contexts and namespaces](/guides/contexts-and-namespaces/).
 
 ## `Application "x" has N contexts; pass context with one of: …`
 
-No pin, and the application has several contexts, so there is no default to fall back
-on. Either pass `context` to `select_app` to pin one for the session, or `_context`
-on the individual call.
+The application has several contexts, so `select_app` cannot choose one for you.
+Pass `context` to `select_app`; the handle it returns names that context.
 
 ## `Application "x" is ambiguous`
 
 The short name you used — the trailing package segment — matches more than one
 installed application. Use the full package name or the application id. Matching is
 on whole segments, so this is never a prefix collision.
+
+## `Application "x" is published by several signers`
+
+The package is installed from more than one signer, and each is a separate app with its own tools and handles.
+The error lists each application id with its signer; pass the id of the one you mean to `select_app` or `describe_app`.
 
 ## `Context "x" not found: it is neither a context id nor an alias`
 

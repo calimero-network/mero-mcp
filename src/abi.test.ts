@@ -94,6 +94,24 @@ test('an exact package name resolves even when its last segment is ambiguous', a
   assert.equal((await loader.resolveAppId('org.example.kv-store')).id, 'other');
 });
 
+test('one package from two signers is ambiguous by package or segment, listing each id and signer, and an id picks one', async () => {
+  const apps = [
+    app({ id: 'app-a', package: 'com.calimero.kv-store', signer_id: 'signer-a' }),
+    app({ id: 'app-b', package: 'com.calimero.kv-store', signer_id: 'signer-b' }),
+  ];
+  const { loader } = fake({ apps });
+  for (const name of ['kv-store', 'com.calimero.kv-store']) {
+    await assert.rejects(
+      loader.resolveAppId(name),
+      new RegExp(
+        `^Error: Application "${name}" is published by several signers: ` +
+          'app-a \\(signer signer-a\\), app-b \\(signer signer-b\\)\\. Pass the application id\\.$',
+      ),
+    );
+  }
+  assert.equal((await loader.resolveAppId('app-b')).id, 'app-b');
+});
+
 test('resolveAppId matches whole segments only, never a prefix of one', async () => {
   const { loader } = fake({ apps: [app({ package: 'com.calimero.mero-chat-v2' })] });
   await assert.rejects(loader.resolveAppId('mero-chat'), /not found\. Installed: com\.calimero\.mero-chat-v2/);

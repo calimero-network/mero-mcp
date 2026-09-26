@@ -15,9 +15,8 @@ function lazyNamespace(ensure: () => Promise<NodeSession>, namespace: 'admin' | 
 }
 
 /**
- * A NodeSession stand-in that only calls `create` on first tool use, and only memoizes it on
- * success: a down node or bad credentials fails that one call instead of the server refusing to
- * start, and the next call tries again. `url`/`nodeName`/`authMode` are placeholders until then.
+ * A NodeSession stand-in that calls `create` on first use (the catalog sync at connect) and memoizes only success:
+ * a down node or bad credentials fails that use, never startup, and the next use retries. Fields are placeholders until then.
  */
 export function createLazySession(cfg: Config, create: (cfg: Config) => Promise<NodeSession> = createSession): NodeSession {
   let pending: Promise<NodeSession> | undefined;

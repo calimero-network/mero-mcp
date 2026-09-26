@@ -1,0 +1,102 @@
+import { test, mock } from 'node:test';
+import assert from 'node:assert/strict';
+import { createAbiLoader } from './abi.ts';
+import { createCatalog, WATCH_INTERVAL_MS } from './catalog.ts';
+import { fakeNode, manifest, method, type FakeApp } from '../test/support/node.ts';
+
+const app = (id: string, pkg: string, version = '1.0.0'): FakeApp => ({ id, package: pkg, version, abi: manifest([method('ping')]) });
+
+test('sync notifies only when an app is installed, upgraded or uninstalled, and keeps catalog order by package', async () => {
+  const node = fakeNode([app('b-id', 'org.b'), app('a-id', 'org.a')]);
+  const catalog = createCatalog(createAbiLoader(node.session));
+  let changes = 0;
+  catalog.subscribe(() => changes++);
+
+  await catalog.sync();
+  assert.deepEqual(catalog.apps().map((a) => a.package), ['org.a', 'org.b']);
+  await catalog.sync();
+  assert.equal(changes, 1, 'an unchanged node must not announce a change');
+
+  node.apps.push(app('c-id', 'org.c'));
+  await catalog.sync();
+  node.apps[0].version = '2.0.0';
+  await catalog.sync();
+  node.apps.splice(1, 1);
+  await catalog.sync();
+  assert.equal(changes, 4);
+  assert.deepEqual(catalog.apps().map((a) => a.package), ['org.b', 'org.c']);
+});
+
+test('a listener that throws is reported and does not stop the others', async (t) => {
+  const logged = t.mock.method(console, 'error', () => {});
+  const node = fakeNode([app('a-id', 'org.a')]);
+  const catalog = createCatalog(createAbiLoader(node.session));
+  let changes = 0;
+  catalog.subscribe(() => {
+    throw new Error('boom');
+  });
+  catalog.subscribe(() => changes++);
+
+  await catalog.sync();
+  assert.equal(changes, 1);
+  assert.match(String(logged.mock.calls[0].arguments.join(' ')), /boom/);
+});
+
+test('an app whose ABI cannot be read is left out and reported, and the rest still load', async (t) => {
+  const logged = t.mock.method(console, 'error', () => {});
+  const node = fakeNode([app('a-id', 'org.a'), { ...app('bad-id', 'org.bad'), abi: { schema_version: 'wasm-abi/1' } }]);
+  const catalog = createCatalog(createAbiLoader(node.session));
+  await catalog.sync();
+  assert.deepEqual(catalog.apps().map((a) => a.package), ['org.a']);
+  assert.match(String(logged.mock.calls[0]?.arguments[0]), /^\[mero-mcp\] skipping org\.bad: /);
+});
+
+test('the refresh poll starts with the first sync that reaches the node and runs every 30 s', async (t) => {
+  mock.timers.enable({ apis: ['setInterval'] });
+  t.after(() => mock.timers.reset());
+  const node = fakeNode([app('a-id', 'org.a')]);
+  let listed = 0;
+  const list = node.session.mero.admin.listApplications.bind(node.session.mero.admin);
+  node.session.mero.admin.listApplications = async () => {
+    listed++;
+    return list();
+  };
+  const catalog = createCatalog(createAbiLoader(node.session));
+  let changes = 0;
+  catalog.subscribe(() => changes++);
+
+  mock.timers.tick(WATCH_INTERVAL_MS * 3);
+  assert.equal(listed, 0, 'nothing polls before the first sync');
+  await catalog.sync();
+  node.apps.push(app('b-id', 'org.b'));
+  mock.timers.tick(WATCH_INTERVAL_MS);
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(listed, 2);
+  assert.equal(changes, 2);
+});
+
+test('overlapping syncs run in order, so an older snapshot finishing late never replaces a newer one', async () => {
+  const node = fakeNode([app('a-id', 'org.a')]);
+  const loader = createAbiLoader(node.session);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  let calls = 0;
+  const loadAll = loader.loadAll;
+  loader.loadAll = async () => {
+    const first = calls++ === 0;
+    const snapshot = await loadAll();
+    if (first) await held;
+    return snapshot;
+  };
+  const catalog = createCatalog(loader);
+
+  const older = catalog.sync();
+  await new Promise((resolve) => setImmediate(resolve));
+  node.apps.push(app('b-id', 'org.b'));
+  const newer = catalog.sync();
+  await new Promise((resolve) => setImmediate(resolve));
+  release();
+  await Promise.all([older, newer]);
+  assert.deepEqual(catalog.apps().map((a) => a.package), ['org.a', 'org.b']);
+});

@@ -1,491 +1,823 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { z } from 'zod';
-import type { McpServer } from '@modelcontextprotocol/server';
-import type { Config } from '../config.ts';
-import type { NodeSession } from '../node.ts';
-import { getSelection, registerAppTools } from './app.ts';
+import { loadConfig } from '../config.ts';
+import { WATCH_INTERVAL_MS } from '../catalog.ts';
+import { guideHash, handles } from '../handle.ts';
+import { createServerFactory } from '../server.ts';
+import { connect, type Era } from '../../test/support/connect.ts';
+import { ctx, fakeNode, manifest, method, type FakeApp } from '../../test/support/node.ts';
 
-const CFG = { toolsets: new Set(['core']) } as Config;
+const CFG = loadConfig({ HOME: '/x' } as NodeJS.ProcessEnv);
+const GUIDE = '## Overview\nA store that explains itself.\n## Procedures\n### Save a value';
 
-type ToolResult = { isError?: boolean; content: Array<{ type: string; text: string }> };
-type ToolConfig = { description?: string; inputSchema?: Record<string, z.ZodTypeAny>; annotations?: { readOnlyHint?: boolean } };
+type Block = { type: string; text?: string; resource?: { uri: string; mimeType?: string; text?: string; _meta?: Record<string, unknown> } };
+type ToolResult = { isError?: boolean; content: Block[]; structuredContent?: unknown };
 
-const method = (name: string, params: Array<{ name: string; type: string }> = [], intent = 'mutating') => ({
-  name,
-  params: params.map((p) => ({ name: p.name, type: { kind: p.type } })),
-  returns: { kind: 'unit' },
-  intent,
+const kv = (): FakeApp => ({
+  id: 'kv-id',
+  package: 'com.calimero.kv-store',
+  version: '1.0.0',
+  signer_id: 'SignerKey1',
+  metadata: { name: 'KV Store', guide: GUIDE, icon: 'https://example.com/kv.png' },
+  abi: manifest([
+    method('set', [{ name: 'key', type: { kind: 'string' } }]),
+    method('get', [{ name: 'key', type: { kind: 'string' } }], { intent: 'read_only', returns: { kind: 'string' }, returns_nullable: true }),
+  ]),
+  contexts: [ctx('kvctx')],
 });
-const manifest = (methods: unknown[]) => ({ schema_version: 'wasm-abi/1', types: {}, methods, events: [] });
 
-/** Context ids are base58 32-byte hashes and the alias path keys on that shape, so a fixture id must have it too. */
-const ctx = (label: string) => {
-  assert.match(label, /^[1-9A-HJ-NP-Za-km-z]+$/, `${label} is not base58, so it would not read as a context id`);
-  return label.padEnd(44, 'z');
-};
+const plain = (): FakeApp => ({
+  id: 'notes-id',
+  package: 'org.example.notes',
+  version: '0.2.0',
+  signer_id: 'SignerKey2',
+  metadata: { name: 'Notes', icon: 'notes.png' },
+  abi: manifest([method('add', [{ name: 'body', type: { kind: 'string' } }], { returns: { $ref: 'Note' } })], {
+    Note: { kind: 'record', fields: [{ name: 'id', type: { kind: 'u32' } }] },
+  }),
+  contexts: [ctx('notesctx')],
+});
 
-const KV = { id: 'kv-id', package: 'com.calimero.kv-store', version: '0.1.0', blob: { bytecode: 'kv-blob', compiled: 'c' } };
-const NOTES = { id: 'notes-id', package: 'notes', version: '0.2.0', blob: { bytecode: 'notes-blob', compiled: 'c' } };
-// Sanitising `kv_store` and `kv-store` lands on one slug, while whole-segment resolution keeps them distinct inputs.
-const TWIN = { id: 'twin-id', package: 'org.example.kv_store', version: '1.0.0', blob: { bytecode: 'twin-blob', compiled: 'c' } };
-const BARE = { id: 'RawApp42', package: undefined, version: '0.0.1', blob: { bytecode: 'bare-blob', compiled: 'c' } };
-
-const ABIS: Record<string, unknown> = {
-  'kv-id': manifest([method('get', [{ name: 'key', type: 'string' }], 'read_only'), method('set', [{ name: 'key', type: 'string' }])]),
-  'notes-id': manifest([method('add', [{ name: 'body', type: 'string' }]), method('get', [{ name: 'id', type: 'string' }], 'read_only')]),
-  'twin-id': manifest([method('ping')]),
-  RawApp42: manifest([method('ping')]),
-};
-
-const FIXED = ['describe_app', 'select_app', 'deselect_app', 'call'];
-
-/** Mirrors the SDK: it validates against `inputSchema` before the handler ever runs. */
-function fakeServer() {
-  const tools = new Map<string, { config: ToolConfig; handler: (input: Record<string, unknown>) => Promise<ToolResult> }>();
-  const removed: string[] = [];
-  const server = {
-    registerTool(name: string, config: ToolConfig, handler: (input: Record<string, unknown>) => Promise<ToolResult>) {
-      tools.set(name, { config, handler });
-      return {
-        remove: () => {
-          removed.push(name);
-          tools.delete(name);
-        },
-      };
-    },
-  } as unknown as McpServer;
-
-  return {
-    server,
-    removed,
-    names: () => [...tools.keys()],
-    config: (name: string) => tools.get(name)!.config,
-    async call(name: string, input: Record<string, unknown> = {}): Promise<ToolResult> {
-      const tool = tools.get(name);
-      assert.ok(tool, `tool ${name} is not registered`);
-      const shape = tool.config.inputSchema;
-      if (!shape) return tool.handler(input);
-      const parsed = z.object(shape).safeParse(input);
-      if (!parsed.success) return { isError: true, content: [{ type: 'text', text: parsed.error.message }] };
-      return tool.handler(parsed.data as Record<string, unknown>);
-    },
-  };
+async function setup(apps: FakeApp[] = [kv(), plain()], era: Era = '2025-11-25', opts: Parameters<typeof fakeNode>[1] = {}) {
+  const node = fakeNode(apps, opts);
+  const { client, close } = await connect(createServerFactory(node.session, CFG), era);
+  const call = (name: string, args: Record<string, unknown> = {}) => client.callTool({ name, arguments: args }) as Promise<ToolResult>;
+  const json = async (name: string, args: Record<string, unknown> = {}) => JSON.parse((await call(name, args)).content[0].text!);
+  return { ...node, client, close, call, json };
 }
 
-type FakeContext = string | { id: string; serviceName?: string };
+const LABEL = "App guide, provided by the app's author (package com.calimero.kv-store, signer SignerKey1):";
+const RETRY = 'Call select_app for com.calimero.kv-store and retry with the returned app_handle.';
 
-function fakeSession(
-  opts: { contexts?: Record<string, FakeContext[]>; abis?: Record<string, unknown>; aliases?: Record<string, string> } = {},
-) {
-  const apps = [KV, NOTES, TWIN, BARE];
-  const abis = opts.abis ?? ABIS;
-  const executed: Array<Record<string, unknown>> = [];
+test('describe_app returns the author-labelled guide as an embedded resource, and a handle, without registering anything', async () => {
+  const s = await setup();
+  try {
+    const before = (await s.client.listTools()).tools.map((t) => t.name);
+    const res = await s.call('describe_app', { app: 'kv-store' });
+    const summary = JSON.parse(res.content[0].text!);
+    assert.equal(summary.appVersion, '1.0.0');
+    assert.equal(typeof summary.app_handle, 'string');
+    assert.equal(res.content[1].text, LABEL);
+    assert.deepEqual(res.content[2].resource, {
+      uri: 'calimero://apps/kv-id/1.0.0/guide',
+      mimeType: 'text/markdown',
+      text: GUIDE,
+      _meta: { package: 'com.calimero.kv-store', appVersion: '1.0.0', signerId: 'SignerKey1' },
+    });
+    assert.deepEqual((await s.client.listTools()).tools.map((t) => t.name), before);
+  } finally {
+    await s.close();
+  }
+});
+
+test('describe_app on an app without a guide says so and still issues a handle', async () => {
+  const s = await setup();
+  try {
+    const res = await s.call('describe_app', { app: 'notes' });
+    assert.equal(typeof JSON.parse(res.content[0].text!).app_handle, 'string');
+    assert.equal(res.content[1].text, 'This app ships no guide.');
+  } finally {
+    await s.close();
+  }
+});
+
+test('the tool list is every method of every installed app, sorted by package then method, with no _context argument', async () => {
+  const s = await setup();
+  try {
+    const names = (await s.client.listTools()).tools.map((t) => t.name).filter((n) => n.startsWith('kv_store_') || n.startsWith('notes_'));
+    assert.deepEqual(names, ['kv_store_get', 'kv_store_set', 'notes_add']);
+    const set = (await s.client.listTools()).tools.find((t) => t.name === 'kv_store_set')!;
+    assert.deepEqual(Object.keys(set.inputSchema.properties ?? {}), ['app_handle', 'key']);
+    assert.deepEqual(set.inputSchema.required, ['app_handle', 'key']);
+  } finally {
+    await s.close();
+  }
+});
+
+test('a generated tool called without an app_handle is refused with the guide and runs nothing', async () => {
+  const s = await setup();
+  try {
+    const res = await s.call('kv_store_set', { key: 'k' });
+    assert.equal(res.isError, true);
+    assert.equal(res.content[0].text, LABEL);
+    assert.equal(res.content[1].resource?.text, GUIDE);
+    assert.equal(res.content[2].text, RETRY);
+    assert.deepEqual(s.executed, []);
+  } finally {
+    await s.close();
+  }
+});
+
+test('a forged handle is refused and runs nothing', async () => {
+  const s = await setup();
+  try {
+    const { app_handle } = await s.json('select_app', { app: 'kv-store' });
+    const [body] = (app_handle as string).split('.');
+    const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+    const forged = `${Buffer.from(JSON.stringify({ ...payload, c: ctx('otherctx') })).toString('base64url')}.${(app_handle as string).split('.')[1]}`;
+    const res = await s.call('kv_store_set', { app_handle: forged, key: 'k' });
+    assert.equal(res.isError, true);
+    assert.equal(res.content.at(-1)!.text, RETRY);
+    assert.deepEqual(s.executed, []);
+  } finally {
+    await s.close();
+  }
+});
+
+test('a handle from select_app runs the call in the context it names', async () => {
+  const s = await setup();
+  try {
+    const { app_handle, context } = await s.json('select_app', { app: 'kv-store' });
+    assert.equal(context, ctx('kvctx'));
+    const res = await s.call('kv_store_set', { app_handle, key: 'k' });
+    assert.equal(res.isError, undefined);
+    assert.deepEqual(s.executed, [{ contextId: ctx('kvctx'), method: 'set', argsJson: { key: 'k' } }]);
+  } finally {
+    await s.close();
+  }
+});
+
+test('a handle with no context is refused with a request to select one, and runs nothing', async () => {
+  const s = await setup();
+  try {
+    const { app_handle } = await s.json('describe_app', { app: 'kv-store' });
+    const res = await s.call('kv_store_set', { app_handle, key: 'k' });
+    assert.equal(res.isError, true);
+    assert.deepEqual(res.content.map((b) => b.text), [
+      'This app_handle names no context. Call select_app for com.calimero.kv-store with a context and retry with the returned app_handle.',
+    ]);
+    assert.deepEqual(s.executed, []);
+  } finally {
+    await s.close();
+  }
+});
+
+test('a handle goes stale when the app version, its guide, or its context changes', async () => {
+  for (const [change, toolText] of [
+    [(a: FakeApp) => (a.version = '1.1.0'), RETRY],
+    [(a: FakeApp) => (a.metadata = { ...a.metadata, guide: `${GUIDE}\n### Another` }), RETRY],
+    [(a: FakeApp) => (a.contexts = [ctx('newctx')]), RETRY],
+  ] as const) {
+    const s = await setup();
+    try {
+      const { app_handle } = await s.json('select_app', { app: 'kv-store' });
+      change(s.apps[0]);
+      const viaCall = await s.call('call', { app_handle, method: 'set', args: { key: 'k' } });
+      assert.equal(viaCall.isError, true);
+      assert.equal(viaCall.content.at(-1)!.text, RETRY);
+      const res = await s.call('kv_store_set', { app_handle, key: 'k' });
+      assert.equal(res.isError, true);
+      assert.equal(res.content.at(-1)!.text, toolText);
+      assert.deepEqual(s.executed, []);
+    } finally {
+      await s.close();
+    }
+  }
+});
+
+test('after an in-place upgrade an old tool resyncs, then runs as the new version or refuses with the plain retry', async () => {
+  const s = await setup([kv()]);
+  try {
+    Object.assign(s.apps[0], { version: '1.1.0', abi: manifest([method('set', [{ name: 'key', type: { kind: 'string' } }]), method('del')]) });
+    const fresh = await s.json('select_app', { app: 'kv-store' });
+    assert.deepEqual([fresh.appVersion, fresh.tools], ['1.1.0', ['kv_store_del', 'kv_store_set']]);
+    await s.call('kv_store_set', { app_handle: fresh.app_handle, key: 'k' });
+    assert.deepEqual(s.executed, [{ contextId: ctx('kvctx'), method: 'set', argsJson: { key: 'k' } }]);
+    const listed = (await s.client.listTools()).tools.find((t) => t.name === 'kv_store_set');
+    assert.equal(listed?._meta?.appVersion, '1.1.0');
+
+    Object.assign(s.apps[0], { version: '1.2.0', abi: manifest([method('get', [{ name: 'key', type: { kind: 'string' } }])]) });
+    // A handle for the new version must not run the old tool's method, which that version no longer has.
+    const current = handles.issue({ a: 'kv-id', p: 'com.calimero.kv-store', v: '1.2.0', g: guideHash(GUIDE), c: ctx('kvctx'), s: null });
+    const gone = await s.call('kv_store_set', { app_handle: current, key: 'k' });
+    assert.equal(gone.isError, true);
+    // 1.1.0 is gone, so the refusal must not send the agent back to it; the tool leaves the list below.
+    assert.deepEqual(gone.content.map((b) => b.text ?? b.resource?.text).slice(-1), [RETRY]);
+    assert.equal(s.executed.length, 1);
+    assert.ok(!(await s.client.listTools()).tools.some((t) => t.name === 'kv_store_set'));
+    assert.deepEqual((await s.json('select_app', { app: 'kv-store' })).tools, ['kv_store_get']);
+  } finally {
+    await s.close();
+  }
+});
+
+test('after an in-place upgrade whose re-sync fails, an old tool refuses a current handle and runs nothing', async () => {
+  const s = await setup([kv()]);
+  try {
+    s.apps[0].version = '1.1.0';
+    const current = handles.issue({ a: 'kv-id', p: 'com.calimero.kv-store', v: '1.1.0', g: guideHash(GUIDE), c: ctx('kvctx'), s: null });
+    const list = s.session.mero.admin.listApplications.bind(s.session.mero.admin);
+    let calls = 0;
+    s.session.mero.admin.listApplications = async () => {
+      if (++calls === 2) throw new Error('node blip');
+      return list();
+    };
+    const res = await s.call('kv_store_set', { app_handle: current, key: 'k' });
+    assert.equal(res.isError, true);
+    assert.equal(res.content.at(-1)!.text, RETRY);
+    assert.deepEqual(s.executed, []);
+  } finally {
+    await s.close();
+  }
+});
+
+test('a tool whose app was uninstalled refuses with the retry line and the guide, runs nothing, and leaves the list', async () => {
+  const s = await setup();
+  try {
+    const { app_handle } = await s.json('select_app', { app: 'kv-store' });
+    s.apps.splice(0, 1);
+    const res = await s.call('kv_store_set', { app_handle, key: 'k' });
+    assert.equal(res.isError, true);
+    assert.deepEqual(res.content.map((b) => b.text ?? b.resource?.text), [LABEL, GUIDE, RETRY]);
+    assert.deepEqual(s.executed, []);
+    assert.ok(!(await s.client.listTools()).tools.some((t) => t.name.startsWith('kv_store_')));
+  } finally {
+    await s.close();
+  }
+});
+
+test('a tool whose app was uninstalled still refuses with the retry line when the re-sync fails', async () => {
+  const s = await setup();
+  try {
+    const { app_handle } = await s.json('select_app', { app: 'kv-store' });
+    s.apps.splice(0, 1);
+    const list = s.session.mero.admin.listApplications.bind(s.session.mero.admin);
+    let calls = 0;
+    s.session.mero.admin.listApplications = async () => {
+      if (++calls === 2) throw new Error('node blip');
+      return list();
+    };
+    const res = await s.call('kv_store_set', { app_handle, key: 'k' });
+    assert.deepEqual(res.content.map((b) => b.text ?? b.resource?.text), [LABEL, GUIDE, RETRY]);
+    assert.deepEqual(s.executed, []);
+  } finally {
+    await s.close();
+  }
+});
+
+test('call with a handle for an uninstalled app, or without one for a multi-service app, refuses with the retry line', async () => {
+  const s = await setup([kv(), drive()]);
+  try {
+    const { app_handle } = await s.json('select_app', { app: 'kv-store' });
+    s.apps.splice(0, 1);
+    const gone = await s.call('call', { app_handle, method: 'set', args: { key: 'k' } });
+    assert.deepEqual(gone.content.map((b) => b.text), ['Call select_app for the application and retry with the returned app_handle.']);
+
+    const bare = await s.call('call', { method: 'create_doc', args: { title: 't' }, app: 'mero-drive' });
+    assert.deepEqual(bare.content.map((b) => b.text ?? b.resource?.text).slice(-2), [
+      '## Overview\ndrive',
+      'Call select_app for com.calimero.mero-drive and retry with the returned app_handle.',
+    ]);
+    assert.deepEqual(s.executed, []);
+  } finally {
+    await s.close();
+  }
+});
+
+test('a catalog miss whose re-sync fails still resolves the app, using the direct read', async () => {
+  const s = await setup();
+  try {
+    s.apps.push(kv());
+    s.apps[1].id = 'kv-id-2';
+    const list = s.session.mero.admin.listApplications.bind(s.session.mero.admin);
+    let calls = 0;
+    s.session.mero.admin.listApplications = async () => {
+      calls++;
+      if (calls === 2) throw new Error('node blip');
+      return list();
+    };
+    const res = await s.json('describe_app', { app: 'kv-id-2' });
+    assert.equal(res.application, 'kv-id-2');
+  } finally {
+    await s.close();
+  }
+});
+
+test('an app without a guide still needs a handle, and the refusal carries only the retry line', async () => {
+  const s = await setup();
+  try {
+    const res = await s.call('notes_add', { body: 'x' });
+    assert.equal(res.isError, true);
+    assert.deepEqual(res.content.map((b) => b.text), ['Call select_app for org.example.notes and retry with the returned app_handle.']);
+    assert.deepEqual(s.executed, []);
+  } finally {
+    await s.close();
+  }
+});
+
+test("a handle for one app is refused by another app's tool", async () => {
+  const s = await setup();
+  try {
+    const { app_handle } = await s.json('select_app', { app: 'notes' });
+    const res = await s.call('kv_store_set', { app_handle, key: 'k' });
+    assert.equal(res.isError, true);
+    assert.deepEqual(s.executed, []);
+  } finally {
+    await s.close();
+  }
+});
+
+test('an argument that violates the ABI is an error after the handle check, and runs nothing', async () => {
+  const s = await setup();
+  try {
+    const { app_handle } = await s.json('select_app', { app: 'kv-store' });
+    const res = await s.call('kv_store_set', { app_handle, key: 42 });
+    assert.equal(res.isError, true);
+    assert.deepEqual(s.executed, []);
+  } finally {
+    await s.close();
+  }
+});
+
+test('a failed contract call is an isError result carrying the node message, not a protocol error', async () => {
+  const s = await setup([kv()], '2025-11-25', {
+    execute: () => {
+      throw new Error('key too long');
+    },
+  });
+  try {
+    const { app_handle } = await s.json('select_app', { app: 'kv-store' });
+    const res = await s.call('kv_store_set', { app_handle, key: 'k' });
+    assert.equal(res.isError, true);
+    assert.match(res.content[0].text!, /key too long/);
+  } finally {
+    await s.close();
+  }
+});
+
+test('call takes the same handle, and without one refuses with the named app guide', async () => {
+  const s = await setup();
+  try {
+    const refused = await s.call('call', { method: 'set', args: { key: 'k' }, app: 'kv-store' });
+    assert.equal(refused.isError, true);
+    assert.equal(refused.content[1].resource?.text, GUIDE);
+    const bare = await s.call('call', { method: 'set', args: { key: 'k' } });
+    assert.deepEqual(bare.content.map((b) => b.text), ['Call select_app for the application and retry with the returned app_handle.']);
+    assert.deepEqual(s.executed, []);
+
+    const { app_handle } = await s.json('select_app', { app: 'kv-store' });
+    await s.call('call', { app_handle, method: 'set', args: { key: 'k' } });
+    assert.deepEqual(s.executed, [{ contextId: ctx('kvctx'), method: 'set', argsJson: { key: 'k' } }]);
+  } finally {
+    await s.close();
+  }
+});
+
+test('select_app resolves an alias to the context it pins in the handle', async () => {
+  const apps = [{ ...kv(), contexts: [ctx('kvctx'), ctx('kvtwo')] }];
+  const s = await setup(apps, '2025-11-25', { aliases: { work: ctx('kvtwo') } });
+  try {
+    const several = await s.json('select_app', { app: 'kv-store' });
+    assert.equal(several.context, null);
+    assert.equal(several.note, `Application "kv-store" has 2 contexts; pass context with one of: ${ctx('kvctx')}, ${ctx('kvtwo')}`);
+    const { app_handle } = await s.json('select_app', { app: 'kv-store', context: 'work' });
+    await s.call('kv_store_set', { app_handle, key: 'k' });
+    assert.equal(s.executed[0].contextId, ctx('kvtwo'));
+  } finally {
+    await s.close();
+  }
+});
+
+test('generated tools carry a title, explicit annotations, an icon only for a URL, and _meta', async () => {
+  const s = await setup();
+  try {
+    const tools = (await s.client.listTools()).tools;
+    const get = tools.find((t) => t.name === 'kv_store_get')!;
+    const add = tools.find((t) => t.name === 'notes_add')!;
+    assert.equal(get.title, 'Get (KV Store)');
+    assert.deepEqual(get.annotations, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false });
+    assert.deepEqual(add.annotations, { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false });
+    assert.deepEqual(get.icons, [{ src: 'https://example.com/kv.png' }]);
+    assert.equal(add.icons, undefined);
+    assert.deepEqual(get._meta, { package: 'com.calimero.kv-store', appVersion: '1.0.0', signerId: 'SignerKey1', intent: 'read_only' });
+    // select_app only reads the node and mints a handle, so clients need not confirm it.
+    assert.deepEqual(tools.find((t) => t.name === 'select_app')!.annotations, { readOnlyHint: true });
+  } finally {
+    await s.close();
+  }
+});
+
+test('a long method name is cut to 49 characters with a hash of the full name', async () => {
+  const long = 'reconcile_every_pending_attachment_upload_now';
+  const s = await setup([{ ...plain(), package: 'org.example.a-very-long-application-name', abi: manifest([method(long)]) }]);
+  try {
+    const name = (await s.client.listTools()).tools.map((t) => t.name).find((n) => n.startsWith('a_very_long'))!;
+    assert.equal(name.length, 49);
+    assert.match(name, /^a_very_long_applicat_reconcile_every_pendi_[0-9a-f]{6}$/);
+  } finally {
+    await s.close();
+  }
+});
+
+for (const era of ['2025-11-25', '2026-07-28'] as const) {
+  test(`${era}: outputSchema and structuredContent follow the era, wrapped in {result} only for 2025-11-25 non-object returns`, async () => {
+    const s = await setup([kv(), plain()], era, { execute: (p) => (p.method === 'get' ? 'v' : { id: 7 }) });
+    try {
+      const tools = (await s.client.listTools()).tools;
+      const get = tools.find((t) => t.name === 'kv_store_get')!;
+      const add = tools.find((t) => t.name === 'notes_add')!;
+      const { app_handle: kvHandle } = await s.json('select_app', { app: 'kv-store' });
+      const { app_handle: notesHandle } = await s.json('select_app', { app: 'notes' });
+      const got = await s.call('kv_store_get', { app_handle: kvHandle, key: 'k' });
+      const added = await s.call('notes_add', { app_handle: notesHandle, body: 'x' });
+      if (era === '2025-11-25') {
+        assert.deepEqual(get.outputSchema, { type: 'object', properties: { result: { anyOf: [{ type: 'string' }, { type: 'null' }] } }, required: ['result'] });
+        assert.deepEqual(got.structuredContent, { result: 'v' });
+      } else {
+        assert.deepEqual(get.outputSchema, { anyOf: [{ type: 'string' }, { type: 'null' }] });
+        assert.equal(got.structuredContent, 'v');
+      }
+      assert.deepEqual(added.structuredContent, { id: 7 });
+      assert.equal(add.outputSchema?.type, 'object');
+    } finally {
+      await s.close();
+    }
+  });
+}
+
+test('a missing handle is refused with the guide even when the arguments are also wrong', async () => {
+  const s = await setup();
+  try {
+    const tool = await s.call('kv_store_set', { key: 42 });
+    assert.equal(tool.content.at(-1)!.text, RETRY);
+    assert.equal(tool.content[1].resource?.text, GUIDE);
+    const viaCall = await s.call('call', { method: 'set', args: { key: 42 }, app: 'kv-store' });
+    assert.equal(viaCall.content.at(-1)!.text, RETRY);
+    assert.deepEqual(s.executed, []);
+  } finally {
+    await s.close();
+  }
+});
+
+const drive = (): FakeApp => ({
+  id: 'drive-id',
+  package: 'com.calimero.mero-drive',
+  version: '2.0.0',
+  signer_id: 'SignerKey3',
+  metadata: { name: 'Mero Drive', guide: '## Overview\ndrive' },
+  abi: undefined,
+  services: {
+    docs: manifest([method('create_doc', [{ name: 'title', type: { kind: 'string' } }])]),
+    registry: manifest([method('register_folder', [{ name: 'name', type: { kind: 'string' } }])]),
+  },
+  contexts: [
+    { id: ctx('docsctx'), serviceName: 'docs' },
+    { id: ctx('regctx'), serviceName: 'registry' },
+  ],
+});
+
+test('for a multi-service app the chosen context picks the service, the handle binds it, and each service keeps its own tools', async () => {
+  const s = await setup([drive()]);
+  try {
+    const names = (await s.client.listTools()).tools.map((t) => t.name).filter((n) => n.startsWith('mero_drive'));
+    assert.deepEqual(names, ['mero_drive_docs_create_doc', 'mero_drive_registry_register_folder']);
+
+    const docs = await s.json('select_app', { app: 'mero-drive', context: ctx('docsctx') });
+    assert.equal(docs.service, 'docs');
+    assert.deepEqual(docs.tools, ['mero_drive_docs_create_doc']);
+    await s.call('mero_drive_docs_create_doc', { app_handle: docs.app_handle, title: 't' });
+    assert.deepEqual(s.executed, [{ contextId: ctx('docsctx'), method: 'create_doc', argsJson: { title: 't' } }]);
+
+    // A docs handle is not a registry handle, even though both name the same package and version.
+    const crossed = await s.call('mero_drive_registry_register_folder', { app_handle: docs.app_handle, name: 'f' });
+    assert.equal(crossed.isError, true);
+
+    const registry = await s.json('select_app', { app: 'mero-drive', context: ctx('regctx') });
+    await s.call('call', { app_handle: registry.app_handle, method: 'register_folder', args: { name: 'f' } });
+    assert.deepEqual(s.executed.at(-1), { contextId: ctx('regctx'), method: 'register_folder', argsJson: { name: 'f' } });
+  } finally {
+    await s.close();
+  }
+});
+
+test("a handle's own service and its context's service are each checked, so either mismatch alone is refused", async () => {
+  const s = await setup([drive()]);
+  try {
+    const { app_handle } = await s.json('select_app', { app: 'mero-drive', context: ctx('regctx') });
+    const payload = handles.read(app_handle)!;
+    for (const minted of [{ ...payload, s: 'docs' }, { ...payload, c: ctx('docsctx') }]) {
+      const res = await s.call('mero_drive_registry_register_folder', { app_handle: handles.issue(minted), name: 'f' });
+      assert.equal(res.content.at(-1)!.text, 'Call select_app for com.calimero.mero-drive and retry with the returned app_handle.');
+    }
+    assert.deepEqual(s.executed, []);
+  } finally {
+    await s.close();
+  }
+});
+
+test("call refuses a handle for one app when app names another, with that app's guide, and runs nothing", async () => {
+  const s = await setup([kv(), plain(), drive()]);
+  try {
+    const notes = await s.json('select_app', { app: 'notes' });
+    const crossed = await s.call('call', { app_handle: notes.app_handle, method: 'set', args: { key: 'k' }, app: 'kv-store' });
+    assert.equal(crossed.isError, true);
+    assert.deepEqual(crossed.content.map((b) => b.text ?? b.resource?.text), [LABEL, GUIDE, RETRY]);
+    const kvHandle = (await s.json('select_app', { app: 'kv-store' })).app_handle;
+    const reverse = await s.call('call', { app_handle: kvHandle, method: 'add', args: { body: 'x' }, app: 'notes' });
+    assert.deepEqual(reverse.content.map((b) => b.text), ['Call select_app for org.example.notes and retry with the returned app_handle.']);
+    assert.deepEqual(s.executed, []);
+
+    await s.call('call', { app_handle: kvHandle, method: 'set', args: { key: 'k' }, app: 'kv-store' });
+    await s.call('call', { app_handle: kvHandle, method: 'set', args: { key: 'k' }, app: 'no-such-app' });
+    const docs = await s.json('select_app', { app: 'mero-drive', context: ctx('docsctx') });
+    await s.call('call', { app_handle: docs.app_handle, method: 'create_doc', args: { title: 't' }, app: 'mero-drive' });
+    assert.deepEqual(s.executed, [
+      { contextId: ctx('kvctx'), method: 'set', argsJson: { key: 'k' } },
+      { contextId: ctx('kvctx'), method: 'set', argsJson: { key: 'k' } },
+      { contextId: ctx('docsctx'), method: 'create_doc', argsJson: { title: 't' } },
+    ]);
+  } finally {
+    await s.close();
+  }
+});
+
+const kvBy = (id: string, signer: string, context: string): FakeApp => ({ ...kv(), id, signer_id: signer, contexts: [ctx(context)] });
+
+test('one package from two signers is two apps: own tools, no silent pick by name, and a handle per signer', async () => {
+  // Same package, version and guide, so only the signer tells the two handles apart.
+  const s = await setup([kvBy('kv-a', 'SignerA', 'ctxa'), kvBy('kv-b', 'SignerB', 'ctxb')]);
+  try {
+    const names = (await s.client.listTools()).tools.map((t) => t.name).filter((n) => n.startsWith('kv_store') && n.endsWith('_set'));
+    assert.deepEqual(names, ['kv_store_set', 'kv_store_kvb_set']);
+
+    const listed = 'kv-a (signer SignerA), kv-b (signer SignerB). Pass the application id.';
+    for (const tool of ['select_app', 'describe_app']) {
+      const res = await s.call(tool, { app: 'kv-store' });
+      assert.equal(res.isError, true);
+      assert.equal(res.content[0].text, `Error: Application "kv-store" is published by several signers: ${listed}`);
+    }
+
+    const a = await s.json('select_app', { app: 'kv-a' });
+    const b = await s.json('select_app', { app: 'kv-b' });
+    assert.deepEqual([a.context, a.tools.at(-1), b.context, b.tools.at(-1)], [ctx('ctxa'), 'kv_store_set', ctx('ctxb'), 'kv_store_kvb_set']);
+    for (const [tool, handle] of [['kv_store_kvb_set', a.app_handle], ['kv_store_set', b.app_handle]]) {
+      const crossed = await s.call(tool, { app_handle: handle, key: 'k' });
+      assert.equal(crossed.isError, true);
+    }
+    // A planning handle names no context, so only the bound signer can tell the tool it is for the other app.
+    const planning = (await s.json('describe_app', { app: 'kv-a' })).app_handle;
+    assert.equal((await s.call('kv_store_kvb_set', { app_handle: planning, key: 'k' })).content.at(-1)!.text, RETRY);
+    const viaCall = await s.call('call', { app_handle: a.app_handle, method: 'set', args: { key: 'k' }, app: 'kv-b' });
+    assert.equal(viaCall.isError, true);
+    assert.deepEqual(s.executed, []);
+
+    await s.call('kv_store_kvb_set', { app_handle: b.app_handle, key: 'k' });
+    await s.call('call', { app_handle: a.app_handle, method: 'set', args: { key: 'k' } });
+    assert.deepEqual(s.executed, [
+      { contextId: ctx('ctxb'), method: 'set', argsJson: { key: 'k' } },
+      { contextId: ctx('ctxa'), method: 'set', argsJson: { key: 'k' } },
+    ]);
+  } finally {
+    await s.close();
+  }
+});
+
+test("select_app refuses a context of another app, by id or alias, naming the app's own contexts", async () => {
+  const s = await setup([kv(), plain()], '2025-11-25', { aliases: { theirs: ctx('notesctx') } });
+  try {
+    for (const context of [ctx('notesctx'), 'theirs']) {
+      const res = await s.call('select_app', { app: 'kv-store', context });
+      assert.equal(res.isError, true);
+      assert.equal(res.content[0].text, `Error: Context "${context}" does not belong to "kv-store". Contexts for "kv-store": ${ctx('kvctx')}`);
+    }
+  } finally {
+    await s.close();
+  }
+});
+
+test('two packages that sanitise to one slug are told apart by app id, and an app with no package is named by its id', async () => {
+  const twin: FakeApp = { ...plain(), id: 'twin-id', package: 'org.example.kv_store', abi: manifest([method('ping')]) };
+  const bare: FakeApp = { ...plain(), id: 'RawApp42', package: undefined, metadata: undefined, abi: manifest([method('ping')]) };
+  const s = await setup([kv(), twin, bare]);
+  try {
+    const tools = (await s.client.listTools()).tools;
+    const names = tools.map((t) => t.name);
+    assert.ok(names.includes('kv_store_set') && names.includes('kv_store_twinid_ping') && names.includes('rawapp42_ping'));
+    assert.equal(tools.find((t) => t.name === 'rawapp42_ping')!.title, 'Ping (RawApp42)');
+  } finally {
+    await s.close();
+  }
+});
+
+test('select_app with no context says how to get one, and marks its tool names as the ones a client may prefix', async () => {
+  const s = await setup([{ ...kv(), contexts: [] }]);
+  try {
+    const summary = await s.json('select_app', { app: 'kv-store' });
+    assert.equal(summary.context, null);
+    assert.equal(
+      summary.note,
+      'Application "kv-store" has no contexts on this node. Create one in the Calimero desktop app, or use create_context.',
+    );
+    assert.deepEqual(summary.tools, ['kv_store_get', 'kv_store_set']);
+    assert.match(summary.toolsNote, /mcp__<server>__<tool>/);
+  } finally {
+    await s.close();
+  }
+});
+
+test('a context that is neither an id nor an alias is named with the candidates, and only a resolved alias is remembered', async () => {
+  const s = await setup([kv()], '2025-11-25', { aliases: { core: ctx('kvctx') } });
   const lookups: string[] = [];
-  const session = {
-    url: 'http://localhost:2528',
-    nodeName: 'test',
-    authMode: 'none',
-    mero: {
-      admin: {
-        listApplications: async () => ({ apps }),
-        getApplication: async (id: string) => ({ application: apps.find((a) => a.id === id) ?? null }),
-        getApplicationAbi: async (id: string) => abis[id],
-        getContextsForApplication: async (id: string) => ({
-          contexts: (opts.contexts?.[id] ?? [ctx('ctxone')]).map((c) => (typeof c === 'string' ? { id: c } : c)),
-        }),
-        // Mirrors core: a miss is a 200 carrying a null value, not a throw.
-        lookupContextAlias: async (name: string) => {
-          lookups.push(name);
-          return { value: opts.aliases?.[name] ?? null };
-        },
-      },
-      rpc: {
-        execute: async (params: Record<string, unknown>) => {
-          executed.push(params);
-          return { ok: true };
-        },
-      },
-    },
-  } as unknown as NodeSession;
-  return { session, executed, lookups };
-}
-
-function setup(opts: Parameters<typeof fakeSession>[0] = {}) {
-  const srv = fakeServer();
-  const { session, executed, lookups } = fakeSession(opts);
-  registerAppTools(srv.server, session, CFG);
-  return { ...srv, executed, lookups };
-}
-
-const text = (res: ToolResult) => res.content[0].text;
-
-test('the fixed tools register before anything is selected', () => {
-  const { names } = setup();
-  assert.deepEqual(names(), FIXED);
+  const admin = s.session.mero.admin as { lookupContextAlias: (name: string) => Promise<unknown> };
+  const lookup = admin.lookupContextAlias;
+  admin.lookupContextAlias = (name) => (lookups.push(name), lookup(name));
+  try {
+    const missing = await s.call('select_app', { app: 'kv-store', context: 'nope' });
+    assert.equal(missing.isError, true);
+    assert.equal(
+      missing.content[0].text,
+      `Error: Context "nope" not found: it is neither a context id nor an alias on this node. Contexts for "kv-store": ${ctx('kvctx')}`,
+    );
+    await s.call('select_app', { app: 'kv-store', context: 'nope' });
+    await s.call('select_app', { app: 'kv-store', context: 'core' });
+    await s.call('select_app', { app: 'kv-store', context: 'core' });
+    await s.call('select_app', { app: 'kv-store', context: ctx('kvctx') });
+    assert.deepEqual(lookups, ['nope', 'nope', 'core']);
+  } finally {
+    await s.close();
+  }
 });
 
-test('describe_app returns the signatures and identity without selecting', async () => {
-  const { call, names } = setup();
-  const described = JSON.parse(text(await call('describe_app', { app: 'kv-store' })));
-  assert.deepEqual(described.methods, ['[view] get(key: string) -> unit', '[mut] set(key: string) -> unit']);
-  assert.deepEqual(
-    { application: described.application, package: described.package, version: described.version, service: described.service },
-    { application: 'kv-id', package: 'com.calimero.kv-store', version: '0.1.0', service: null },
-  );
-  assert.deepEqual(names(), FIXED);
+test('call on an unknown method lists what the app exposes, and runs nothing', async () => {
+  const s = await setup();
+  try {
+    const { app_handle } = await s.json('select_app', { app: 'kv-store' });
+    const res = await s.call('call', { app_handle, method: 'nope' });
+    assert.equal(res.isError, true);
+    assert.equal(res.content[0].text, 'Error: Method "nope" not found on "com.calimero.kv-store". Available: set, get');
+    assert.deepEqual(s.executed, []);
+  } finally {
+    await s.close();
+  }
 });
 
-test('select_app registers one tool per ABI method, prefixed by the package name', async () => {
-  const { call, names } = setup();
-  const summary = JSON.parse(text(await call('select_app', { app: 'kv-store' })));
-  assert.deepEqual(names(), [...FIXED, 'kv_store_get', 'kv_store_set']);
-  assert.deepEqual(summary.tools, ['kv_store_get', 'kv_store_set']);
-  assert.equal(summary.context, ctx('ctxone'));
-});
-
-test('an application with no package falls back to its id for the prefix', async () => {
-  const { call, names } = setup();
-  const summary = JSON.parse(text(await call('select_app', { app: 'RawApp42' })));
-  assert.deepEqual(summary.tools, ['rawapp42_ping']);
-  assert.deepEqual(names(), [...FIXED, 'rawapp42_ping']);
-});
-
-test('a named service prefixes the tool names', async () => {
-  const { call, names } = setup();
-  await call('select_app', { app: 'kv-store', service: 'api' });
-  assert.ok(names().includes('kv_store_api_get'));
-});
-
-test('readOnlyHint marks view methods only', async () => {
-  const { call, config } = setup();
-  await call('select_app', { app: 'kv-store' });
-  assert.deepEqual(config('kv_store_get').annotations, { readOnlyHint: true });
-  assert.equal(config('kv_store_set').annotations, undefined);
-});
-
-test('two applications stay selected at once, each with its own tools and schema', async () => {
-  const { call, names, config } = setup();
-  await call('select_app', { app: 'kv-store' });
-  const summary = JSON.parse(text(await call('select_app', { app: 'notes' })));
-  assert.deepEqual(names(), [...FIXED, 'kv_store_get', 'kv_store_set', 'notes_add', 'notes_get']);
-  assert.deepEqual(Object.keys(config('kv_store_set').inputSchema!), ['_context', 'key']);
-  assert.deepEqual(Object.keys(config('notes_add').inputSchema!), ['_context', 'body']);
-  assert.deepEqual(
-    summary.selected.map((s: { application: string; context: string }) => [s.application, s.context]),
-    [['kv-id', ctx('ctxone')], ['notes-id', ctx('ctxone')]],
-  );
-  assert.equal(summary.toolCount, 4);
-  assert.equal(summary.warning, undefined);
-});
-
-test('two applications declaring the same method get distinct tools that reach their own app', async () => {
-  const { call, names, executed } = setup({ contexts: { 'kv-id': [ctx('kvctx')], 'notes-id': [ctx('notesctx')] } });
-  await call('select_app', { app: 'kv-store' });
-  await call('select_app', { app: 'notes' });
-  assert.ok(names().includes('kv_store_get') && names().includes('notes_get'));
-  await call('kv_store_get', { key: 'k' });
-  await call('notes_get', { id: '7' });
-  assert.deepEqual(executed, [
-    { contextId: ctx('kvctx'), method: 'get', argsJson: { key: 'k' } },
-    { contextId: ctx('notesctx'), method: 'get', argsJson: { id: '7' } },
+test('describe_app reads the service from contexts, and says when none can be read', async () => {
+  const s = await setup([
+    { ...kv(), contexts: [{ id: ctx('kvctx'), serviceName: 'issue-tracker' }] },
+    { ...plain(), contexts: [] },
   ]);
+  try {
+    const kvDescribed = await s.json('describe_app', { app: 'kv-store' });
+    assert.equal(kvDescribed.service, 'issue-tracker');
+    assert.deepEqual(kvDescribed.contextServices, ['issue-tracker']);
+    assert.equal(kvDescribed.serviceNote, undefined);
+    const notesDescribed = await s.json('describe_app', { app: 'notes' });
+    assert.equal(notesDescribed.service, null);
+    assert.match(notesDescribed.serviceNote, /^Not discoverable: a node exposes no service list/);
+  } finally {
+    await s.close();
+  }
 });
 
-test('two packages that sanitise to one prefix are disambiguated by application id', async () => {
-  const { call, names } = setup();
-  await call('select_app', { app: 'kv-store' });
-  const twin = JSON.parse(text(await call('select_app', { app: 'kv_store' })));
-  assert.deepEqual(twin.tools, ['kv_store_twinid_ping']);
-  assert.deepEqual(names(), [...FIXED, 'kv_store_get', 'kv_store_set', 'kv_store_twinid_ping']);
+test('a method with its own app_handle parameter gets no generated tool and is reached through call', async (t) => {
+  const logged = t.mock.method(console, 'error', () => {});
+  const app: FakeApp = {
+    ...plain(),
+    abi: manifest([method('ping'), method('store', [{ name: 'app_handle', type: { kind: 'string' } }])]),
+  };
+  const s = await setup([app]);
+  try {
+    const names = (await s.client.listTools()).tools.map((t) => t.name);
+    assert.ok(names.includes('notes_ping'));
+    assert.ok(!names.includes('notes_store'));
+    const lines = logged.mock.calls.map((c) => c.arguments.join(' '));
+    assert.ok(
+      lines.includes('[mero-mcp] no tool for org.example.notes 0.2.0 store: its app_handle parameter would collide; use call'),
+      `stderr was: ${JSON.stringify(lines)}`,
+    );
+
+    const { app_handle, tools } = await s.json('select_app', { app: 'notes' });
+    assert.deepEqual(tools, ['notes_ping']);
+    await s.call('call', { app_handle, method: 'store', args: { app_handle: 'x' } });
+    assert.deepEqual(s.executed, [{ contextId: ctx('notesctx'), method: 'store', argsJson: { app_handle: 'x' } }]);
+
+    // An in-place upgrade that gives ping an app_handle parameter must not run it through the old tool.
+    Object.assign(s.apps[0], { version: '0.3.0', abi: manifest([method('ping', [{ name: 'app_handle', type: { kind: 'string' } }])]) });
+    const refused = await s.call('notes_ping', { app_handle });
+    assert.equal(refused.isError, true);
+    assert.equal(s.executed.length, 1);
+  } finally {
+    await s.close();
+  }
 });
 
-test('re-selecting an application refreshes its tools instead of duplicating them', async () => {
-  const { call, names, removed } = setup();
-  await call('select_app', { app: 'kv-store' });
-  const again = JSON.parse(text(await call('select_app', { app: 'kv-store' })));
-  assert.deepEqual(removed, ['kv_store_get', 'kv_store_set']);
-  assert.deepEqual(names(), [...FIXED, 'kv_store_get', 'kv_store_set']);
-  assert.deepEqual(again.tools, ['kv_store_get', 'kv_store_set']);
-  assert.equal(again.selected.length, 1);
-  assert.equal(again.toolCount, 2);
+const tiny = (id: string, pkg: string, methods: string[]): FakeApp => ({
+  id,
+  package: pkg,
+  version: '1.0.0',
+  abi: manifest(methods.map((m) => method(m))),
+  contexts: [ctx(id.replace(/[^1-9A-HJ-NP-Za-km-z]/g, ''))],
 });
 
-test('deselect_app removes one application and leaves the other registered and callable', async () => {
-  const { call, names, removed, executed } = setup({ contexts: { 'notes-id': [ctx('notesctx')] } });
-  await call('select_app', { app: 'kv-store' });
-  await call('select_app', { app: 'notes' });
-  const res = JSON.parse(text(await call('deselect_app', { app: 'kv-store' })));
-  assert.deepEqual(removed, ['kv_store_get', 'kv_store_set']);
-  assert.deepEqual(names(), [...FIXED, 'notes_add', 'notes_get']);
-  assert.deepEqual(res.selected.map((s: { application: string }) => s.application), ['notes-id']);
-  assert.equal(res.toolCount, 2);
-  await call('notes_add', { body: 'hi' });
-  assert.deepEqual(executed, [{ contextId: ctx('notesctx'), method: 'add', argsJson: { body: 'hi' } }]);
+test('a generated name that equals a built-in tool is disambiguated, and the server still connects', async () => {
+  const s = await setup([tiny('nodeapp-id', 'com.x.node', ['status'])]);
+  try {
+    const names = (await s.client.listTools()).tools.map((t) => t.name);
+    assert.equal(names.filter((n) => n === 'node_status').length, 1);
+    assert.ok(names.includes('node_nodeap_status'));
+    const { app_handle, tools } = await s.json('select_app', { app: 'node' });
+    assert.deepEqual(tools, ['node_nodeap_status']);
+    await s.call('node_nodeap_status', { app_handle });
+    assert.equal(s.executed[0].method, 'status');
+  } finally {
+    await s.close();
+  }
 });
 
-test('deselect_app on an application that is not selected says which ones are', async () => {
-  const { call } = setup();
-  await call('select_app', { app: 'kv-store' });
-  const res = await call('deselect_app', { app: 'notes' });
-  assert.equal(res.isError, true);
-  assert.match(text(res), /"notes" is not selected\. Selected: kv-store/);
+test("two apps whose names meet keep one tool each, and each reaches its own app", async () => {
+  const s = await setup([tiny('a-id', 'com.x.kv', ['store_get']), tiny('b-id', 'com.y.kv-store', ['get'])]);
+  try {
+    const names = (await s.client.listTools()).tools.map((t) => t.name);
+    assert.ok(names.includes('kv_store_get') && names.includes('kv_store_bid_get'), JSON.stringify(names));
+    const kvStore = await s.json('select_app', { app: 'com.y.kv-store' });
+    assert.deepEqual(kvStore.tools, ['kv_store_bid_get']);
+    await s.call('kv_store_bid_get', { app_handle: kvStore.app_handle });
+    const kvApp = await s.json('select_app', { app: 'com.x.kv' });
+    await s.call('kv_store_get', { app_handle: kvApp.app_handle });
+    assert.deepEqual(s.executed.map((e) => e.method), ['get', 'store_get']);
+  } finally {
+    await s.close();
+  }
 });
 
-test('past the tool-count threshold select_app warns but still registers', async () => {
-  const many = manifest(Array.from({ length: 81 }, (_, i) => method(`m${i}`)));
-  const { call, names } = setup({ abis: { ...ABIS, 'kv-id': many } });
-  const summary = JSON.parse(text(await call('select_app', { app: 'kv-store' })));
-  assert.equal(summary.toolCount, 81);
-  assert.match(summary.warning, /81 application tools/);
-  assert.ok(names().includes('kv_store_m80'));
+test('an install whose tool name meets an existing one registers both, and the list keeps working', async () => {
+  const s = await setup([tiny('a-id', 'com.x.kv', ['store_get', 'ping'])]);
+  Object.assign(s.session.mero.admin, {
+    installApplication: async () => (s.apps.push(tiny('b-id', 'com.y.kv-store', ['get'])), { applicationId: 'b-id' }),
+  });
+  try {
+    const installed = await s.call('install_application', { coords: 'com.y.kv-store@1.0.0' });
+    assert.equal(installed.isError, undefined);
+    const names = (await s.client.listTools()).tools.map((t) => t.name);
+    assert.ok(['kv_store_get', 'kv_ping', 'kv_store_bid_get'].every((n) => names.includes(n)), JSON.stringify(names));
+    const { app_handle } = await s.json('select_app', { app: 'com.y.kv-store' });
+    await s.call('kv_store_bid_get', { app_handle });
+    assert.deepEqual(s.executed.map((e) => e.method), ['get']);
+  } finally {
+    await s.close();
+  }
 });
 
-test('node_status reports every selected application and its own pinned context', async () => {
-  const { call } = setup({ contexts: { 'kv-id': [ctx('kvctx')], 'notes-id': [ctx('notesctx')] } });
-  await call('select_app', { app: 'kv-store' });
-  await call('select_app', { app: 'notes' });
-  assert.deepEqual(getSelection().selected, [
-    { application: 'kv-id', package: 'com.calimero.kv-store', service: null, context: ctx('kvctx'), tools: 2 },
-    { application: 'notes-id', package: 'notes', service: null, context: ctx('notesctx'), tools: 2 },
-  ]);
+const solo = (): FakeApp => ({
+  id: 'solo-id',
+  package: 'com.x.solo',
+  version: '1.0.0',
+  signer_id: 'SignerKey4',
+  metadata: { name: 'Solo' },
+  abi: undefined,
+  services: { main: manifest([method('ping')]) },
+  contexts: [ctx('soloctx')],
 });
 
-test('an argument that violates the derived schema never reaches rpc.execute', async () => {
-  const { call, executed } = setup();
-  await call('select_app', { app: 'kv-store' });
-  const res = await call('kv_store_set', { key: 42 });
-  assert.equal(res.isError, true);
-  assert.deepEqual(executed, []);
+test('a context created without a service name belongs to the one service of a single-service bundle', async () => {
+  const s = await setup([solo()]);
+  try {
+    assert.equal((await s.json('describe_app', { app: 'solo' })).service, 'main');
+    const selected = await s.json('select_app', { app: 'solo' });
+    assert.deepEqual([selected.service, selected.context, selected.tools], ['main', ctx('soloctx'), ['solo_main_ping']]);
+    const viaTool = await s.call('solo_main_ping', { app_handle: selected.app_handle });
+    assert.equal(viaTool.isError, undefined);
+    await s.call('call', { app_handle: selected.app_handle, method: 'ping' });
+    assert.deepEqual(s.executed, [
+      { contextId: ctx('soloctx'), method: 'ping', argsJson: {} },
+      { contextId: ctx('soloctx'), method: 'ping', argsJson: {} },
+    ]);
+  } finally {
+    await s.close();
+  }
 });
 
-test('a valid call reaches rpc.execute with exactly contextId, method and argsJson', async () => {
-  const { call, executed } = setup();
-  await call('select_app', { app: 'kv-store' });
-  await call('kv_store_set', { key: 'k' });
-  assert.deepEqual(executed, [{ contextId: ctx('ctxone'), method: 'set', argsJson: { key: 'k' } }]);
-  assert.deepEqual(Object.keys(executed[0]), ['contextId', 'method', 'argsJson']);
-});
+for (const entry of ['select_app', 'describe_app', 'call'] as const) {
+  test(`${entry} on a node that was down at connect brings up its app tools and starts the poll`, async (t) => {
+    const logged = t.mock.method(console, 'error', () => {});
+    t.mock.timers.enable({ apis: ['setInterval'] });
+    const node = fakeNode([kv()]);
+    const admin = node.session.mero.admin as { listApplications: () => Promise<unknown> };
+    const list = admin.listApplications;
+    let down = true;
+    let lists = 0;
+    admin.listApplications = async () => {
+      lists++;
+      if (down) throw new Error('connection refused');
+      return list();
+    };
+    const { client, close } = await connect(createServerFactory(node.session, CFG));
+    try {
+      assert.match(String(logged.mock.calls[0]?.arguments[0]), /app list unavailable at connect/);
+      down = false;
+      const handle = handles.issue({ a: 'kv-id', p: 'com.calimero.kv-store', v: '1.0.0', g: guideHash(GUIDE), c: ctx('kvctx'), s: null });
+      const args = entry === 'call' ? { app_handle: handle, method: 'set', args: { key: 'k' } } : { app: 'kv-store' };
+      const res = (await client.callTool({ name: entry, arguments: args })) as { isError?: boolean; content: Array<{ text?: string }> };
+      assert.equal(res.isError, undefined, res.content[0].text);
+      if (entry === 'select_app') assert.deepEqual(JSON.parse(res.content[0].text!).tools, ['kv_store_get', 'kv_store_set']);
+      assert.ok((await client.listTools()).tools.some((tool) => tool.name === 'kv_store_set'));
 
-test('an explicit context beats the pinned one', async () => {
-  const { call, executed } = setup({ contexts: { 'kv-id': [ctx('ctxa'), ctx('ctxb')] } });
-  await call('select_app', { app: 'kv-store', context: ctx('ctxpinned') });
-  await call('kv_store_set', { key: 'k' });
-  await call('kv_store_set', { key: 'k', _context: ctx('ctxdirect') });
-  assert.deepEqual(executed.map((e) => e.contextId), [ctx('ctxpinned'), ctx('ctxdirect')]);
-});
-
-test('with several contexts and no pin, the error lists the candidates', async () => {
-  const ids = [ctx('ctxa'), ctx('ctxb'), ctx('ctxc')];
-  const { call, executed } = setup({ contexts: { 'kv-id': ids } });
-  const summary = JSON.parse(text(await call('select_app', { app: 'kv-store' })));
-  assert.equal(summary.context, null);
-  assert.equal(summary.note, `Application "kv-store" has 3 contexts; pass context with one of: ${ids.join(', ')}`);
-
-  const res = await call('kv_store_set', { key: 'k' });
-  assert.equal(res.isError, true);
-  assert.ok(text(res).includes(ids.join(', ')));
-  assert.deepEqual(executed, []);
-});
-
-test('with zero contexts the message points at the desktop app and create_context', async () => {
-  const { call } = setup({ contexts: { 'kv-id': [] } });
-  const summary = JSON.parse(text(await call('select_app', { app: 'kv-store' })));
-  const expected =
-    'Application "kv-store" has no contexts on this node. Create one in the Calimero desktop app, or use create_context.';
-  assert.equal(summary.note, expected);
-  assert.equal(text(await call('kv_store_set', { key: 'k' })), `Error: ${expected}`);
-});
-
-test('the pin of the selected app does not leak into a call against another app', async () => {
-  const { call, executed } = setup({ contexts: { 'notes-id': [ctx('notesctx')] } });
-  await call('select_app', { app: 'kv-store', context: ctx('kvctx') });
-  await call('call', { app: 'notes', method: 'add', args: { body: 'hi' } });
-  assert.equal(executed[0].contextId, ctx('notesctx'));
-});
-
-test('a context pinned for one selected application is never used by another', async () => {
-  const ids = [ctx('na'), ctx('nb')];
-  const { call, executed } = setup({ contexts: { 'notes-id': ids } });
-  await call('select_app', { app: 'kv-store', context: ctx('kvctx') });
-  await call('select_app', { app: 'notes' });
-
-  const res = await call('notes_add', { body: 'hi' });
-  assert.equal(res.isError, true);
-  assert.equal(text(res), `Error: Application "notes" has 2 contexts; pass context with one of: ${ids.join(', ')}`);
-  assert.deepEqual(executed, []);
-
-  await call('kv_store_set', { key: 'k' });
-  assert.deepEqual(executed, [{ contextId: ctx('kvctx'), method: 'set', argsJson: { key: 'k' } }]);
-});
-
-test('_context targets a call on whichever selected application it is passed to', async () => {
-  const { call, executed } = setup({ contexts: { 'notes-id': [ctx('na'), ctx('nb')] } });
-  await call('select_app', { app: 'kv-store', context: ctx('kvctx') });
-  await call('select_app', { app: 'notes' });
-  await call('notes_add', { body: 'hi', _context: ctx('nb') });
-  await call('kv_store_set', { key: 'k', _context: ctx('kvother') });
-  assert.deepEqual(executed.map((e) => e.contextId), [ctx('nb'), ctx('kvother')]);
-});
-
-test('call without `app` while several are selected asks which one', async () => {
-  const { call } = setup();
-  await call('select_app', { app: 'kv-store' });
-  await call('select_app', { app: 'notes' });
-  const res = await call('call', { method: 'get', args: { key: 'k' } });
-  assert.equal(res.isError, true);
-  assert.match(text(res), /Several applications are selected \(kv-store, notes\); pass `app` to choose one/);
-});
-
-test('a method with a parameter named context still receives its own argument', async () => {
-  const abis = { 'kv-id': manifest([method('note', [{ name: 'context', type: 'string' }])]) };
-  const { call, executed } = setup({ abis, contexts: { 'kv-id': [ctx('ctxone')] } });
-  await call('select_app', { app: 'kv-store' });
-  await call('kv_store_note', { context: 'the app owns this' });
-  assert.deepEqual(executed, [{ contextId: ctx('ctxone'), method: 'note', argsJson: { context: 'the app owns this' } }]);
-});
-
-test('a method with a parameter named context can still be targeted with _context', async () => {
-  const abis = { 'kv-id': manifest([method('note', [{ name: 'context', type: 'string' }])]) };
-  const { call, executed } = setup({ abis, contexts: { 'kv-id': [ctx('ctxa'), ctx('ctxb')] } });
-  await call('select_app', { app: 'kv-store', context: ctx('ctxpinned') });
-  await call('kv_store_note', { context: 'the app owns this', _context: ctx('ctxdirect') });
-  // The option targets the call and never reaches the app; the param reaches the app and never targets the call.
-  assert.deepEqual(executed, [{ contextId: ctx('ctxdirect'), method: 'note', argsJson: { context: 'the app owns this' } }]);
-});
-
-test('call validates against the same derived schema', async () => {
-  const { call, executed } = setup();
-  await call('select_app', { app: 'kv-store' });
-  const res = await call('call', { method: 'set', args: { key: 42 } });
-  assert.equal(res.isError, true);
-  assert.deepEqual(executed, []);
-});
-
-test('call reaches the same method as the dynamic tool', async () => {
-  const { call, executed } = setup();
-  await call('select_app', { app: 'kv-store' });
-  await call('call', { method: 'set', args: { key: 'k' }, context: ctx('ctxdirect') });
-  assert.deepEqual(executed, [{ contextId: ctx('ctxdirect'), method: 'set', argsJson: { key: 'k' } }]);
-});
-
-test('call without a selection says how to get one', async () => {
-  const { call } = setup();
-  const res = await call('call', { method: 'set', args: { key: 'k' } });
-  assert.equal(res.isError, true);
-  assert.match(text(res), /Pass `app`, or run select_app first/);
-});
-
-test('call on an unknown method lists what the app exposes', async () => {
-  const { call } = setup();
-  const res = await call('call', { app: 'kv-store', method: 'nope' });
-  assert.match(text(res), /Method "nope" not found on "kv-store"\. Available: get, set/);
-});
-
-test('an alias passed as _context resolves, and the call reaches that context', async () => {
-  const contexts = { 'kv-id': [ctx('kvctx'), ctx('kvtwo')] };
-  const { call, executed } = setup({ contexts, aliases: { core: ctx('kvctx') } });
-  await call('select_app', { app: 'kv-store', context: ctx('kvtwo') });
-  await call('kv_store_set', { key: 'k', _context: 'core' });
-  assert.deepEqual(executed, [{ contextId: ctx('kvctx'), method: 'set', argsJson: { key: 'k' } }]);
-});
-
-test("call's context option resolves an alias too", async () => {
-  const { call, executed } = setup({ aliases: { work: ctx('kvctx') } });
-  await call('select_app', { app: 'kv-store' });
-  await call('call', { method: 'set', args: { key: 'k' }, context: 'work' });
-  assert.deepEqual(executed, [{ contextId: ctx('kvctx'), method: 'set', argsJson: { key: 'k' } }]);
-});
-
-test('a context id is used as passed, without an alias lookup', async () => {
-  const { call, executed, lookups } = setup();
-  await call('select_app', { app: 'kv-store' });
-  await call('kv_store_set', { key: 'k', _context: ctx('kvraw') });
-  assert.deepEqual(executed, [{ contextId: ctx('kvraw'), method: 'set', argsJson: { key: 'k' } }]);
-  assert.deepEqual(lookups, []);
-});
-
-test('a context that is neither an id nor an alias names it and lists the candidates', async () => {
-  const ids = [ctx('kvctx'), ctx('kvtwo')];
-  const { call, executed } = setup({ contexts: { 'kv-id': ids } });
-  await call('select_app', { app: 'kv-store', context: ctx('kvctx') });
-  const res = await call('kv_store_set', { key: 'k', _context: 'core' });
-  assert.equal(res.isError, true);
-  assert.equal(
-    text(res),
-    `Error: Context "core" not found: it is neither a context id nor an alias on this node. ` +
-      `Contexts for "kv-store": ${ids.join(', ')}`,
-  );
-  assert.deepEqual(executed, []);
-});
-
-test('a resolved alias is looked up once, and a failed resolution is never remembered', async () => {
-  const { call, lookups } = setup({ aliases: { core: ctx('kvctx') } });
-  await call('select_app', { app: 'kv-store' });
-  await call('kv_store_set', { key: 'k', _context: 'core' });
-  await call('kv_store_set', { key: 'k', _context: 'core' });
-  assert.deepEqual(lookups, ['core']);
-
-  assert.equal((await call('kv_store_set', { key: 'k', _context: 'nope' })).isError, true);
-  assert.equal((await call('kv_store_set', { key: 'k', _context: 'nope' })).isError, true);
-  assert.deepEqual(lookups, ['core', 'nope', 'nope']);
-});
-
-test('select_app pins an alias by the context id it resolves to', async () => {
-  const contexts = { 'kv-id': [ctx('kvctx'), ctx('kvtwo')] };
-  const { call, executed } = setup({ contexts, aliases: { core: ctx('kvctx') } });
-  const summary = JSON.parse(text(await call('select_app', { app: 'kv-store', context: 'core' })));
-  assert.equal(summary.context, ctx('kvctx'));
-  assert.equal(getSelection().selected[0].context, ctx('kvctx'));
-  await call('kv_store_set', { key: 'k' });
-  assert.deepEqual(executed, [{ contextId: ctx('kvctx'), method: 'set', argsJson: { key: 'k' } }]);
-});
-
-test('a pin that resolves to nothing leaves the selection it would have replaced alone', async () => {
-  const { call, names, removed } = setup();
-  await call('select_app', { app: 'kv-store' });
-  const res = await call('select_app', { app: 'kv-store', context: 'nope' });
-  assert.equal(res.isError, true);
-  assert.deepEqual(removed, []);
-  assert.deepEqual(names(), [...FIXED, 'kv_store_get', 'kv_store_set']);
-  assert.equal(getSelection().selected[0].context, ctx('ctxone'));
-});
-
-test('describe_app reports the service name its contexts carry', async () => {
-  const { call } = setup({ contexts: { 'kv-id': [{ id: ctx('kvctx'), serviceName: 'issue-tracker' }] } });
-  const described = JSON.parse(text(await call('describe_app', { app: 'kv-store' })));
-  assert.equal(described.service, 'issue-tracker');
-  assert.deepEqual(described.contextServices, ['issue-tracker']);
-  assert.equal(described.serviceNote, undefined);
-});
-
-test('describe_app lists every service in use and names none when the contexts disagree', async () => {
-  const contexts = [{ id: ctx('kvctx'), serviceName: 'api' }, { id: ctx('kvtwo'), serviceName: 'worker' }];
-  const { call } = setup({ contexts: { 'kv-id': contexts } });
-  const described = JSON.parse(text(await call('describe_app', { app: 'kv-store' })));
-  assert.equal(described.service, null);
-  assert.deepEqual(described.contextServices, ['api', 'worker']);
-});
-
-test('describe_app says a service name is not discoverable when no context carries one', async () => {
-  const { call } = setup({ contexts: { 'kv-id': [] } });
-  const described = JSON.parse(text(await call('describe_app', { app: 'kv-store' })));
-  assert.equal(described.service, null);
-  assert.deepEqual(described.contextServices, []);
-  assert.match(described.serviceNote, /^Not discoverable: a node exposes no service list/);
-});
-
-test('a requested service is reported even with no context to confirm it', async () => {
-  const { call } = setup({ contexts: { 'kv-id': [] } });
-  const described = JSON.parse(text(await call('describe_app', { app: 'kv-store', service: 'api' })));
-  assert.equal(described.service, 'api');
-  assert.equal(described.serviceNote, undefined);
-});
-
-test('select_app marks its tool names as the server-side ones a client may prefix', async () => {
-  const { call } = setup();
-  const summary = JSON.parse(text(await call('select_app', { app: 'kv-store' })));
-  assert.deepEqual(summary.tools, ['kv_store_get', 'kv_store_set']);
-  assert.match(summary.toolsNote, /server-side tool names/);
-  assert.match(summary.toolsNote, /mcp__<server>__<tool>/);
-});
+      const before = lists;
+      t.mock.timers.tick(WATCH_INTERVAL_MS);
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(lists, before + 1);
+    } finally {
+      await close();
+    }
+  });
+}

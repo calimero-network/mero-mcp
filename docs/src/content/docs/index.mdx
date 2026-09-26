@@ -52,10 +52,9 @@ It registers two kinds of tools:
 - **Fixed tools** for the node itself — `node_status`, `list_contexts`,
   `create_context`, `install_application`, `create_namespace` and the rest,
   grouped into [toolsets](/reference/configuration/#toolsets) you can trim.
-- **Generated tools**, one per method of any application you point it at. Run
-  `select_app` and the server fetches that application's ABI from the node,
-  turns each method into an MCP tool with a real JSON Schema for its arguments,
-  and registers it for the life of the process.
+- **Generated tools**, one per method of every installed application.
+  The server reads each application's ABI from the node and turns each method into an MCP tool with a real JSON Schema for its arguments.
+  `select_app` returns the app's guide and the `app_handle` every one of those tools requires.
 
 That second part is the reason this exists. An agent holding
 `kv_store_set(key: string, value: string)` with a validated schema does not have

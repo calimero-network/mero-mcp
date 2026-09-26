@@ -27,7 +27,7 @@ import {
   toolText,
 } from './e2e-lib.mjs';
 
-const PLANNED = 16;
+const PLANNED = 17;
 
 const { values: opts } = parseArgs({
   options: { node: { type: 'string' }, app: { type: 'string' } },
@@ -120,10 +120,9 @@ async function runChecks({ checks, mcp, api, kv, second }) {
     return `protocol ${res.protocolVersion}, serverInfo ${res.serverInfo?.name}@${res.serverInfo?.version}`;
   });
 
-  await checks.check('tools/list before any select carries no application tools', async () => {
+  await checks.check('tools/list carries every installed app method before any select', async () => {
     before = await mcp.listTools();
-    assert(before.length > 0, 'tools/list is empty');
-    for (const fixed of ['node_status', 'describe_app', 'select_app', 'deselect_app', 'call']) {
+    for (const fixed of ['node_status', 'describe_app', 'select_app', 'call']) {
       assert(
         before.some((t) => t.name === fixed),
         `the fixed toolset is missing ${fixed}`,
@@ -132,10 +131,10 @@ async function runChecks({ checks, mcp, api, kv, second }) {
     if (kv.abi) {
       for (const m of kv.abi.methods) {
         const name = kvToolName(kv.slug, m.name);
-        assert(!before.some((t) => t.name === name), `${name} is registered before select_app ran`);
+        assert(before.some((t) => t.name === name), `${name} is not listed although ${kv.name} is installed`);
       }
     }
-    return `${before.length} fixed tools, none derived from an application`;
+    return `${before.length} tools, the app tools listed without a select`;
   });
 
   await checks.check('every advertised tool carries a valid JSON Schema object', () => {
@@ -148,24 +147,23 @@ async function runChecks({ checks, mcp, api, kv, second }) {
   });
 
   let selected;
-  await checks.check('select_app derives one tool per ABI method', async () => {
+  await checks.check('select_app returns an app_handle and names the app tools', async () => {
     selected = await mcp.call('select_app', { app: kv.name });
-    assert(Array.isArray(selected.tools), `select_app returned no tool list: ${JSON.stringify(selected).slice(0, 200)}`);
+    assert(typeof selected.app_handle === 'string' && selected.app_handle.includes('.'), `select_app returned no app_handle: ${JSON.stringify(selected).slice(0, 200)}`);
     if (kv.abi) {
       const expected = kv.abi.methods.map((m) => kvToolName(kv.slug, m.name)).sort();
-      assertEqual([...selected.tools].sort(), expected, 'the registered tools do not match the ABI read out of band');
+      assertEqual([...selected.tools].sort(), expected, 'the named tools do not match the ABI read out of band');
       return `${expected.length} methods from the node's own ABI`;
     }
     assertEqual(selected.tools.length, selected.methods.length, 'select_app reported a different number of tools than methods');
     return `${selected.tools.length} methods (self-reported: no out-of-band ABI on a foreign node)`;
   });
 
-  await checks.check('tools/list after select gained exactly those tools', async () => {
+  await checks.check('select_app leaves tools/list exactly as it was', async () => {
     const after = await mcp.listTools();
-    const gained = after.filter((t) => !before.some((b) => b.name === t.name)).map((t) => t.name).sort();
-    assertEqual(gained, [...selected.tools].sort(), 'tools/list does not reflect what select_app reported');
+    assertEqual(after.map((t) => t.name), before.map((t) => t.name), 'selecting an app changed the tool list');
     for (const t of after) assertEqual(t.inputSchema?.type, 'object', `${t.name} inputSchema is not an object schema`);
-    return `${before.length} -> ${after.length} tools`;
+    return `${after.length} tools, unchanged`;
   });
 
   if (!api) {
@@ -176,6 +174,7 @@ async function runChecks({ checks, mcp, api, kv, second }) {
       'a schema-violating argument is a validation error and changes nothing',
       "a real node rejection carries the node's own message, not a bare status line",
       "a plain-text node rejection also carries the node's own message",
+      'a mutating tool without an app_handle is refused and changes nothing',
     ]) {
       checks.skip(label, FOREIGN);
     }
@@ -184,14 +183,14 @@ async function runChecks({ checks, mcp, api, kv, second }) {
       const tools = await mcp.listTools();
       const set = tools.find((t) => t.name === kvToolName(kv.slug, 'set'));
       assert(set, `${kvToolName(kv.slug, 'set')} is not registered`);
-      assertEqual(Object.keys(set.inputSchema.properties).sort(), ['_context', 'key', 'value'], 'set advertises the wrong properties');
-      assertEqual([...(set.inputSchema.required ?? [])].sort(), ['key', 'value'], 'set does not require exactly key and value');
-      return 'key and value, both required, plus the injected _context option';
+      assertEqual(Object.keys(set.inputSchema.properties).sort(), ['app_handle', 'key', 'value'], 'set advertises the wrong properties');
+      assertEqual([...(set.inputSchema.required ?? [])].sort(), ['app_handle', 'key', 'value'], 'set does not require exactly its handle, key and value');
+      return 'app_handle, key and value, all required';
     });
 
     await checks.check('a round trip through MCP is visible to a direct /jsonrpc read', async () => {
       const key = `mcp-${Date.now().toString(36)}`;
-      await mcp.call(kvToolName(kv.slug, 'set'), { key, value: 'written-over-mcp' });
+      await mcp.call(kvToolName(kv.slug, 'set'), { app_handle: selected.app_handle, key, value: 'written-over-mcp' });
       // Direct /jsonrpc, no MCP server involved: a no-op write answered by a cache would pass a set/get pair.
       const seen = await api.execute(kv.context, 'get', { key });
       assertEqual(seen, 'written-over-mcp', 'the value the node holds is not the value written over MCP');
@@ -200,7 +199,7 @@ async function runChecks({ checks, mcp, api, kv, second }) {
 
     await checks.check('the generic call tool reaches the same method', async () => {
       const key = `call-${Date.now().toString(36)}`;
-      await mcp.call('call', { method: 'set', args: { key, value: 'written-via-call' } });
+      await mcp.call('call', { app_handle: selected.app_handle, method: 'set', args: { key, value: 'written-via-call' } });
       const seen = await api.execute(kv.context, 'get', { key });
       assertEqual(seen, 'written-via-call', 'the call fallback did not reach the same method');
       return `${key} = ${seen}`;
@@ -210,16 +209,32 @@ async function runChecks({ checks, mcp, api, kv, second }) {
       const key = `guard-${Date.now().toString(36)}`;
       await api.execute(kv.context, 'set', { key, value: 'untouched' });
 
-      const msg = await mcp.callRaw(kvToolName(kv.slug, 'set'), { key, value: 123 });
+      const msg = await mcp.callRaw(kvToolName(kv.slug, 'set'), { app_handle: selected.app_handle, key, value: 123 });
       const text = toolText(msg);
       assert(msg.result?.isError, `a number for a string parameter was accepted: ${text}`);
-      // The SDK rejects before the handler runs, under its own fixed prefix; the server's node errors start `Error: `.
-      const prefix = `Input validation error: Invalid arguments for tool ${kvToolName(kv.slug, 'set')}: `;
-      assert(text.startsWith(prefix), `not the SDK's input validation error: ${text}`);
+      // The server validates after the handle check and reports zod's issue list, so the offending path is parseable.
+      const issues = JSON.parse(text.replace(/^Error: /, ''));
+      assertEqual(issues.map((i) => i.path.join('.')), ['value'], `not a validation error on value: ${text}`);
 
       const seen = await api.execute(kv.context, 'get', { key });
       assertEqual(seen, 'untouched', 'the rejected call still changed state');
-      return text.slice(0, 110);
+      return `rejected at ${issues[0].path.join('.')}: ${issues[0].message}`;
+    });
+
+    await checks.check('a mutating tool without an app_handle is refused and changes nothing', async () => {
+      const key = `nohandle-${Date.now().toString(36)}`;
+      await api.execute(kv.context, 'set', { key, value: 'untouched' });
+      for (const app_handle of [undefined, `${selected.app_handle.split('.')[0]}.AAAA`]) {
+        const msg = await mcp.callRaw(kvToolName(kv.slug, 'set'), { ...(app_handle ? { app_handle } : {}), key, value: 'must-not-land' });
+        assert(msg.result?.isError, `the call ran without a valid handle: ${toolText(msg)}`);
+        assertEqual(
+          msg.result.content.at(-1).text,
+          `Call select_app for ${selected.package} and retry with the returned app_handle.`,
+          'the refusal does not say how to get a handle',
+        );
+      }
+      assertEqual(await api.execute(kv.context, 'get', { key }), 'untouched', 'a refused call still changed state');
+      return 'missing and forged handles both refused; state unchanged';
     });
 
     // A real node rejection, not a fake in a unit test: core answers create_context with
@@ -258,8 +273,8 @@ async function runChecks({ checks, mcp, api, kv, second }) {
   if (!api) {
     for (const label of [
       'an application with no context names the desktop app and create_context',
-      'two applications can be selected at once, both toolsets present',
-      'with two applications selected each call reaches its own',
+      'two handles are held at once, each naming its own app',
+      'each handle routes its calls to its own app and context',
     ]) {
       checks.skip(label, FOREIGN);
     }
@@ -272,27 +287,24 @@ async function runChecks({ checks, mcp, api, kv, second }) {
         `Application "${second.name}" has no contexts on this node. Create one in the Calimero desktop app, or use create_context.`,
         'the no-context note is not the message desktop users need',
       );
-      await mcp.call('deselect_app', { app: second.name });
       return res.note;
     });
 
     second.context = await api.createContext(second.id, await api.createNamespace(second.id));
 
-    await checks.check('two applications can be selected at once, both toolsets present', async () => {
+    let secondHandle;
+    await checks.check('two handles are held at once, each naming its own app', async () => {
       const res = await mcp.call('select_app', { app: second.name });
-      assertEqual(res.selected.length, 2, 'the second select_app did not add to the selection');
-
-      const names = (await mcp.listTools()).map((t) => t.name);
-      const kvTools = kv.abi.methods.map((m) => kvToolName(kv.slug, m.name));
-      const secondTools = second.abi.methods.map((m) => kvToolName(second.slug, m.name));
-      for (const n of [...kvTools, ...secondTools]) assert(names.includes(n), `${n} is missing while two applications are selected`);
-      return `${kvTools.length} ${kv.slug}_* and ${secondTools.length} ${second.slug}_* tools registered together`;
+      secondHandle = res.app_handle;
+      assertEqual(res.context, second.context, 'the second app did not pin its only context');
+      assert(secondHandle !== selected.app_handle, 'two apps got the same handle');
+      return `${kv.slug} and ${second.slug} each hold a handle`;
     });
 
-    await checks.check('with two applications selected each call reaches its own', async () => {
+    await checks.check('each handle routes its calls to its own app and context', async () => {
       const key = `route-${Date.now().toString(36)}`;
-      await mcp.call(kvToolName(kv.slug, 'set'), { key, value: 'in-kv' });
-      await mcp.call(kvToolName(second.slug, 'authored_insert'), { key, value: 'in-second' });
+      await mcp.call(kvToolName(kv.slug, 'set'), { app_handle: selected.app_handle, key, value: 'in-kv' });
+      await mcp.call(kvToolName(second.slug, 'authored_insert'), { app_handle: secondHandle, key, value: 'in-second' });
 
       assertEqual(await api.execute(kv.context, 'get', { key }), 'in-kv', 'the kv-store call did not land in the kv-store context');
       assertEqual(
@@ -302,7 +314,7 @@ async function runChecks({ checks, mcp, api, kv, second }) {
       );
       // A key only the second application ever saw: if the tools shared a target it would show up here too.
       const only = `second-only-${key}`;
-      await mcp.call(kvToolName(second.slug, 'authored_insert'), { key: only, value: 'x' });
+      await mcp.call(kvToolName(second.slug, 'authored_insert'), { app_handle: secondHandle, key: only, value: 'x' });
       assertEqual(await api.execute(kv.context, 'get', { key: only }), null, 'a write through one application landed in the other');
       return `${key} resolves to "in-kv" in ${kv.slug} and "in-second" in ${second.slug}, and ${only} exists only in ${second.slug}`;
     });
