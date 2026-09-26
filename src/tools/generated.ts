@@ -7,7 +7,7 @@ import type { Catalog } from '../catalog.ts';
 import { errorResult } from '../errors.ts';
 import { advertised, type Gate } from '../gate.ts';
 import type { NodeSession } from '../node.ts';
-import { parseArgs, renderMethodSignature, schemaBuilder } from '../schema.ts';
+import { methodDescription, parseArgs, schemaBuilder } from '../schema.ts';
 
 const MAX_SLUG = 20;
 const MAX_NAME = 49; // 64 minus Claude Code's 15-char `mcp__mero-mcp__` prefix
@@ -88,16 +88,20 @@ function toolConfig(app: ResolvedApp, method: AbiMethod) {
   const output = schemaBuilder(app.manifest, 'output');
   const readOnly = method.intent === 'read_only';
   const returned = method.returns && output.type(method.returns);
-  const returns = returned && (method.returns_nullable ? returned.nullable() : returned);
+  const returns = returned && output.document(method.returns_nullable ? returned.nullable() : returned, method.returns_doc);
   return {
     title: toolTitle(app, method.name),
-    description: renderMethodSignature(method),
+    description: methodDescription(method),
     inputSchema: advertised(
       input.jsonSchema(z.object({ [HANDLE_PARAM]: input.describe(z.string(), APP_HANDLE_DOC), ...input.params(method) })),
     ),
     ...(returns ? { outputSchema: advertised(output.jsonSchema(returns)) } : {}),
-    // destructiveHint stays false until the ABI can say otherwise; every hint is sent explicitly.
-    annotations: { readOnlyHint: readOnly, destructiveHint: false, idempotentHint: readOnly, openWorldHint: false },
+    annotations: {
+      readOnlyHint: readOnly,
+      destructiveHint: method.destructive === true,
+      idempotentHint: method.idempotent === true || readOnly,
+      openWorldHint: false,
+    },
     ...(app.icon && URL.canParse(app.icon) ? { icons: [{ src: app.icon }] } : {}),
     _meta: {
       package: packageKey(app),

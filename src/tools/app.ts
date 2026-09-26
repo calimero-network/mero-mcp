@@ -6,7 +6,7 @@ import { errorResult, textResult } from '../errors.ts';
 import { advertisedObject, type Gate } from '../gate.ts';
 import { guideBlocks } from '../guide.ts';
 import type { NodeSession } from '../node.ts';
-import { parseArgs, renderMethodSignature } from '../schema.ts';
+import { methodReference, parseArgs } from '../schema.ts';
 import { toolNamesByApp } from './generated.ts';
 
 /** Core hex-encodes every 32-byte id (context, group, namespace), always 64 lowercase hex chars. */
@@ -69,7 +69,7 @@ export function registerAppTools(
       service: app.serviceName ?? (contextServices.length === 1 ? contextServices[0] : null),
       contextServices,
       ...(app.serviceName || contextServices.length ? {} : { serviceNote: SERVICE_UNKNOWN }),
-      methods: app.manifest.methods.map(renderMethodSignature),
+      methods: app.manifest.methods.map(methodReference),
       app_handle: gate.issue(app, contextId),
     };
   }

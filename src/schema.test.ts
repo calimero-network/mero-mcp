@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { AbiManifest } from '@calimero-network/abi-codegen';
-import { inputShapeForMethod, renderMethodSignature, schemaBuilder } from './schema.ts';
+import { inputShapeForMethod, methodDescription, renderMethodSignature, schemaBuilder } from './schema.ts';
 import { z } from 'zod';
 
 function deepFreeze<T>(v: T): T {
@@ -277,4 +277,47 @@ test('renderMethodSignature names containers compactly', () => {
     } as never),
     '[mut] bulk(xs: Point[], m: map<string, u64>) -> bytes',
   );
+});
+
+const docManifest = (types: Record<string, unknown> = {}) => manifest({ types } as Partial<AbiManifest>);
+
+test('parameter, field and named-type docs become JSON Schema descriptions, a bytes hint kept beside the doc', () => {
+  const m = docManifest({ Edit: { kind: 'record', doc: 'One block edit.', fields: [{ name: 'b', type: { kind: 'u32' }, doc: '0 breaks the block.' }] } });
+  const b = schemaBuilder(m);
+  const params = [
+    { name: 'edit', type: { $ref: 'Edit' }, doc: 'The edit to apply.' },
+    { name: 'hash', type: { kind: 'bytes', size: 2 }, doc: 'The blob hash.' },
+    { name: 'now', type: { kind: 'u64' } },
+  ];
+  const json = b.jsonSchema(z.object(b.params({ name: 'm', params } as never))) as {
+    properties: Record<string, { description?: string; $ref?: string }>;
+    $defs: { Edit: { description?: string; properties: { b: { description?: string } } } };
+  };
+  assert.deepEqual(json.properties.edit, { description: 'The edit to apply.', $ref: '#/$defs/Edit' });
+  assert.equal(json.properties.hash.description, 'The blob hash. (bytes: a hex string or a 2-byte array)');
+  assert.equal(json.properties.now.description, undefined);
+  assert.equal(json.$defs.Edit.description, 'One block edit.');
+  assert.equal(json.$defs.Edit.properties.b.description, '0 breaks the block.');
+});
+
+test('a unit-only enum is a plain enum without docs, and oneOf of documented consts with them', () => {
+  const plain = docManifest({ S: { kind: 'variant', variants: [{ name: 'Open' }, { name: 'Done' }] } });
+  const docs = docManifest({ S: { kind: 'variant', variants: [{ name: 'Open', doc: 'Still running.' }, { name: 'Done' }] } });
+  const defOf = (m: AbiManifest) => {
+    const b = schemaBuilder(m);
+    return (b.jsonSchema(z.object({ s: b.type({ $ref: 'S' }) })) as { $defs: { S: unknown } }).$defs.S;
+  };
+  assert.deepEqual(defOf(plain), { type: 'string', enum: ['Open', 'Done'] });
+  assert.deepEqual(defOf(docs), {
+    oneOf: [
+      { type: 'string', const: 'Open', description: 'Still running.' },
+      { type: 'string', const: 'Done' },
+    ],
+  });
+});
+
+test('methodDescription is the doc, a blank line, then the signature; the signature alone without a doc', () => {
+  const set = { name: 'set_blocks', params: [{ name: 'now', type: { kind: 'u64' } }], returns: { kind: 'u32' }, intent: 'mutating' } as never;
+  assert.equal(methodDescription(set), '[mut] set_blocks(now: u64) -> u32');
+  assert.equal(methodDescription({ ...(set as object), doc: 'Apply edits.\n\n# Errors\nPast 512.' } as never), 'Apply edits.\n\n# Errors\nPast 512.\n\n[mut] set_blocks(now: u64) -> u32');
 });

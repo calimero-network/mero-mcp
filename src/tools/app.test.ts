@@ -852,3 +852,31 @@ for (const entry of ['select_app', 'describe_app', 'call'] as const) {
     }
   });
 }
+
+test('ABI docs and flags reach the tool: description, parameter doc, returns_doc, destructive and idempotent hints', async () => {
+  const documented: FakeApp = {
+    ...kv(),
+    abi: manifest([
+      method('clear', [], { doc: 'Delete every key.', destructive: true, idempotent: true }),
+      method('get', [{ name: 'key', type: { kind: 'string' }, doc: 'Up to 64 bytes.' }], {
+        intent: 'read_only',
+        returns: { kind: 'string' },
+        returns_doc: 'The stored value.',
+      }),
+    ]),
+  };
+  const s = await setup([documented], '2026-07-28');
+  try {
+    const tools = (await s.client.listTools()).tools;
+    const clear = tools.find((t) => t.name === 'kv_store_clear')!;
+    const get = tools.find((t) => t.name === 'kv_store_get')!;
+    assert.equal(clear.description, 'Delete every key.\n\n[mut] clear() -> unit');
+    assert.deepEqual(clear.annotations, { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false });
+    assert.equal((get.inputSchema.properties as Record<string, { description?: string }>).key.description, 'Up to 64 bytes.');
+    assert.deepEqual(get.outputSchema, { type: 'string', description: 'The stored value.' });
+    const described = await s.json('describe_app', { app: 'kv-store' });
+    assert.deepEqual(described.methods, ['Delete every key.\n\n[mut] clear() -> unit', '[view] get(key: string) -> string\n  key: Up to 64 bytes.']);
+  } finally {
+    await s.close();
+  }
+});
