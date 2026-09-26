@@ -31,6 +31,8 @@ const opaqueInvitation = z
 // Hex matches how this codebase already renders bytes for display (see schema.ts's bytesSchema).
 const toHex = (bytes: number[]) => Buffer.from(bytes).toString('hex');
 
+const VISIBILITY = z.enum(['open', 'restricted']).describe('open: namespace members can join; restricted: members must be added.');
+
 /** init takes the same JSON args object a method call does, so it is validated the way method calls are. */
 function initParams(manifest: AbiManifest, label: string, args: Record<string, unknown>): number[] {
   const init = manifest.methods.find((m) => m.name === 'init');
@@ -307,6 +309,63 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
       wrap(async ({ group, members }: { group: string; members: Array<{ identity: string; role: string }> }) => {
         await admin.addGroupMembers(group, { members });
         return `Added ${members.map((m) => `${m.identity} (${m.role})`).join(', ')} to group ${group}.`;
+      }),
+    );
+
+    server.registerTool(
+      'create_group',
+      {
+        description: 'Create a group (subgroup) inside a namespace, or nested under another group with `parent`. Returns its groupId.',
+        inputSchema: {
+          namespace: z.string(),
+          name: z.string().optional(),
+          visibility: VISIBILITY.optional(),
+          parent: z.string().optional().describe('Group id to nest under; omit to create directly in the namespace.'),
+        },
+      },
+      async ({ namespace, name, visibility, parent }: { namespace: string; name?: string; visibility?: 'open' | 'restricted'; parent?: string }) => {
+        try {
+          if (!parent) return textResult(await admin.createGroupInNamespace(namespace, { groupName: name, visibility }));
+          const { targetApplicationId } = await admin.getGroupInfo(parent);
+          const { groupId } = await admin.createGroup({ applicationId: targetApplicationId, name, parentGroupId: parent });
+          if (!visibility) return textResult({ groupId });
+          try {
+            await admin.setSubgroupVisibility(groupId, { subgroupVisibility: visibility });
+          } catch (err) {
+            return errorResult(new Error(`Group ${groupId} was created under ${parent} but its visibility was not set; retry set_group_visibility.`, { cause: err }));
+          }
+          return textResult({ groupId });
+        } catch (err) {
+          return errorResult(err);
+        }
+      },
+    );
+
+    server.registerTool(
+      'set_group_visibility',
+      {
+        description: 'Make a group open (namespace members can join it) or restricted (members must be added).',
+        inputSchema: { group: z.string(), visibility: VISIBILITY },
+      },
+      wrap(async ({ group, visibility }: { group: string; visibility: 'open' | 'restricted' }) => {
+        await admin.setSubgroupVisibility(group, { subgroupVisibility: visibility });
+        return `Group ${group} is now ${visibility}.`;
+      }),
+    );
+
+    server.registerTool(
+      'set_group_metadata',
+      {
+        description: "Replace a group's metadata record: its name and string key/value data. Keys left out are removed.",
+        inputSchema: {
+          group: z.string(),
+          name: z.string().optional(),
+          data: z.record(z.string(), z.string()).optional().describe('The complete key/value set to store.'),
+        },
+      },
+      wrap(async ({ group, name, data }: { group: string; name?: string; data?: Record<string, string> }) => {
+        await admin.setGroupMetadata(group, { name, data: data ?? {} });
+        return `Metadata of group ${group} replaced.`;
       }),
     );
   }
