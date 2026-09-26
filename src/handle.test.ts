@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { guideHash, handleKeeper } from './handle.ts';
 
-const PAYLOAD = { p: 'com.example.blocks', v: '1.2.0', g: guideHash('## Overview'), c: 'Ctx111', s: null };
+const PAYLOAD = { a: 'BlocksAppId', p: 'com.example.blocks', v: '1.2.0', g: guideHash('## Overview'), c: 'Ctx111', s: null };
 
 test('a handle carries its payload as base64url JSON, then a dot, then a base64url HMAC-SHA256 of that JSON', () => {
   const key = randomBytes(32);

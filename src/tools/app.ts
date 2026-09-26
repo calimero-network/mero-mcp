@@ -3,7 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import type { AbiLoader, ResolvedApp } from '../abi.ts';
 import type { Catalog } from '../catalog.ts';
 import { errorResult, textResult } from '../errors.ts';
-import { advertisedObject, packageKey, type Gate } from '../gate.ts';
+import { advertisedObject, type Gate } from '../gate.ts';
 import { guideBlocks } from '../guide.ts';
 import type { NodeSession } from '../node.ts';
 import { inputShapeForMethod, renderMethodSignature } from '../schema.ts';
@@ -39,21 +39,8 @@ const noContexts = (label: string) =>
 
 const contextsFor = (label: string, ids: string[]) => `Contexts for "${label}": ${ids.join(', ') || '(none)'}`;
 
-type VersionedContext = { id: string; version?: string };
-
-const contextsElsewhere = (label: string, version: string, elsewhere: VersionedContext[]) =>
-  `Application "${label}" ${version} has no contexts on this node; other installed versions do: ` +
-  `${elsewhere.map((c) => `${c.id} (${c.version ?? 'unversioned'})`).join(', ')}. ` +
-  `Pass context with one of them to act on that version, ` +
-  `or create one for ${version} in the Calimero desktop app or with create_context.`;
-
 const severalContexts = (label: string, ids: string[]) =>
   `Application "${label}" has ${ids.length} contexts; pass context with one of: ${ids.join(', ')}`;
-
-function noContextNote(label: string, version: string | undefined, ids: string[], elsewhere: VersionedContext[]) {
-  if (ids.length) return severalContexts(label, ids);
-  return elsewhere.length ? contextsElsewhere(label, version ?? 'unversioned', elsewhere) : noContexts(label);
-}
 
 /** A second content block onward, so the structured result in the first stays parseable JSON. */
 const withBlocks = (data: unknown, blocks: Array<{ type: string }>) =>
@@ -108,24 +95,12 @@ export function registerAppTools(
     return found;
   }
 
-  /** With a context, the installed version whose application owns it (the handle binds that version); without, the newest. */
-  async function chooseVersion(app: string, context?: string) {
-    const versions = await loader.versionsOf(app);
-    const owners = async (of: typeof versions) =>
-      Promise.all(of.map(async ({ id, version }) => ({ id, version, contexts: await gate.contextsOf(id) })));
-    if (!context) {
-      const [newest] = await owners(versions.slice(0, 1));
-      // Without a context the newest version is bound; point at the others' contexts rather than suggest creating one.
-      const others = newest.contexts.length ? [] : await owners(versions.slice(1));
-      const elsewhere = others.flatMap((o) => o.contexts.map((c) => ({ id: c.id, version: o.version })));
-      return { ...newest, contextId: undefined, elsewhere };
-    }
-    const owned = await owners(versions);
-    const candidates = [...new Set(owned.flatMap((o) => o.contexts.map((c) => c.id)))];
-    const contextId = await resolveContextValue(context, app, candidates);
-    const owner = owned.find((o) => o.contexts.some((c) => c.id === contextId));
-    if (!owner) throw new Error(`Context "${context}" does not belong to "${app}". ${contextsFor(app, candidates)}`);
-    return { ...owner, contextId, elsewhere: [] };
+  /** The chosen context, resolved from an id or alias and checked to belong to `label`, or the only context there is. */
+  async function chooseContext(label: string, ids: string[], context?: string): Promise<string | null> {
+    if (!context) return ids.length === 1 ? ids[0] : null;
+    const contextId = await resolveContextValue(context, label, ids);
+    if (!ids.includes(contextId)) throw new Error(`Context "${context}" does not belong to "${label}". ${contextsFor(label, ids)}`);
+    return contextId;
   }
 
   /** The catalog entry `match` picks; a miss (node down at connect, or an install made elsewhere) syncs once first. */
@@ -191,12 +166,13 @@ export function registerAppTools(
     },
     async ({ app, service, context }) => {
       try {
-        const chosen = await chooseVersion(app, context);
-        const ids = chosen.contexts.map((c) => c.id);
-        const contextId = chosen.contextId ?? (ids.length === 1 ? ids[0] : null);
+        const { id } = await loader.identify(app);
+        const contexts = await gate.contextsOf(id);
+        const ids = contexts.map((c) => c.id);
+        const contextId = await chooseContext(app, ids, context);
         // A context belongs to one service, so the chosen context decides which service the handle binds.
-        const contextService = chosen.contexts.find((c) => c.id === contextId)?.serviceName;
-        const resolved = await loader.load(chosen.id, contextService ?? service);
+        const contextService = contexts.find((c) => c.id === contextId)?.serviceName;
+        const resolved = await loader.load(id, contextService ?? service);
         const entry = await catalogued(sameUnit(resolved));
         const tools = entry ? [...toolNamesByApp(catalog.apps(), reserved).get(entry)!.values()] : [];
         return withBlocks(
@@ -205,7 +181,7 @@ export function registerAppTools(
             tools,
             toolsNote: TOOLS_NOTE,
             context: contextId,
-            ...(contextId ? {} : { note: noContextNote(app, chosen.version, ids, chosen.elsewhere) }),
+            ...(contextId ? {} : { note: ids.length ? severalContexts(app, ids) : noContexts(app) }),
           },
           resolved.guide ? guideBlocks(resolved) : [],
         );
@@ -229,13 +205,10 @@ export function registerAppTools(
         const payload = gate.read(app_handle);
         if (!payload) return await refuseWithout(app);
         // With a valid handle `app` only matters when it names another app; a name that resolves to nothing is ignored.
-        const named = typeof app === 'string' ? await loader.resolveAppId(app).catch(() => undefined) : undefined;
-        if (named && (named.package ?? named.id) !== payload.p) return await refuseWithout(app);
-        // Installed versions of one package share its name, so the handle's version picks the entry to load.
-        const listed = await catalogued(
-          (a) => packageKey(a) === payload.p && (a.version ?? '') === payload.v && (a.serviceName ?? null) === payload.s,
-        );
-        const resolved = await loader.load(listed?.id ?? payload.p, payload.s ?? undefined);
+        const named = typeof app === 'string' ? await loader.identify(app).catch(() => undefined) : undefined;
+        if (named && named.id !== payload.a) return await refuseWithout(app);
+        const resolved = await loader.load(payload.a, payload.s ?? undefined);
+        await catalogued(sameUnit(resolved));
         const admitted = await gate.admit(resolved, app_handle);
         if ('refusal' in admitted) return admitted.refusal;
         const { method, args } = CALL_INPUT.parse(raw);

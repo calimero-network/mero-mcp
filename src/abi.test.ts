@@ -94,15 +94,22 @@ test('an exact package name resolves even when its last segment is ambiguous', a
   assert.equal((await loader.resolveAppId('org.example.kv-store')).id, 'other');
 });
 
-test('several installed versions of one package resolve to the newest, by package or segment, never as ambiguous', async () => {
+test('one package from two signers is ambiguous by package or segment, listing each id and signer, and an id picks one', async () => {
   const apps = [
-    app({ id: 'v1-10', package: 'com.calimero.kv-store', version: '1.10.0' }),
-    app({ id: 'v1-9', package: 'com.calimero.kv-store', version: '1.9.0' }),
+    app({ id: 'app-a', package: 'com.calimero.kv-store', signer_id: 'signer-a' }),
+    app({ id: 'app-b', package: 'com.calimero.kv-store', signer_id: 'signer-b' }),
   ];
   const { loader } = fake({ apps });
-  assert.equal((await loader.resolveAppId('kv-store')).id, 'v1-10');
-  assert.equal((await loader.resolveAppId('com.calimero.kv-store')).id, 'v1-10');
-  assert.deepEqual(await loader.versionsOf('kv-store'), [{ id: 'v1-10', version: '1.10.0' }, { id: 'v1-9', version: '1.9.0' }]);
+  for (const name of ['kv-store', 'com.calimero.kv-store']) {
+    await assert.rejects(
+      loader.resolveAppId(name),
+      new RegExp(
+        `^Error: Application "${name}" is published by several signers: ` +
+          'app-a \\(signer signer-a\\), app-b \\(signer signer-b\\)\\. Pass the application id\\.$',
+      ),
+    );
+  }
+  assert.equal((await loader.resolveAppId('app-b')).id, 'app-b');
 });
 
 test('resolveAppId matches whole segments only, never a prefix of one', async () => {

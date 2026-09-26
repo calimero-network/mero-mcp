@@ -26,9 +26,11 @@ export interface ResolvedApp {
 /** No installed app answers to the name or id asked for. */
 export class AppNotFoundError extends Error {}
 
-// Numeric, so 1.10.0 sorts after 1.9.0 and two installed versions of one package never fall back to node order.
-export const byVersion = (a: { version?: string }, b: { version?: string }) =>
-  (a.version ?? '').localeCompare(b.version ?? '', undefined, { numeric: true });
+/** The fields a refusal shows, readable without fetching an ABI. */
+export type AppIdentity = Pick<ResolvedApp, 'id' | 'package' | 'version' | 'signerId' | 'guide'>;
+
+/** Orders strings by UTF-16 code unit, independent of locale. */
+export const codeUnit = (x: string, y: string) => (x < y ? -1 : x > y ? 1 : 0);
 
 /** Packages are reverse-DNS dotted; the trailing segment is the name people type and tool names are built from. */
 export const lastSegment = (name: string) => name.split('.').pop() || name;
@@ -67,8 +69,8 @@ export function createAbiLoader(session: NodeSession) {
     }
   }
 
-  /** Every installed version of the one package `nameOrId` names, newest first. */
-  async function versionsOf(nameOrId: string): Promise<InstalledApp[]> {
+  /** The one installed app `nameOrId` names; core keys a bundle by package and signer, so an upgrade replaces it in place. */
+  async function findApp(nameOrId: string): Promise<InstalledApp> {
     const apps = await installed();
     const byId = apps.filter((a) => a.id === nameOrId);
     const byPackage = apps.filter((a) => a.package === nameOrId);
@@ -84,14 +86,24 @@ export function createAbiLoader(session: NodeSession) {
       const listed = packages.join(', ');
       throw new Error(`Application "${nameOrId}" is ambiguous: ${listed}. Pass the full package name or the application id.`);
     }
+    if (matches.length > 1) {
+      const listed = matches.map((a) => `${a.id} (signer ${a.signer_id ?? 'unknown'})`).join(', ');
+      throw new Error(`Application "${nameOrId}" is published by several signers: ${listed}. Pass the application id.`);
+    }
     if (!matches.length) {
       const listed = apps.map((a) => a.package || a.id).join(', ') || '(none)';
       throw new AppNotFoundError(`Application "${nameOrId}" not found. Installed: ${listed}`);
     }
-    return matches.sort((a, b) => byVersion(b, a));
+    return matches[0];
   }
 
-  const findApp = async (nameOrId: string) => (await versionsOf(nameOrId))[0];
+  const identity = (app: InstalledApp): AppIdentity => ({
+    id: app.id,
+    package: app.package,
+    version: app.version,
+    signerId: app.signer_id,
+    guide: guideOf(app.metadata),
+  });
 
   async function manifestFor(app: InstalledApp, blobId: string, serviceName?: string): Promise<AbiManifest> {
     // Blob ids are content-addressed, so an upgraded app resolves to a new key.
@@ -116,13 +128,9 @@ export function createAbiLoader(session: NodeSession) {
     const soleService = services.length === 1 ? services[0] : undefined;
     const serviceName = requested ?? soleService;
     return {
-      id: app.id,
-      package: app.package,
-      version: app.version,
+      ...identity(app),
       name: metadataField(app.metadata, 'name'),
       icon: metadataField(app.metadata, 'icon'),
-      signerId: app.signer_id,
-      guide: guideOf(app.metadata),
       serviceName,
       soleService,
       blobId,
@@ -136,8 +144,9 @@ export function createAbiLoader(session: NodeSession) {
       return { id: app.id, package: app.package, blobId: app.blob.bytecode };
     },
 
-    async versionsOf(nameOrId: string): Promise<Array<{ id: string; version?: string }>> {
-      return (await versionsOf(nameOrId)).map((a) => ({ id: a.id, version: a.version }));
+    /** The app `nameOrId` names, without its ABI, so a multi-service app needs no service. */
+    async identify(nameOrId: string): Promise<AppIdentity> {
+      return identity(await findApp(nameOrId));
     },
 
     async load(nameOrId: string, serviceName?: string): Promise<ResolvedApp> {
@@ -157,15 +166,8 @@ export function createAbiLoader(session: NodeSession) {
           }),
         ),
       );
-      const code = (x: string, y: string) => (x < y ? -1 : x > y ? 1 : 0);
-      const compare = (a: ResolvedApp, b: ResolvedApp): number => {
-        const pkg = code(a.package ?? a.id, b.package ?? b.id);
-        if (pkg !== 0) return pkg;
-        const version = byVersion(a, b);
-        if (version !== 0) return version;
-        const service = code(a.serviceName ?? '', b.serviceName ?? '');
-        return service !== 0 ? service : code(a.id, b.id);
-      };
+      const compare = (a: ResolvedApp, b: ResolvedApp): number =>
+        codeUnit(a.package ?? a.id, b.package ?? b.id) || codeUnit(a.id, b.id) || codeUnit(a.serviceName ?? '', b.serviceName ?? '');
       return loaded.filter((a): a is ResolvedApp => a !== undefined).sort(compare);
     },
   };

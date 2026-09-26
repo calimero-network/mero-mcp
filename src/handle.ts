@@ -3,8 +3,12 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypt
 const GUIDE_HASH_HEX = 16;
 const KEY_BYTES = 32;
 
-/** What an app_handle vouches for: package, app version, guide hash, the context it targets, and that context's service. */
+/**
+ * What an app_handle vouches for: the application (core derives its id from package and signer), package, app version,
+ * guide hash, the context it targets, and that context's service.
+ */
 export interface HandlePayload {
+  a: string;
   p: string;
   v: string;
   g: string;

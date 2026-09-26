@@ -188,7 +188,7 @@ test('after an in-place upgrade an old tool resyncs, then runs as the new versio
 
     Object.assign(s.apps[0], { version: '1.2.0', abi: manifest([method('get', [{ name: 'key', type: { kind: 'string' } }])]) });
     // A handle for the new version must not run the old tool's method, which that version no longer has.
-    const current = handles.issue({ p: 'com.calimero.kv-store', v: '1.2.0', g: guideHash(GUIDE), c: ctx('kvctx'), s: null });
+    const current = handles.issue({ a: 'kv-id', p: 'com.calimero.kv-store', v: '1.2.0', g: guideHash(GUIDE), c: ctx('kvctx'), s: null });
     const gone = await s.call('kv_store_set', { app_handle: current, key: 'k' });
     assert.equal(gone.isError, true);
     // 1.1.0 is gone, so the refusal must not send the agent back to it; the tool leaves the list below.
@@ -473,107 +473,42 @@ test("call refuses a handle for one app when app names another, with that app's 
   }
 });
 
-const kvAt = (id: string, version: string, context: string, params: Array<{ name: string; type: unknown }>): FakeApp => ({
-  ...kv(),
-  id,
-  version,
-  abi: manifest([method('set', params)]),
-  contexts: [ctx(context)],
-});
+const kvBy = (id: string, signer: string, context: string): FakeApp => ({ ...kv(), id, signer_id: signer, contexts: [ctx(context)] });
 
-test('with two versions installed the plain names are the newest, select_app agrees, and a crossed call is redirected once', async () => {
-  const key = { name: 'key', type: { kind: 'string' } };
-  const s = await setup([kvAt('kv-one', '1.0.0', 'kvv1', [key]), kvAt('kv-two', '2.0.0', 'kvv2', [key, { name: 'ttl', type: { kind: 'u32' } }])]);
+test('one package from two signers is two apps: own tools, no silent pick by name, and a handle per signer', async () => {
+  // Same package, version and guide, so only the signer tells the two handles apart.
+  const s = await setup([kvBy('kv-a', 'SignerA', 'ctxa'), kvBy('kv-b', 'SignerB', 'ctxb')]);
   try {
-    const tools = (await s.client.listTools()).tools;
-    assert.equal(new Set(tools.map((t) => t.name)).size, tools.length);
-    assert.deepEqual(
-      tools.filter((t) => t.name.startsWith('kv_store')).map((t) => [t.name, t._meta?.appVersion, t.description]),
-      [
-        ['kv_store_kvone_set', '1.0.0', '[mut] set(key: string) -> unit'],
-        ['kv_store_set', '2.0.0', '[mut] set(key: string, ttl: u32) -> unit'],
-      ],
-    );
+    const names = (await s.client.listTools()).tools.map((t) => t.name).filter((n) => n.startsWith('kv_store') && n.endsWith('_set'));
+    assert.deepEqual(names, ['kv_store_set', 'kv_store_kvb_set']);
 
-    const newest = await s.json('select_app', { app: 'kv-store' });
-    assert.deepEqual([newest.appVersion, newest.tools], ['2.0.0', ['kv_store_set']]);
-    const crossed = await s.call('kv_store_kvone_set', { app_handle: newest.app_handle, key: 'k' });
-    assert.equal(crossed.isError, true);
-    assert.equal(
-      crossed.content.at(-1)!.text,
-      'This app_handle is for com.calimero.kv-store 2.0.0, but this tool belongs to com.calimero.kv-store 1.0.0. ' +
-        'Pass it to kv_store_set instead, or call select_app for com.calimero.kv-store with a context of ' +
-        'com.calimero.kv-store 1.0.0 and retry with the returned app_handle.',
-    );
+    const listed = 'kv-a (signer SignerA), kv-b (signer SignerB). Pass the application id.';
+    for (const tool of ['select_app', 'describe_app']) {
+      const res = await s.call(tool, { app: 'kv-store' });
+      assert.equal(res.isError, true);
+      assert.equal(res.content[0].text, `Error: Application "kv-store" is published by several signers: ${listed}`);
+    }
+
+    const a = await s.json('select_app', { app: 'kv-a' });
+    const b = await s.json('select_app', { app: 'kv-b' });
+    assert.deepEqual([a.context, a.tools.at(-1), b.context, b.tools.at(-1)], [ctx('ctxa'), 'kv_store_set', ctx('ctxb'), 'kv_store_kvb_set']);
+    for (const [tool, handle] of [['kv_store_kvb_set', a.app_handle], ['kv_store_set', b.app_handle]]) {
+      const crossed = await s.call(tool, { app_handle: handle, key: 'k' });
+      assert.equal(crossed.isError, true);
+    }
+    // A planning handle names no context, so only the bound signer can tell the tool it is for the other app.
+    const planning = (await s.json('describe_app', { app: 'kv-a' })).app_handle;
+    assert.equal((await s.call('kv_store_kvb_set', { app_handle: planning, key: 'k' })).content.at(-1)!.text, RETRY);
+    const viaCall = await s.call('call', { app_handle: a.app_handle, method: 'set', args: { key: 'k' }, app: 'kv-b' });
+    assert.equal(viaCall.isError, true);
     assert.deepEqual(s.executed, []);
 
-    const retried = await s.call('kv_store_set', { app_handle: newest.app_handle, key: 'k', ttl: 5 });
-    assert.equal(retried.isError, undefined);
-    await s.call('call', { app_handle: newest.app_handle, method: 'set', args: { key: 'k', ttl: 6 } });
+    await s.call('kv_store_kvb_set', { app_handle: b.app_handle, key: 'k' });
+    await s.call('call', { app_handle: a.app_handle, method: 'set', args: { key: 'k' } });
     assert.deepEqual(s.executed, [
-      { contextId: ctx('kvv2'), method: 'set', argsJson: { key: 'k', ttl: 5 } },
-      { contextId: ctx('kvv2'), method: 'set', argsJson: { key: 'k', ttl: 6 } },
+      { contextId: ctx('ctxb'), method: 'set', argsJson: { key: 'k' } },
+      { contextId: ctx('ctxa'), method: 'set', argsJson: { key: 'k' } },
     ]);
-  } finally {
-    await s.close();
-  }
-});
-
-test('a crossed version whose own version lacks the method says which version to select', async () => {
-  const key = { name: 'key', type: { kind: 'string' } };
-  const s = await setup([
-    { ...kvAt('kv-one', '1.0.0', 'kvv1', [key]), abi: manifest([method('set', [key]), method('legacy')]) },
-    kvAt('kv-two', '2.0.0', 'kvv2', [key]),
-  ]);
-  try {
-    const newest = await s.json('select_app', { app: 'kv-store' });
-    const res = await s.call('kv_store_kvone_legacy', { app_handle: newest.app_handle });
-    assert.equal(
-      res.content.at(-1)!.text,
-      'This app_handle is for com.calimero.kv-store 2.0.0, but this tool belongs to com.calimero.kv-store 1.0.0. ' +
-        'Call select_app for com.calimero.kv-store with a context of com.calimero.kv-store 1.0.0 and retry with the returned app_handle.',
-    );
-    assert.deepEqual(s.executed, []);
-  } finally {
-    await s.close();
-  }
-});
-
-test('when the newest version has no contexts, the note lists the contexts of the other versions with their versions', async () => {
-  const key = { name: 'key', type: { kind: 'string' } };
-  const s = await setup([kvAt('kv-one', '1.0.0', 'kvv1', [key]), { ...kvAt('kv-two', '2.0.0', 'kvv2', [key]), contexts: [] }]);
-  try {
-    const selected = await s.json('select_app', { app: 'kv-store' });
-    assert.equal(selected.context, null);
-    assert.equal(
-      selected.note,
-      `Application "kv-store" 2.0.0 has no contexts on this node; other installed versions do: ${ctx('kvv1')} (1.0.0). ` +
-        'Pass context with one of them to act on that version, or create one for 2.0.0 in the Calimero desktop app or with create_context.',
-    );
-  } finally {
-    await s.close();
-  }
-});
-
-test('select_app binds the installed version whose application owns the chosen context, and the newest without one', async () => {
-  const key = { name: 'key', type: { kind: 'string' } };
-  const s = await setup([kvAt('kv-one', '1.0.0', 'kvv1', [key]), kvAt('kv-two', '2.0.0', 'kvv2', [key, { name: 'ttl', type: { kind: 'u32' } }])]);
-  try {
-    const v2 = await s.json('select_app', { app: 'com.calimero.kv-store', context: ctx('kvv2') });
-    assert.deepEqual([v2.application, v2.appVersion, v2.context, v2.tools], ['kv-two', '2.0.0', ctx('kvv2'), ['kv_store_set']]);
-    await s.call('kv_store_set', { app_handle: v2.app_handle, key: 'k', ttl: 1 });
-
-    const v1 = await s.json('select_app', { app: 'kv-store', context: ctx('kvv1') });
-    assert.deepEqual([v1.application, v1.appVersion, v1.tools], ['kv-one', '1.0.0', ['kv_store_kvone_set']]);
-    await s.call('kv_store_kvone_set', { app_handle: v1.app_handle, key: 'k' });
-    assert.deepEqual(s.executed, [
-      { contextId: ctx('kvv2'), method: 'set', argsJson: { key: 'k', ttl: 1 } },
-      { contextId: ctx('kvv1'), method: 'set', argsJson: { key: 'k' } },
-    ]);
-
-    const newest = await s.json('select_app', { app: 'kv-store' });
-    assert.deepEqual([newest.appVersion, newest.context], ['2.0.0', ctx('kvv2')]);
-    assert.equal((await s.json('describe_app', { app: 'kv-store' })).appVersion, '2.0.0');
   } finally {
     await s.close();
   }
@@ -812,7 +747,7 @@ for (const entry of ['select_app', 'describe_app', 'call'] as const) {
     try {
       assert.match(String(logged.mock.calls[0]?.arguments[0]), /app list unavailable at connect/);
       down = false;
-      const handle = handles.issue({ p: 'com.calimero.kv-store', v: '1.0.0', g: guideHash(GUIDE), c: ctx('kvctx'), s: null });
+      const handle = handles.issue({ a: 'kv-id', p: 'com.calimero.kv-store', v: '1.0.0', g: guideHash(GUIDE), c: ctx('kvctx'), s: null });
       const args = entry === 'call' ? { app_handle: handle, method: 'set', args: { key: 'k' } } : { app: 'kv-store' };
       const res = (await client.callTool({ name: entry, arguments: args })) as { isError?: boolean; content: Array<{ text?: string }> };
       assert.equal(res.isError, undefined, res.content[0].text);
