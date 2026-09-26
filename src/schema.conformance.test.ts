@@ -6,7 +6,9 @@ import { fileURLToPath } from 'node:url';
 import { parseAbiManifest, type AbiManifest } from '@calimero-network/abi-codegen';
 import { McpServer, InMemoryTransport } from '@modelcontextprotocol/server';
 import { Client } from '@modelcontextprotocol/client';
-import { inputShapeForMethod } from './schema.ts';
+import { z } from 'zod';
+import { inputShapeForMethod, methodDescription, schemaBuilder } from './schema.ts';
+import { advertised } from './gate.ts';
 
 // Committed straight from core's own builds, so a change to the ABI format fails here rather than in production.
 const FIXTURES = join(fileURLToPath(new URL('../test/fixtures/abi/', import.meta.url)));
@@ -16,7 +18,7 @@ const load = (name: string): AbiManifest =>
 
 const EXPECTED_METHOD_COUNTS: Record<string, number> = {
   'kv-store': 11,
-  abi_conformance: 40,
+  abi_conformance: 41,
   'scaffolding-e2e': 91,
 };
 
@@ -151,6 +153,42 @@ test('kv-store: set(key, value) advertises exactly those two required properties
     const schema = tools[0].inputSchema as { properties: Record<string, unknown>; required?: string[] };
     assert.deepEqual(Object.keys(schema.properties).sort(), ['key', 'value']);
     assert.deepEqual([...(schema.required ?? [])].sort(), ['key', 'value']);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+test('abi_conformance: its method and parameter docs reach tools/list', async () => {
+  const m = load('abi_conformance');
+  const documented = m.methods.filter((x) => x.doc);
+  assert.ok(documented.length > 0, 'abi_conformance carries no docs: refresh it from core apps/abi_conformance/abi.expected.json');
+  const server = new McpServer({ name: 'docs', version: '0.0.0' });
+  // Docs live in schemaBuilder's own per-manifest registry, so tools must advertise via its jsonSchema(),
+  // the same path production uses (tools/generated.ts), not the raw zod shape the SDK converts on its own.
+  const b = schemaBuilder(m);
+  for (const method of documented) {
+    server.registerTool(
+      `app_${method.name}`,
+      { description: methodDescription(method), inputSchema: advertised(b.jsonSchema(z.object(b.params(method)))) },
+      async () => ({ content: [{ type: 'text' as const, text: '' }] }),
+    );
+  }
+
+  const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: 'docs', version: '0.0.0' });
+  await Promise.all([server.connect(serverSide), client.connect(clientSide)]);
+  try {
+    const { tools } = await client.listTools();
+    for (const method of documented) {
+      const tool = tools.find((t) => t.name === `app_${method.name}`);
+      assert.ok(tool, `${method.name} is not listed`);
+      assert.ok(tool.description?.startsWith(`${method.doc}\n\n`), `${method.name}: its doc is missing from the description`);
+      const props = tool.inputSchema.properties as Record<string, { description?: string }>;
+      for (const p of method.params.filter((x) => x.doc)) {
+        assert.ok(props[p.name].description?.startsWith(p.doc!), `${method.name}(${p.name}): its doc is missing from the schema`);
+      }
+    }
   } finally {
     await client.close();
     await server.close();
