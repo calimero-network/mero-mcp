@@ -148,6 +148,15 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
   );
 
   server.registerTool(
+    'join_context',
+    {
+      description: "Join a context this node is not yet a member of, such as one in a namespace or group it just joined. Returns the node's member key in it.",
+      inputSchema: { context: z.string().describe('Context id.') },
+    },
+    wrap(async ({ context }: { context: string }) => admin.joinContext(context)),
+  );
+
+  server.registerTool(
     'delete_context',
     {
       description: 'Delete a context from this node, including its data. Use this to clear a context left behind by a deleted namespace.',
@@ -367,6 +376,17 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
         await admin.setGroupMetadata(group, { name, data: data ?? {} });
         return `Metadata of group ${group} replaced.`;
       }),
+    );
+
+    server.registerTool(
+      'join_open_group',
+      {
+        description:
+          'Join an open group through membership of its parent (join via inheritance). ' +
+          'Then join_context joins the contexts inside it.',
+        inputSchema: { group: z.string() },
+      },
+      wrap(async ({ group }: { group: string }) => admin.joinSubgroupInheritance(group)),
     );
   }
 }
