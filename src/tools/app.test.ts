@@ -433,6 +433,45 @@ for (const era of ['2025-11-25', '2026-07-28'] as const) {
       await s.close();
     }
   });
+
+  test(`${era}: a returns_doc on an object return keeps outputSchema.type: object and does not add an era wrap`, async () => {
+    const documented: FakeApp = {
+      ...plain(),
+      abi: manifest(
+        [
+          method('add', [{ name: 'body', type: { kind: 'string' } }], { returns: { $ref: 'Note' }, returns_doc: 'The saved note.' }),
+          method('count', [], { intent: 'read_only', returns: { kind: 'u32' }, returns_doc: 'How many notes exist.' }),
+        ],
+        { Note: { kind: 'record', fields: [{ name: 'id', type: { kind: 'u32' } }] } },
+      ),
+    };
+    const s = await setup([documented], era, { execute: (p) => (p.method === 'count' ? 3 : { id: 7 }) });
+    try {
+      const tools = (await s.client.listTools()).tools;
+      const add = tools.find((t) => t.name === 'notes_add')!;
+      const count = tools.find((t) => t.name === 'notes_count')!;
+      const { app_handle } = await s.json('select_app', { app: 'notes' });
+      const added = await s.call('notes_add', { app_handle, body: 'x' });
+      const counted = await s.call('notes_count', { app_handle });
+      // The documented named-record return stays type: object at the root, era-independent: never wrapped.
+      assert.equal(add.outputSchema?.type, 'object');
+      assert.equal((add.outputSchema as { description?: string }).description, 'The saved note.');
+      assert.deepEqual(added.structuredContent, { id: 7 });
+      if (era === '2025-11-25') {
+        assert.deepEqual(count.outputSchema, {
+          type: 'object',
+          properties: { result: { type: 'integer', minimum: 0, maximum: 9007199254740991, description: 'How many notes exist.' } },
+          required: ['result'],
+        });
+        assert.deepEqual(counted.structuredContent, { result: 3 });
+      } else {
+        assert.deepEqual(count.outputSchema, { type: 'integer', minimum: 0, maximum: 9007199254740991, description: 'How many notes exist.' });
+        assert.equal(counted.structuredContent, 3);
+      }
+    } finally {
+      await s.close();
+    }
+  });
 }
 
 test('a missing handle is refused with the guide even when the arguments are also wrong', async () => {

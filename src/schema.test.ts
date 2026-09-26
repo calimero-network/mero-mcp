@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { AbiManifest } from '@calimero-network/abi-codegen';
-import { inputShapeForMethod, methodDescription, renderMethodSignature, schemaBuilder } from './schema.ts';
+import { inputShapeForMethod, methodDescription, methodReference, renderMethodSignature, schemaBuilder } from './schema.ts';
 import { z } from 'zod';
 
 function deepFreeze<T>(v: T): T {
@@ -320,4 +320,14 @@ test('methodDescription is the doc, a blank line, then the signature; the signat
   const set = { name: 'set_blocks', params: [{ name: 'now', type: { kind: 'u64' } }], returns: { kind: 'u32' }, intent: 'mutating' } as never;
   assert.equal(methodDescription(set), '[mut] set_blocks(now: u64) -> u32');
   assert.equal(methodDescription({ ...(set as object), doc: 'Apply edits.\n\n# Errors\nPast 512.' } as never), 'Apply edits.\n\n# Errors\nPast 512.\n\n[mut] set_blocks(now: u64) -> u32');
+});
+
+test('methodReference indents every line of a multi-line parameter doc, not just the first', () => {
+  const set = {
+    name: 'set_blocks',
+    params: [{ name: 'now', type: { kind: 'u64' }, doc: 'Unix millis.\nMust be monotonic.' }],
+    returns: { kind: 'u32' },
+    intent: 'mutating',
+  } as never;
+  assert.equal(methodReference(set), '[mut] set_blocks(now: u64) -> u32\n  now: Unix millis.\n    Must be monotonic.');
 });

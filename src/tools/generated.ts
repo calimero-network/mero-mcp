@@ -83,6 +83,19 @@ export function toolNamesByApp(apps: readonly ResolvedApp[], reserved: ReadonlyS
   );
 }
 
+/**
+ * A named-type return, once `document` gives it a description, moves from an inlined object
+ * to a `$ref` (its `type` now lives on the `$defs` target). The SDK decides era wrapping from
+ * the root's own `type`, so a documented object return must keep carrying `type: 'object'` at
+ * the root too, or adding a doc comment would silently start wrapping the tool's result.
+ */
+function outputJsonSchema(output: ReturnType<typeof schemaBuilder>, schema: z.ZodType): Record<string, unknown> {
+  const json = output.jsonSchema(schema);
+  if ('type' in json || typeof json.$ref !== 'string') return json;
+  const target = (json.$defs as Record<string, { type?: unknown }> | undefined)?.[json.$ref.replace('#/$defs/', '')];
+  return target?.type === undefined ? json : { ...json, type: target.type };
+}
+
 function toolConfig(app: ResolvedApp, method: AbiMethod) {
   const input = schemaBuilder(app.manifest, 'input');
   const output = schemaBuilder(app.manifest, 'output');
@@ -95,7 +108,7 @@ function toolConfig(app: ResolvedApp, method: AbiMethod) {
     inputSchema: advertised(
       input.jsonSchema(z.object({ [HANDLE_PARAM]: input.describe(z.string(), APP_HANDLE_DOC), ...input.params(method) })),
     ),
-    ...(returns ? { outputSchema: advertised(output.jsonSchema(returns)) } : {}),
+    ...(returns ? { outputSchema: advertised(outputJsonSchema(output, returns)) } : {}),
     annotations: {
       readOnlyHint: readOnly,
       destructiveHint: method.destructive === true,

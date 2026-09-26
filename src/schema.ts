@@ -164,8 +164,6 @@ export function schemaBuilder(m: AbiManifest, mode: SchemaMode = 'input') {
   };
 }
 
-export const zodForType = (t: AbiTypeRef, m: AbiManifest): z.ZodType => schemaBuilder(m).type(t);
-
 export const inputShapeForMethod = (method: AbiMethod, m: AbiManifest): Record<string, z.ZodType> => schemaBuilder(m).params(method);
 
 export const parseArgs = (method: AbiMethod, m: AbiManifest, args: unknown) => z.object(inputShapeForMethod(method, m)).parse(args);
@@ -178,7 +176,9 @@ export function methodDescription(method: AbiMethod): string {
 
 /** describe_app registers no schema to carry parameter docs, so they follow the description. */
 export function methodReference(method: AbiMethod): string {
-  const params = method.params.filter((p) => p.doc).map((p) => `  ${p.name}: ${p.doc}`);
+  const params = method.params
+    .filter((p) => p.doc)
+    .map((p) => `  ${p.name}: ${p.doc!.replace(/\n/g, '\n    ')}`);
   return [methodDescription(method), ...params].join('\n');
 }
 
