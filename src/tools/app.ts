@@ -132,7 +132,8 @@ export function registerAppTools(
   async function catalogued(match: (a: ResolvedApp) => boolean): Promise<ResolvedApp | undefined> {
     const hit = catalog.apps().find(match);
     if (hit) return hit;
-    await catalog.sync();
+    // A transient node error here must not fail the caller: the miss/not-found path below still applies.
+    await catalog.sync().catch(() => {});
     return catalog.apps().find(match);
   }
 

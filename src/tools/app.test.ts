@@ -216,6 +216,25 @@ test('a tool whose app was uninstalled refuses with the retry line and the guide
   }
 });
 
+test('a catalog miss whose re-sync fails still resolves the app, using the direct read', async () => {
+  const s = await setup();
+  try {
+    s.apps.push(kv());
+    s.apps[1].id = 'kv-id-2';
+    const list = s.session.mero.admin.listApplications.bind(s.session.mero.admin);
+    let calls = 0;
+    s.session.mero.admin.listApplications = async () => {
+      calls++;
+      if (calls === 2) throw new Error('node blip');
+      return list();
+    };
+    const res = await s.json('describe_app', { app: 'kv-id-2' });
+    assert.equal(res.application, 'kv-id-2');
+  } finally {
+    await s.close();
+  }
+});
+
 test('an app without a guide still needs a handle, and the refusal carries only the retry line', async () => {
   const s = await setup();
   try {
