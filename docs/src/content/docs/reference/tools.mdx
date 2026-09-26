@@ -242,7 +242,7 @@ Show an application's methods and guide without choosing a context. Read-only.
 | `app` | string | Id, package name, or trailing segment |
 | `service` | string, optional | For an app bundling several services |
 
-Returns, as JSON: `application`, `package`, `appVersion`, resolved `service`, `contextServices`, every method as a signature, and an `app_handle` with no context.
+Returns, as JSON: `application`, `package`, `appVersion`, resolved `service`, `contextServices`, every method as a signature (with its doc and documented parameters when the ABI carries them; see [ABI mapping](/reference/abi-mapping/#docs-and-hints)), and an `app_handle` with no context.
 Then the guide as an embedded `text/markdown` resource after an author label, or the line `This app ships no guide.`
 
 Omitting `service` on a multi-service app returns an error naming the available services.

@@ -86,8 +86,8 @@ representation:
 - **Unit variants** ride as bare names — `"Pending"`.
 - **Payload variants** ride as a single-key object — `{"Approved": {"by": "…"}}`.
 
-A variant with no payloads anywhere becomes a plain string `enum`.
-A mix becomes a `oneOf` of the string enum and one object schema per payload variant.
+A variant with no payloads anywhere becomes a plain string `enum`, unless a unit variant carries a doc, in which case it becomes a `oneOf` of `{ const, description }` entries instead (see [Docs and hints](#docs-and-hints)).
+A mix becomes a `oneOf` of the unit variants (as an `enum` or as documented consts) and one object schema per payload variant.
 
 ## CRDT collection wrappers
 
@@ -119,7 +119,7 @@ Outgoing arguments are built by filtering the input down to the method's *declar
 
 ## Method signatures
 
-`describe_app` and `select_app` render each method as a signature, and it is also the tool's description:
+`describe_app` and `select_app` render each method as a signature, which is a documented method's tool description too, below its doc (see [Docs and hints](#docs-and-hints)):
 
 ```
 [view] get(key: string) -> string | null
