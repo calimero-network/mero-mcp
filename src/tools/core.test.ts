@@ -457,3 +457,64 @@ test('a bodyless rejection still names the endpoint and the status, and an unrea
   assert.equal(unreachable.isError, true);
   assert.equal(textOf(unreachable), 'Error: Cannot reach the node at http://localhost:2528/admin-api/health: fetch failed');
 });
+
+/** Two installed apps: one whose init takes (name, seed), one whose init takes nothing. */
+const INIT_ABIS: Record<string, unknown> = {
+  AppBlocks: {
+    schema_version: 'wasm-abi/1',
+    types: {},
+    methods: [{ name: 'init', params: [{ name: 'name', type: { kind: 'string' } }, { name: 'seed', type: { kind: 'u64' } }] }],
+    events: [],
+  },
+  AppPlain: { schema_version: 'wasm-abi/1', types: {}, methods: [{ name: 'init', params: [] }], events: [] },
+  AppNoInit: { schema_version: 'wasm-abi/1', types: {}, methods: [{ name: 'ping', params: [] }], events: [] },
+};
+
+function initAdmin() {
+  const created: Array<Record<string, unknown>> = [];
+  const abiFetches: string[] = [];
+  const admin = {
+    listApplications: async () => ({
+      apps: Object.keys(INIT_ABIS).map((id) => ({ id, package: `com.example.${id.toLowerCase()}`, metadata: [], blob: { bytecode: `${id}-blob` } })),
+    }),
+    getApplicationAbi: async (id: string) => {
+      abiFetches.push(id);
+      return INIT_ABIS[id];
+    },
+    createContext: async (request: Record<string, unknown>) => {
+      created.push(request);
+      return { contextId: 'Ctx111', memberPublicKey: 'Member111' };
+    },
+  };
+  const { server, tools } = fakeServer();
+  registerCoreTools(server, fakeSession(admin), loadConfig(env()), CATALOG);
+  return { create: tools.get('create_context')!, created, abiFetches };
+}
+
+test('create_context validates init args against the ABI and sends them as the JSON init input', async () => {
+  const { create, created } = initAdmin();
+  await create({ application: 'AppBlocks', namespace: 'Ns111', args: { name: 'world-1', seed: 7, stray: true } });
+  assert.equal(created.length, 1);
+  assert.deepEqual(JSON.parse(Buffer.from(created[0].initializationParams as number[]).toString('utf8')), { name: 'world-1', seed: 7 });
+});
+
+test('create_context rejects init args that violate the init signature and creates nothing', async () => {
+  const { create, created } = initAdmin();
+  const res = await create({ application: 'AppBlocks', namespace: 'Ns111', args: { name: 'world-1', seed: 'seven' } });
+  assert.equal(res.isError, true);
+  assert.deepEqual(created, []);
+});
+
+test('create_context without args sends no init input and never fetches the ABI, as before', async () => {
+  const { create, created, abiFetches } = initAdmin();
+  await create({ application: 'AppPlain', namespace: 'Ns111' });
+  assert.deepEqual(created, [{ applicationId: 'AppPlain', groupId: 'Ns111', name: undefined, serviceName: undefined }]);
+  assert.deepEqual(abiFetches, []);
+});
+
+test('create_context with args for an app that declares no init method says so and creates nothing', async () => {
+  const { create, created } = initAdmin();
+  const res = await create({ application: 'AppNoInit', namespace: 'Ns111', args: { name: 'x' } });
+  assert.equal(textOf(res), 'Error: Application "AppNoInit" declares no init method, so it takes no init args.');
+  assert.deepEqual(created, []);
+});
