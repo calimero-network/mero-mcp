@@ -201,6 +201,26 @@ test('after an in-place upgrade an old tool resyncs, then runs as the new versio
   }
 });
 
+test('after an in-place upgrade whose re-sync fails, an old tool refuses a current handle and runs nothing', async () => {
+  const s = await setup([kv()]);
+  try {
+    s.apps[0].version = '1.1.0';
+    const current = handles.issue({ a: 'kv-id', p: 'com.calimero.kv-store', v: '1.1.0', g: guideHash(GUIDE), c: ctx('kvctx'), s: null });
+    const list = s.session.mero.admin.listApplications.bind(s.session.mero.admin);
+    let calls = 0;
+    s.session.mero.admin.listApplications = async () => {
+      if (++calls === 2) throw new Error('node blip');
+      return list();
+    };
+    const res = await s.call('kv_store_set', { app_handle: current, key: 'k' });
+    assert.equal(res.isError, true);
+    assert.equal(res.content.at(-1)!.text, RETRY);
+    assert.deepEqual(s.executed, []);
+  } finally {
+    await s.close();
+  }
+});
+
 test('a tool whose app was uninstalled refuses with the retry line and the guide, runs nothing, and leaves the list', async () => {
   const s = await setup();
   try {

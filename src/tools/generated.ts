@@ -138,10 +138,13 @@ export function registerGeneratedTools(
     }
     if (current.version !== app.version) {
       await resync();
-      const upgraded = catalog.apps().find((a) => a.id === app.id && a.serviceName === app.serviceName);
+      // A failed re-sync can leave the pre-upgrade entry, whose schema must never validate a call to the new install.
+      const upgraded = catalog
+        .apps()
+        .find((a) => a.id === app.id && a.serviceName === app.serviceName && a.version === current.version);
       const same = upgraded && toolMethods(upgraded).find((m) => m.name === method.name);
       if (upgraded && same) [app, method] = [upgraded, same];
-      // The installed version dropped this method, so the tool leaves the list on this sync; never run it against the new one.
+      // The upgrade is unconfirmed or dropped this method; never run the old tool against the new install.
       else return gate.refuse(current, gate.retryText(current)).refusal;
     }
     const admitted = await gate.admit(current, args[HANDLE_PARAM]);
