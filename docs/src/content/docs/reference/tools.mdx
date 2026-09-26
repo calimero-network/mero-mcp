@@ -76,6 +76,7 @@ Create a context for an application under a namespace.
 | `namespace` | string | Namespace id |
 | `name` | string, optional | |
 | `service` | string, optional | Required for a multi-service application |
+| `args` | object, optional | Arguments for the app's `init`, keyed by parameter name; checked against the ABI like a method call |
 
 ### `delete_context`
 

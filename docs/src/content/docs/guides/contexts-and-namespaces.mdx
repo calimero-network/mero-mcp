@@ -55,6 +55,11 @@ This is the step people miss, and it is why the app's tools are listed while `se
    For a multi-service application, pass `service` too — `describe_app` reports the
    service names existing contexts use, and that is the value this wants.
 
+   If the app's `init` takes parameters (`describe_app` lists `init` with them), pass
+   them as `args`, keyed by parameter name - for example `args {"name": "world-1",
+   "seed": 42, "now": 1727000000}` for mero-blocks. They are checked against the ABI
+   before anything reaches the node.
+
 4. **Select the app and call it:**
 
    ```text

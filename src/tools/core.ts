@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import type { Application, ContextWithGroup, SignedGroupOpenInvitation } from '@calimero-network/mero-js';
+import type { AbiManifest } from '@calimero-network/abi-codegen';
 import type { Config } from '../config.ts';
 import { discoverLocalNodes, listConfiguredNodes, resolveNode } from '../config.ts';
 import type { NodeSession } from '../node.ts';
@@ -8,6 +9,7 @@ import type { Catalog } from '../catalog.ts';
 import { createAbiLoader } from '../abi.ts';
 import { errorResult, textResult } from '../errors.ts';
 import { listing } from '../guide.ts';
+import { inputShapeForMethod } from '../schema.ts';
 
 /** Runs an admin call and folds its result or throw into the MCP text-result convention. */
 function wrap<Args>(fn: (args: Args) => Promise<unknown>) {
@@ -29,9 +31,16 @@ const opaqueInvitation = z
 // Hex matches how this codebase already renders bytes for display (see schema.ts's bytesSchema).
 const toHex = (bytes: number[]) => Buffer.from(bytes).toString('hex');
 
+/** init takes the same JSON args object a method call does, so it is validated the way method calls are. */
+function initParams(manifest: AbiManifest, label: string, args: Record<string, unknown>): number[] {
+  const init = manifest.methods.find((m) => m.name === 'init');
+  if (!init) throw new Error(`Application "${label}" declares no init method, so it takes no init args.`);
+  return [...Buffer.from(JSON.stringify(z.object(inputShapeForMethod(init, manifest)).parse(args)), 'utf8')];
+}
+
 export function registerCoreTools(server: McpServer, session: NodeSession, cfg: Config, catalog: Catalog): void {
   const admin = session.mero.admin;
-  const { resolveAppId } = createAbiLoader(session);
+  const { resolveAppId, load } = createAbiLoader(session);
   // The install already happened; a failed refresh only delays the new tools until the next poll.
   const refreshApps = () => catalog.sync().catch((err: unknown) => console.error('[mero-mcp] app list refresh failed:', err));
 
@@ -103,16 +112,36 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
   server.registerTool(
     'create_context',
     {
-      description: 'Create a new context for an application under a namespace.',
+      description:
+        'Create a new context for an application under a namespace. ' +
+        "Pass `args` when the application's init method takes parameters; describe_app lists init with them.",
       inputSchema: {
         application: z.string().describe('Application id or package name.'),
         namespace: z.string(),
         name: z.string().optional(),
         service: z.string().optional(),
+        args: z.record(z.string(), z.unknown()).optional().describe("Arguments for the application's init method, keyed by parameter name."),
       },
     },
-    wrap(async ({ application, namespace, name, service }: { application: string; namespace: string; name?: string; service?: string }) =>
-      admin.createContext({ applicationId: (await resolveAppId(application)).id, groupId: namespace, name, serviceName: service }),
+    wrap(
+      async ({
+        application,
+        namespace,
+        name,
+        service,
+        args,
+      }: {
+        application: string;
+        namespace: string;
+        name?: string;
+        service?: string;
+        args?: Record<string, unknown>;
+      }) => {
+        const request = { groupId: namespace, name, serviceName: service };
+        if (!args) return admin.createContext({ ...request, applicationId: (await resolveAppId(application)).id });
+        const { id, manifest } = await load(application, service);
+        return admin.createContext({ ...request, applicationId: id, initializationParams: initParams(manifest, application, args) });
+      },
     ),
   );
 
