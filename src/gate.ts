@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { fromJsonSchema } from '@modelcontextprotocol/server';
-import type { ResolvedApp } from './abi.ts';
+import type { AppIdentity, ResolvedApp } from './abi.ts';
 import { guideBlocks } from './guide.ts';
 import { guideHash, handles, type HandleKeeper } from './handle.ts';
 import type { NodeSession } from './node.ts';
@@ -28,9 +28,9 @@ export const advertisedObject = (schema: z.ZodObject) => {
 
 export type Admission = { contextId: string } | { refusal: { isError: true; content: Block[] } };
 
-export const packageKey = (app: ResolvedApp) => app.package ?? app.id;
+export const packageKey = (app: Pick<AppIdentity, 'id' | 'package'>) => app.package ?? app.id;
 
-const retry = (app: ResolvedApp) => `Call select_app for ${packageKey(app)} and retry with the returned app_handle.`;
+const retry = (app: AppIdentity) => `Call select_app for ${packageKey(app)} and retry with the returned app_handle.`;
 
 const noContext = (app: ResolvedApp) =>
   `This app_handle names no context. Call select_app for ${packageKey(app)} with a context and retry with the returned app_handle.`;
@@ -50,7 +50,7 @@ export function createGate(session: NodeSession, keeper: HandleKeeper = handles)
     return ((await session.mero.admin.getContextsForApplication(applicationId)) as { contexts: AppContext[] }).contexts;
   }
 
-  const refuse = (app: ResolvedApp, text: string, withGuide = true) => ({
+  const refuse = (app: AppIdentity, text: string, withGuide = true) => ({
     refusal: { isError: true as const, content: [...(withGuide ? guideBlocks(app) : []), { type: 'text' as const, text }] },
   });
 

@@ -1,4 +1,4 @@
-import type { ResolvedApp } from './abi.ts';
+import type { AppIdentity } from './abi.ts';
 
 const FENCE = /^ *```/;
 const PROCEDURES_HEADING = '## Procedures';
@@ -57,24 +57,17 @@ export function listing(bytes: number[]): { metadata: unknown; procedures: strin
   return { metadata: rest, procedures: typeof guide === 'string' ? procedures(guide) : [] };
 }
 
-export const guideUri = (pkg: string, version: string) =>
-  `calimero://apps/${encodeURIComponent(pkg)}/${encodeURIComponent(version)}/guide`;
+/** The guide resource uri, which only an app with a package and a version has. */
+export const guideUri = ({ package: pkg, version }: Pick<AppIdentity, 'package' | 'version'>) =>
+  pkg && version ? `calimero://apps/${encodeURIComponent(pkg)}/${encodeURIComponent(version)}/guide` : undefined;
 
 /** The guide as an embedded resource, labelled so the agent reads it as the author's text, never as this server's. */
-export function guideBlocks(app: ResolvedApp) {
+export function guideBlocks(app: AppIdentity) {
   if (!app.guide) return [];
   const pkg = app.package ?? app.id;
-  const version = app.version ?? '';
-  return [
-    { type: 'text' as const, text: `App guide, provided by the app's author (package ${pkg}, signer ${app.signerId}):` },
-    {
-      type: 'resource' as const,
-      resource: {
-        uri: guideUri(pkg, version),
-        mimeType: 'text/markdown',
-        text: app.guide,
-        _meta: { package: pkg, appVersion: version, signerId: app.signerId ?? null },
-      },
-    },
-  ];
+  const uri = guideUri(app);
+  const label = { type: 'text' as const, text: `App guide, provided by the app's author (package ${pkg}, signer ${app.signerId}):` };
+  if (!uri) return [label, { type: 'text' as const, text: app.guide }];
+  const _meta = { package: pkg, appVersion: app.version, signerId: app.signerId ?? null };
+  return [label, { type: 'resource' as const, resource: { uri, mimeType: 'text/markdown', text: app.guide, _meta } }];
 }

@@ -29,7 +29,13 @@ export function createCatalog(loader: AbiLoader) {
     if (nextPrint === print) return;
     apps = next;
     print = nextPrint;
-    for (const listener of listeners) listener();
+    for (const listener of listeners) {
+      try {
+        listener();
+      } catch (err) {
+        console.error('[mero-mcp] app list listener failed:', err);
+      }
+    }
   }
 
   /** One sync at a time, so a slow older read can never land after, and over, a newer one. */

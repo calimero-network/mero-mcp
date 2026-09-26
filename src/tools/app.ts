@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
-import type { AbiLoader, ResolvedApp } from '../abi.ts';
+import { AppNotFoundError, type AbiLoader, type ResolvedApp } from '../abi.ts';
 import type { Catalog } from '../catalog.ts';
 import { errorResult, textResult } from '../errors.ts';
 import { advertisedObject, type Gate } from '../gate.ts';
@@ -41,6 +41,8 @@ const contextsFor = (label: string, ids: string[]) => `Contexts for "${label}": 
 
 const severalContexts = (label: string, ids: string[]) =>
   `Application "${label}" has ${ids.length} contexts; pass context with one of: ${ids.join(', ')}`;
+
+const refusal = (text: string) => ({ isError: true as const, content: [{ type: 'text' as const, text }] });
 
 /** A second content block onward, so the structured result in the first stays parseable JSON. */
 const withBlocks = (data: unknown, blocks: Array<{ type: string }>) =>
@@ -117,9 +119,9 @@ export function registerAppTools(
 
   /** The refusal for a call its handle does not cover, with the guide of the app `app` names when it names one. */
   async function refuseWithout(app: unknown) {
-    if (typeof app !== 'string') return { isError: true as const, content: [{ type: 'text' as const, text: NO_HANDLE }] };
-    const resolved = await loader.load(app);
-    return gate.refuse(resolved, gate.retryText(resolved)).refusal;
+    if (typeof app !== 'string') return refusal(NO_HANDLE);
+    const named = await loader.identify(app);
+    return gate.refuse(named, gate.retryText(named)).refusal;
   }
 
   const describeBlocks = (app: ResolvedApp) => (app.guide ? guideBlocks(app) : [{ type: 'text' as const, text: NO_GUIDE }]);
@@ -207,7 +209,11 @@ export function registerAppTools(
         // With a valid handle `app` only matters when it names another app; a name that resolves to nothing is ignored.
         const named = typeof app === 'string' ? await loader.identify(app).catch(() => undefined) : undefined;
         if (named && named.id !== payload.a) return await refuseWithout(app);
-        const resolved = await loader.load(payload.a, payload.s ?? undefined);
+        const resolved = await loader.load(payload.a, payload.s ?? undefined).catch((err: unknown) => {
+          if (err instanceof AppNotFoundError) return undefined;
+          throw err;
+        });
+        if (!resolved) return refusal(NO_HANDLE);
         await catalogued(sameUnit(resolved));
         const admitted = await gate.admit(resolved, app_handle);
         if ('refusal' in admitted) return admitted.refusal;

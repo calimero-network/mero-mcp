@@ -121,7 +121,7 @@ export function registerGeneratedTools(
   loader: AbiLoader,
   reserved: ReadonlySet<string>,
 ): () => void {
-  let registered: RegisteredTool[] = [];
+  const registered: RegisteredTool[] = [];
 
   /** Runs one method as a tool; a tool built before an upgrade or uninstall resyncs the list and answers as it now stands. */
   async function invoke(app: ResolvedApp, method: AbiMethod, args: Record<string, unknown>) {
@@ -130,12 +130,14 @@ export function registerGeneratedTools(
       if (err instanceof AppNotFoundError) return undefined;
       throw err;
     });
+    // A failed re-sync must not replace the refusal; the next poll retries it.
+    const resync = () => catalog.sync().catch(() => {});
     if (!current) {
-      await catalog.sync();
+      await resync();
       return gate.refuse(app, gate.retryText(app)).refusal;
     }
     if (current.version !== app.version) {
-      await catalog.sync();
+      await resync();
       const upgraded = catalog.apps().find((a) => a.id === app.id && a.serviceName === app.serviceName);
       const same = upgraded && toolMethods(upgraded).find((m) => m.name === method.name);
       if (upgraded && same) [app, method] = [upgraded, same];
@@ -153,7 +155,7 @@ export function registerGeneratedTools(
   }
 
   function register() {
-    for (const tool of registered) tool.remove();
+    for (const tool of registered.splice(0)) tool.remove();
     const names = toolNamesByApp(catalog.apps(), reserved);
     for (const app of catalog.apps()) {
       for (const m of app.manifest.methods.filter(collides)) {
@@ -161,13 +163,16 @@ export function registerGeneratedTools(
         console.error(`[mero-mcp] no tool for ${where}: its app_handle parameter would collide; use call`);
       }
     }
-    registered = catalog.apps().flatMap((app) =>
-      toolMethods(app).map((method) =>
-        server.registerTool(names.get(app)!.get(method.name)!, toolConfig(app, method), async (args: unknown) =>
-          invoke(app, method, args as Record<string, unknown>).catch(errorResult),
-        ),
-      ),
-    );
+    // Tracked one by one, so a throw midway still leaves every registered tool removable on the next sync.
+    for (const app of catalog.apps()) {
+      for (const method of toolMethods(app)) {
+        registered.push(
+          server.registerTool(names.get(app)!.get(method.name)!, toolConfig(app, method), async (args: unknown) =>
+            invoke(app, method, args as Record<string, unknown>).catch(errorResult),
+          ),
+        );
+      }
+    }
   }
 
   register();

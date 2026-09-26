@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { guideOf, listing, procedures } from './guide.ts';
+import type { ResolvedApp } from './abi.ts';
+import { guideBlocks, guideOf, listing, procedures } from './guide.ts';
 
 const utf8Bytes = (s: string) => [...Buffer.from(s, 'utf8')];
 const lines = (...l: string[]) => l.join('\n');
@@ -67,4 +68,10 @@ test('listing drops any guide key from object metadata and passes other metadata
   assert.deepEqual(listing(utf8Bytes(JSON.stringify({ name: 'kv', guide: 7 }))), { metadata: { name: 'kv' }, procedures: [] });
   assert.deepEqual(listing(utf8Bytes('plain text')), { metadata: 'plain text', procedures: [] });
   assert.deepEqual(listing([]), { metadata: undefined, procedures: [] });
+});
+
+test('a guide of an app without a package or version is sent as text, since it has no readable resource uri', () => {
+  const app = { id: 'raw-id', guide: '## Overview', signerId: 'S' } as ResolvedApp;
+  assert.deepEqual(guideBlocks(app).map((b) => b.type), ['text', 'text']);
+  assert.equal(guideBlocks({ ...app, package: 'org.x', version: '1.0.0' })[1].type, 'resource');
 });

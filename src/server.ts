@@ -3,7 +3,7 @@ import { McpServer, ResourceNotFoundError, ResourceTemplate } from '@modelcontex
 import { createAbiLoader } from './abi.ts';
 import { createCatalog } from './catalog.ts';
 import type { Config } from './config.ts';
-import { createGate, packageKey } from './gate.ts';
+import { createGate } from './gate.ts';
 import { GUIDE_URI_TEMPLATE, guideUri } from './guide.ts';
 import type { NodeSession } from './node.ts';
 import { registerAppTools } from './tools/app.ts';
@@ -66,12 +66,12 @@ export function createServerFactory(session: NodeSession, cfg: Config) {
     const unsubscribeTools = registerGeneratedTools(server, catalog, gate, session, loader, reserved);
     const unsubscribeResources = catalog.subscribe(() => server.sendResourceListChanged());
 
-    const guided = () => catalog.apps().filter((a) => a.guide && a.package && a.version);
+    const guided = () => catalog.apps().filter((a) => a.guide && guideUri(a));
     server.registerResource(
       'app-guide',
       new ResourceTemplate(GUIDE_URI_TEMPLATE, {
         list: async () => ({
-          resources: [...new Map(guided().map((a) => [guideUri(packageKey(a), a.version!), a])).entries()].map(([uri, a]) => ({
+          resources: [...new Map(guided().map((a) => [guideUri(a)!, a])).entries()].map(([uri, a]) => ({
             uri,
             name: `${a.name ?? a.package} guide`,
             mimeType: 'text/markdown',

@@ -27,6 +27,21 @@ test('sync notifies only when an app is installed, upgraded or uninstalled, and 
   assert.deepEqual(catalog.apps().map((a) => a.package), ['org.b', 'org.c']);
 });
 
+test('a listener that throws is reported and does not stop the others', async (t) => {
+  const logged = t.mock.method(console, 'error', () => {});
+  const node = fakeNode([app('a-id', 'org.a')]);
+  const catalog = createCatalog(createAbiLoader(node.session));
+  let changes = 0;
+  catalog.subscribe(() => {
+    throw new Error('boom');
+  });
+  catalog.subscribe(() => changes++);
+
+  await catalog.sync();
+  assert.equal(changes, 1);
+  assert.match(String(logged.mock.calls[0].arguments.join(' ')), /boom/);
+});
+
 test('an app whose ABI cannot be read is left out and reported, and the rest still load', async (t) => {
   const logged = t.mock.method(console, 'error', () => {});
   const node = fakeNode([app('a-id', 'org.a'), { ...app('bad-id', 'org.bad'), abi: { schema_version: 'wasm-abi/1' } }]);

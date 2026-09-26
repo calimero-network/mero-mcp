@@ -216,6 +216,44 @@ test('a tool whose app was uninstalled refuses with the retry line and the guide
   }
 });
 
+test('a tool whose app was uninstalled still refuses with the retry line when the re-sync fails', async () => {
+  const s = await setup();
+  try {
+    const { app_handle } = await s.json('select_app', { app: 'kv-store' });
+    s.apps.splice(0, 1);
+    const list = s.session.mero.admin.listApplications.bind(s.session.mero.admin);
+    let calls = 0;
+    s.session.mero.admin.listApplications = async () => {
+      if (++calls === 2) throw new Error('node blip');
+      return list();
+    };
+    const res = await s.call('kv_store_set', { app_handle, key: 'k' });
+    assert.deepEqual(res.content.map((b) => b.text ?? b.resource?.text), [LABEL, GUIDE, RETRY]);
+    assert.deepEqual(s.executed, []);
+  } finally {
+    await s.close();
+  }
+});
+
+test('call with a handle for an uninstalled app, or without one for a multi-service app, refuses with the retry line', async () => {
+  const s = await setup([kv(), drive()]);
+  try {
+    const { app_handle } = await s.json('select_app', { app: 'kv-store' });
+    s.apps.splice(0, 1);
+    const gone = await s.call('call', { app_handle, method: 'set', args: { key: 'k' } });
+    assert.deepEqual(gone.content.map((b) => b.text), ['Call select_app for the application and retry with the returned app_handle.']);
+
+    const bare = await s.call('call', { method: 'create_doc', args: { title: 't' }, app: 'mero-drive' });
+    assert.deepEqual(bare.content.map((b) => b.text ?? b.resource?.text).slice(-2), [
+      '## Overview\ndrive',
+      'Call select_app for com.calimero.mero-drive and retry with the returned app_handle.',
+    ]);
+    assert.deepEqual(s.executed, []);
+  } finally {
+    await s.close();
+  }
+});
+
 test('a catalog miss whose re-sync fails still resolves the app, using the direct read', async () => {
   const s = await setup();
   try {
