@@ -29,7 +29,7 @@ A full name longer than 49 characters (64 minus the 15-character `mcp__mero-mcp_
 
 The slug is derived from the *resolved* application, not the string you typed, so one application always names its tools the same way.
 If two apps sanitise to the same slug, the second in package order gets `_` plus the first 6 alphanumerics of its application id, so names are stable across sessions.
-Of two installed versions of one app, the highest keeps the plain slug and the older one takes the suffix, so the plain names match the handle `select_app` gives without a context.
+The same applies to one package from two signers, which are two apps: the one later in application id order takes the suffix.
 A whole name is also kept unique: when a slug plus a method spells a fixed tool (`com.x.node` with `status` would be `node_status`) or another app's tool, that tool takes the application-id suffix too.
 
 ## Scalars

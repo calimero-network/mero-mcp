@@ -23,7 +23,7 @@ The server picks the first that applies, and reports the winner as `authMode` in
 that does want auth, calls are rejected and `authMode: "none"` in `node_status` is the
 tell.
 
-Only `credentials` mode logs in eagerly (on the first tool call, when the session is
+Only `credentials` mode logs in eagerly (when a client opens the connection and the session is
 built). The other modes inject what they were given and let the node judge it.
 
 ## The handoff

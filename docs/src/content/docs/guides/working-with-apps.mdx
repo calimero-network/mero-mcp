@@ -64,12 +64,10 @@ mero-mcp reads it when a client connects, again right after its own `install_app
 When `select_app`, `describe_app` or `call` names an app the list does not have yet, for example because the node was down when the client connected, mero-mcp reads the list again first, which also starts the 30-second refresh.
 Selecting an app never changes the list otherwise.
 
-Each installed version of an app has its own tools.
-The highest installed version keeps the plain tool names, and older versions' names carry a suffix from their application id.
-`select_app` with a context binds the version whose application owns that context, and without one the highest installed version.
-Its `tools` lists exactly the tool names of the version it bound.
-When the highest version has no contexts, its note lists the contexts of the other installed versions, each with its version.
-A handle for one version is refused by another version's tools, with a message naming both versions and the tool that does take the handle.
+A node holds one version of an app: core keys an app by its package and signer, so an upgrade replaces it in place and makes its old handles stale.
+The same package from two signers is two apps, each with its own tools; the one later in application id order carries a suffix from its id.
+A package name then matches both, so `select_app` and `describe_app` refuse it, list each application id with its signer, and ask for the id.
+`select_app`'s `tools` lists exactly the tool names of the app it bound, and a handle for one of the two apps is refused by the other's tools.
 
 ## Multi-service applications
 

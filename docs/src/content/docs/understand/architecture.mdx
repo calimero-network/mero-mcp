@@ -37,7 +37,7 @@ It registers no prompts.
 - src/
   - index.ts        entrypoint: serveStdio over the server factory
   - server.ts       the server factory: catalog, tools, guide resources, cache hints
-  - catalog.ts      installed app versions, refreshed on install and every 30 s
+  - catalog.ts      installed apps, refreshed on install and every 30 s
   - handle.ts       HMAC app handles
   - gate.ts         handle checks and refusals
   - guide.ts        guide parsing and delivery
@@ -111,13 +111,14 @@ an application for the rest of the session.
 
 ## The catalog
 
-The catalog is the list of installed apps every tool list is built from, one entry per app version and service.
-It is server-global, so no list varies by connection, and it is sorted by package, then version, then service.
+The catalog is the list of installed apps every tool list is built from, one entry per app and service.
+An app is a package from one signer: core derives the application id from both, so an upgrade replaces the app in place and a node never holds two versions of it.
+It is server-global, so no list varies by connection, and it is sorted by package, then application id, then service.
 It changes only when its fingerprint of (application id, blob id, version, service, guide hash) changes, which re-registers the generated tools and sends debounced list-changed notifications for tools and resources.
 An app whose ABI cannot be read is left out, with the reason on stderr.
 
 Slugs are derived from the resolved application rather than the string you typed, so one application always names its tools the same way.
-On a collision (two packages sanitising to one slug, or two installed versions of one package) the suffix comes from the application id, never from list order, keeping names stable.
+On a collision (two packages sanitising to one slug, or one package from two signers) the suffix comes from the application id, never from list order, keeping names stable.
 
 ## App handles
 
@@ -125,6 +126,7 @@ An `app_handle` is `base64url(payload) + "." + base64url(HMAC-SHA256(key, payloa
 
 | Key | Meaning |
 | --- | --- |
+| `a` | application id, which binds the package and its signer |
 | `p` | package |
 | `v` | app version |
 | `g` | first 16 hex of sha256 of the guide, or of `""` when there is none |

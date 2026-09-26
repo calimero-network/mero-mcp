@@ -117,8 +117,7 @@ Either the handle is missing or was not issued by this server, or it has gone st
 
 In every case, call `select_app` again and use the handle it returns.
 A handle from `describe_app` names no context, so app tools refuse it with a request to call `select_app` with a context.
-A handle for another installed version of the same app is refused with a message naming both versions and the tool that takes that handle, so one retry with that tool succeeds.
-To use the refused tool instead, call `select_app` with a context of that tool's version.
+A handle binds one application, so the tools of the same package from another signer refuse it.
 
 ## `Application "x" has no contexts on this node`
 
@@ -130,10 +129,6 @@ desktop app, or use create_context.
 Installing an application does not create a context. This is the single most common
 failure — see [contexts and namespaces](/guides/contexts-and-namespaces/).
 
-With several versions installed and no context chosen, `select_app` binds the highest version.
-When only other versions have contexts, the note says so instead, and lists each of those contexts with its version.
-Pass one as `context` to act on that version.
-
 ## `Application "x" has N contexts; pass context with one of: …`
 
 The application has several contexts, so `select_app` cannot choose one for you.
@@ -144,6 +139,11 @@ Pass `context` to `select_app`; the handle it returns names that context.
 The short name you used — the trailing package segment — matches more than one
 installed application. Use the full package name or the application id. Matching is
 on whole segments, so this is never a prefix collision.
+
+## `Application "x" is published by several signers`
+
+The package is installed from more than one signer, and each is a separate app with its own tools and handles.
+The error lists each application id with its signer; pass the id of the one you mean to `select_app` or `describe_app`.
 
 ## `Context "x" not found: it is neither a context id nor an alias`
 

@@ -31,7 +31,7 @@ Returns node `health`, the `url` and `nodeName` in use, the
 [`discoverySource`](/understand/node-discovery/), and the [`authMode`](/understand/authentication/).
 `nodeName` is `null` when nothing on this machine names the node.
 
-Because the session connects lazily, this is usually the first call that can fail —
+A node that was unreachable at connect is not an error until a tool needs it, so this is usually the first call to report it,
 which makes it the right first call of a session.
 
 ### `list_nodes`
@@ -222,11 +222,10 @@ Choose an application and the context to act in. Read-only.
 | `service` | string, optional | Only when no context is chosen; a chosen context decides the service |
 
 Returns everything `describe_app` does, plus the app's tool names (`tools`), the chosen `context`, and an `app_handle` bound to that context and its service.
-`tools` lists exactly the tools of the version and service the handle binds.
-With a context, the handle binds the installed version whose application owns it; without one, the highest installed version.
+`tools` lists exactly the tools of the app and service the handle binds.
+When a package name matches apps from several signers, `select_app` and `describe_app` refuse and list each application id with its signer; pass the application id.
 For a bundle with one named service, a context created without a service name binds that service.
 With several contexts and none chosen, `context` is `null` and a `note` lists the ids.
-When the highest version has no contexts but other installed versions do, the `note` lists those contexts, each with its version.
 An app missing from the tool list, for example because the node was down at connect, makes `select_app`, `describe_app` and `call` read the list again first.
 
 ### `call`
@@ -244,7 +243,7 @@ An unknown `method` returns the list of methods that exist.
 
 ## Generated method tools
 
-One per method of every installed application version, sorted by package, then version, then service, then method, for every client alike.
+One per method of every installed application, sorted by package, then application id, then service, then method, for every client alike.
 Named `<app>_<method>`, or `<app>_<service>_<method>` for a multi-service application, where `<app>` is the sanitised trailing package segment cut to 20 characters; a name longer than 49 characters keeps its first 42 and ends in `_` plus 6 hex of its sha256.
 A name never repeats a fixed tool's name or another app's: a clash adds `_` plus 6 alphanumerics of the application id (see [tool naming](/reference/abi-mapping/#tool-naming)).
 
@@ -255,10 +254,11 @@ A name never repeats a fixed tool's name or another app's: a clash adds `_` plus
 plus the method's declared parameters, typed from the ABI ([ABI mapping](/reference/abi-mapping/)).
 
 Each tool carries a `title` (`Set blocks (Mero Blocks)`), the method's signature as its `description`, an `outputSchema` when the method returns something, and explicit `readOnlyHint`, `destructiveHint`, `idempotentHint` and `openWorldHint: false` annotations.
+`readOnlyHint` follows the method's intent; the ABI cannot mark a method destructive or idempotent yet, so `destructiveHint` is always `false` and `idempotentHint` equals `readOnlyHint`.
 It also carries `icons` when the app's `metadata.icon` is a URL, and `_meta` with the `package`, `appVersion`, `signerId` and method `intent`.
 Results carry `structuredContent` next to the JSON text.
 A contract call that fails returns `isError: true` with the node's message.
 
 ## Resources
 
-`calimero://apps/{package}/{version}/guide` (`text/markdown`): one resource per installed app version that ships a guide.
+`calimero://apps/{package}/{version}/guide` (`text/markdown`): one resource per installed app that ships a guide.

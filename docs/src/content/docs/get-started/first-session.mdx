@@ -36,9 +36,9 @@ question at once:
   fell through to guessing at ports.
 - `authMode` — `handoff`, `token`, `credentials` or `none`.
 
-The server connects lazily, so **this is the first call that can fail.** A node
-that is down or credentials that are wrong surface here, not at startup — and the
-next call retries rather than leaving the server wedged.
+The server connects to the node when your client opens the connection, to list the installed apps.
+A node that is down or credentials that are wrong do not stop the server: they are logged, **this is the first call that reports them**, and the next call retries rather than leaving the server wedged.
+A node that hangs instead of refusing delays the client's handshake by up to the node request timeout.
 
 <Aside type="tip">
 `list_nodes` shows every node this machine knows about plus a live port probe, and
