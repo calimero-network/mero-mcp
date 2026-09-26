@@ -6,6 +6,7 @@ import type { Config } from './config.ts';
 import { createGate } from './gate.ts';
 import { GUIDE_URI_TEMPLATE, guideUri } from './guide.ts';
 import type { NodeSession } from './node.ts';
+import { traceTools } from './trace.ts';
 import { registerAppTools } from './tools/app.ts';
 import { registerCoreTools } from './tools/core.ts';
 import { registerGeneratedTools } from './tools/generated.ts';
@@ -55,6 +56,7 @@ export function createServerFactory(session: NodeSession, cfg: Config) {
         debouncedNotificationMethods: ['notifications/tools/list_changed', 'notifications/resources/list_changed'],
       },
     );
+    traceTools(server);
     const reserved = new Set<string>();
     recordToolNames(server, reserved, () => {
       registerCoreTools(server, session, cfg, loader, catalog);
