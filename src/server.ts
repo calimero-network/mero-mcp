@@ -25,11 +25,8 @@ function recordToolNames(server: McpServer, names: Set<string>, register: () => 
     names.add(args[0] as string);
     return (registerTool as (...a: unknown[]) => unknown).apply(server, args);
   }) as typeof registerTool;
-  try {
-    register();
-  } finally {
-    server.registerTool = registerTool;
-  }
+  register();
+  server.registerTool = registerTool;
 }
 
 /** The published version, so a client's diagnostics name the build it is talking to. */
