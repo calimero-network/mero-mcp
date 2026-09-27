@@ -62,7 +62,7 @@ Contexts on this node. Read-only.
 
 | Argument | Type | Notes |
 | --- | --- | --- |
-| `application` | string, optional | Filter to one application |
+| `application` | string, optional | Filter to one application: id, package name, trailing segment, or display name |
 
 `dagHeads` are rendered as hex.
 
@@ -133,7 +133,7 @@ Install a published application from the node's own configured registry, by
 
 ### `uninstall_application`
 
-**Destructive.** Takes `application` (id, package, or trailing segment).
+**Destructive.** Takes `application` (id, package name, trailing segment, or display name), resolved to one installed application before anything is removed.
 
 ### `upload_blob`
 

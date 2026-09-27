@@ -131,11 +131,13 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
     'list_contexts',
     {
       description: 'Contexts on this node, optionally filtered to one application.',
-      inputSchema: { application: z.string().optional() },
+      inputSchema: { application: z.string().optional().describe('Application id, package name, or display name.') },
       annotations: { readOnlyHint: true },
     },
     wrap(async ({ application }: { application?: string }) => {
-      const { contexts } = application ? await admin.getContextsForApplication(application) : await admin.getContexts();
+      const { contexts } = application
+        ? await admin.getContextsForApplication((await identify(application)).id)
+        : await admin.getContexts();
       return { contexts: contexts.map((ctx: ContextWithGroup) => ({ ...ctx, dagHeads: ctx.dagHeads?.map(toHex) })) };
     }),
   );
@@ -258,11 +260,11 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
       'uninstall_application',
       {
         description: 'Uninstall an application from this node.',
-        inputSchema: { application: z.string() },
+        inputSchema: { application: z.string().describe('Application id, package name, or display name.') },
         annotations: { destructiveHint: true },
       },
       wrap(async ({ application }: { application: string }) => {
-        const removed = await admin.uninstallApplication(application);
+        const removed = await admin.uninstallApplication((await identify(application)).id);
         await refreshApps();
         return removed;
       }),

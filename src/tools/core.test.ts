@@ -125,6 +125,7 @@ test('CALIMERO_MCP_TOOLSETS=core registers only the core group, and core registe
 test('list_contexts calls getContextsForApplication when given an application, else getContexts', async () => {
   const calls: string[] = [];
   const admin = {
+    listApplications,
     getContexts: async () => {
       calls.push('getContexts');
       return { contexts: [] };
@@ -138,8 +139,26 @@ test('list_contexts calls getContextsForApplication when given an application, e
   register(server, fakeSession(admin), loadConfig(env()), CATALOG);
   const handler = tools.get('list_contexts')!;
   await handler({});
-  await handler({ application: 'app1' });
-  assert.deepEqual(calls, ['getContexts', 'getContextsForApplication:app1']);
+  await handler({ application: 'AppId111' });
+  assert.deepEqual(calls, ['getContexts', 'getContextsForApplication:AppId111']);
+});
+
+test('list_contexts and uninstall_application resolve a package or short name to the id core takes, and refuse an unknown one', async () => {
+  const calls: string[] = [];
+  const admin = {
+    listApplications,
+    getContextsForApplication: async (id: string) => (calls.push(`contexts:${id}`), { contexts: [] }),
+    uninstallApplication: async (id: string) => (calls.push(`uninstall:${id}`), { applicationId: id }),
+  };
+  const { server, tools } = fakeServer();
+  register(server, fakeSession(admin), loadConfig(env()), CATALOG);
+  await tools.get('list_contexts')!({ application: 'kv-store' });
+  await tools.get('uninstall_application')!({ application: 'network.calimero.kv-store' });
+  for (const tool of ['list_contexts', 'uninstall_application']) {
+    const res = await tools.get(tool)!({ application: 'nope' });
+    assert.match(textOf(res), /Application "nope" not found\. Installed: network\.calimero\.kv-store/);
+  }
+  assert.deepEqual(calls, ['contexts:AppId111', 'uninstall:AppId111']);
 });
 
 const utf8Bytes = (s: string) => [...Buffer.from(s, 'utf8')];
@@ -305,6 +324,7 @@ test('install and uninstall refresh the app list after the node answers, and a f
   const logged = t.mock.method(console, 'error', () => {});
   const order: string[] = [];
   const admin = {
+    listApplications,
     installApplication: async () => (order.push('install'), { applicationId: 'AppId111' }),
     uninstallApplication: async () => (order.push('uninstall'), { applicationId: 'AppId111' }),
   };
