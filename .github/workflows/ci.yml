@@ -85,15 +85,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # --limit 1 includes pre-releases on purpose: core publishes only release
-      # candidates, so GitHub resolves no "latest" and the newest tag is what ships.
+      # Core publishes release candidates with no merod build attached, so the
+      # newest tag alone isn't reliable; scan back for one that has the asset.
       - name: Download released merod
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -o pipefail
-          TAG=$(gh release list --repo calimero-network/core --limit 1 --json tagName --jq '.[0].tagName')
-          echo "Latest core release: $TAG"
+          TAG=$(./scripts/find-merod-release.sh)
+          echo "Using core release: $TAG"
           curl -fsSL "https://github.com/calimero-network/core/releases/download/$TAG/merod_x86_64-unknown-linux-gnu.tar.gz" | tar xz
           chmod +x ./merod
 
