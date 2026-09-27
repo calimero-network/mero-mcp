@@ -93,13 +93,19 @@ An enum with another serde representation carries `tag`, `content` or `untagged`
 
 | ABI keys | serde attribute | Unit variant | Payload variant | JSON Schema |
 | --- | --- | --- | --- | --- |
-| none | default | `"Name"` | `{"Name": payload}` | `oneOf` |
+| none | default | `"Name"` | `{"Name": payload}` | `enum` or `oneOf`, as above |
 | `tag` | `#[serde(tag = "kind")]` | `{"kind": "Name"}` | `{"kind": "Name", ...payload fields}` | `oneOf` |
 | `tag` + `content` | `#[serde(tag = "t", content = "c")]` | `{"t": "Name"}` | `{"t": "Name", "c": payload}` | `oneOf` |
 | `untagged` | `#[serde(untagged)]` | `null` | the bare payload | `anyOf` |
 
-An internally tagged payload is one object holding the tag and the payload's fields; a payload with no fields to list, such as a map, only requires the tag.
+An enum with a single variant is that variant's schema, not a union.
+An internally tagged payload is one object holding the tag and the payload's fields, found through a newtype struct too.
+A map payload keeps its entries beside the tag, each checked against the map's value type.
+A payload that is itself an internally or adjacently tagged enum adds its own tag and payload beside the outer tag.
+Any other payload, including an enum reusing the outer tag's name, only requires the tag and leaves the rest to the node.
+A tagged value is matched by its tag, so a refusal names the problem of the variant the tag chose.
 Untagged members can overlap, so they are advertised as `anyOf`, and a value is matched against them in order, the first match winning, as serde does.
+Bytes inside an untagged member take no hex string form, because serde would read that string as a later string member instead.
 A value in another representation, such as `{"Text": {...}}` where the ABI says `tag`, is refused before the node is called.
 
 ## CRDT collection wrappers
