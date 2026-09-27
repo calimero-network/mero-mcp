@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { AbiManifest } from '@calimero-network/abi-codegen';
-import { inputShapeForMethod, methodDescription, methodReference, renderMethodSignature, schemaBuilder } from './schema.ts';
+import { inputShapeForMethod, methodReference, renderMethodSignature, schemaBuilder } from './schema.ts';
 import { z } from 'zod';
 
 function deepFreeze<T>(v: T): T {
@@ -316,11 +316,44 @@ test('a unit-only enum is a plain enum without docs, and oneOf of documented con
   });
 });
 
-test('methodDescription is the doc, a blank line, then the signature; the signature alone without a doc', () => {
-  const set = { name: 'set_blocks', params: [{ name: 'now', type: { kind: 'u64' } }], returns: { kind: 'u32' }, intent: 'mutating' } as never;
-  assert.equal(methodDescription(set), '[mut] set_blocks(now: u64) -> u32');
-  assert.equal(methodDescription({ ...(set as object), doc: 'Apply edits.\n\n# Errors\nPast 512.' } as never), 'Apply edits.\n\n# Errors\nPast 512.\n\n[mut] set_blocks(now: u64) -> u32');
+test('a documented payload variant carries its doc on its tagged object', () => {
+  const b = schemaBuilder(docManifest({ S: { kind: 'variant', variants: [{ name: 'Open' }, { name: 'Moved', doc: 'Moved elsewhere.', payload: { kind: 'string' } }] } }));
+  const json = b.jsonSchema(z.object({ s: b.type({ $ref: 'S' }) })) as { $defs: { S: { oneOf: Array<{ description?: string }> } } };
+  assert.deepEqual(json.$defs.S.oneOf.map((member) => member.description), [undefined, 'Moved elsewhere.']);
 });
+
+test('an enum mixing documented units and payload variants advertises each unit as a const beside the tagged objects', () => {
+  const b = schemaBuilder(
+    docManifest({
+      S: {
+        kind: 'variant',
+        variants: [{ name: 'Open', doc: 'Still running.' }, { name: 'Done' }, { name: 'Moved', doc: 'Moved elsewhere.', payload: { kind: 'string' } }],
+      },
+    }),
+  );
+  const json = b.jsonSchema(z.object({ s: b.type({ $ref: 'S' }) })) as { $defs: { S: unknown } };
+  assert.deepEqual(json.$defs.S, {
+    oneOf: [
+      { type: 'string', const: 'Open', description: 'Still running.' },
+      { type: 'string', const: 'Done' },
+      { type: 'object', properties: { Moved: { type: 'string' } }, required: ['Moved'], additionalProperties: false, description: 'Moved elsewhere.' },
+    ],
+  });
+});
+
+test('a doc on a nullable parameter describes it, keeps a bytes hint beside it, and null still validates', () => {
+  const b = schemaBuilder(docManifest());
+  const params = [
+    { name: 'note', type: { kind: 'string' }, nullable: true, doc: 'Optional note.' },
+    { name: 'hash', type: { kind: 'bytes' }, nullable: true, doc: 'The hash.' },
+  ];
+  const shape = b.params({ name: 'm', params } as never);
+  const json = b.jsonSchema(z.object(shape)) as { properties: Record<string, { description?: string }> };
+  assert.equal(json.properties.note.description, 'Optional note.');
+  assert.equal(json.properties.hash.description, 'The hash. (bytes: a hex string or a byte array)');
+  assert.equal(z.object(shape).safeParse({ note: null, hash: null }).success, true);
+});
+
 
 test('methodReference indents every line of a multi-line parameter doc, not just the first', () => {
   const set = {

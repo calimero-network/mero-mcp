@@ -892,6 +892,28 @@ for (const entry of ['select_app', 'describe_app', 'call'] as const) {
   });
 }
 
+test("a returns_doc on a bytes return keeps the bytes hint beside it, and on a named type replaces the type's own doc", async () => {
+  const documented: FakeApp = {
+    ...kv(),
+    abi: manifest(
+      [
+        method('digest', [], { intent: 'read_only', returns: { kind: 'bytes' }, returns_doc: 'The digest.' }),
+        method('status', [], { intent: 'read_only', returns: { $ref: 'Status' }, returns_doc: 'The current status.' }),
+      ],
+      { Status: { kind: 'record', doc: 'A status.', fields: [{ name: 'ok', type: { kind: 'bool' } }] } },
+    ),
+  };
+  const s = await setup([documented], '2026-07-28');
+  try {
+    const tools = (await s.client.listTools()).tools;
+    const described = (name: string) => (tools.find((t) => t.name === name)!.outputSchema as { description?: string }).description;
+    assert.equal(described('kv_store_digest'), 'The digest. (bytes: a byte array)');
+    assert.equal(described('kv_store_status'), 'The current status.');
+  } finally {
+    await s.close();
+  }
+});
+
 test('ABI docs and flags reach the tool: description, parameter doc, returns_doc, destructive and idempotent hints', async () => {
   const documented: FakeApp = {
     ...kv(),

@@ -88,11 +88,8 @@ export function schemaBuilder(m: AbiManifest, mode: SchemaMode = 'input') {
   /** serde externally-tagged: unit variants ride as bare names, payload variants as {Name: payload}; documented units become oneOf consts. */
   function variant(def: AbiVariantDef): z.ZodType {
     const units = def.variants.filter((v) => !v.payload);
-    const unitSchemas = units.some((v) => v.doc)
-      ? units.map((v) => documented(z.literal(v.name), v))
-      : units.length
-        ? [z.enum(units.map((v) => v.name) as [string, ...string[]])]
-        : [];
+    const plainEnum = units.length > 0 && !units.some((v) => v.doc);
+    const unitSchemas = plainEnum ? [z.enum(units.map((v) => v.name) as [string, ...string[]])] : units.map((v) => documented(z.literal(v.name), v));
     const tagged = def.variants.filter((v) => v.payload).map((v) => documented(z.object({ [v.name]: type(v.payload!) }).strict(), v));
     return union([...unitSchemas, ...tagged], true);
   }
@@ -160,7 +157,6 @@ export function schemaBuilder(m: AbiManifest, mode: SchemaMode = 'input') {
     params,
     jsonSchema,
     describe: (schema: z.ZodType, description: string) => note(schema, { description }),
-    document: (schema: z.ZodType, doc: string | undefined) => withDoc(schema, doc, schema),
   };
 }
 

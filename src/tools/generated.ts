@@ -83,17 +83,11 @@ export function toolNamesByApp(apps: readonly ResolvedApp[], reserved: ReadonlyS
   );
 }
 
-/**
- * A named-type return, once `document` gives it a description, moves from an inlined object
- * to a `$ref` (its `type` now lives on the `$defs` target). The SDK decides era wrapping from
- * the root's own `type`, so a documented object return must keep carrying `type: 'object'` at
- * the root too, or adding a doc comment would silently start wrapping the tool's result.
- */
-function outputJsonSchema(output: ReturnType<typeof schemaBuilder>, schema: z.ZodType): Record<string, unknown> {
-  const json = output.jsonSchema(schema);
-  if ('type' in json || typeof json.$ref !== 'string') return json;
-  const target = (json.$defs as Record<string, { type?: unknown }> | undefined)?.[json.$ref.replace('#/$defs/', '')];
-  return target?.type === undefined ? json : { ...json, type: target.type };
+/** returns_doc describes the result; a type hint such as bytes stays beside it, a named type's own doc does not. */
+function documentReturn(json: Record<string, unknown>, method: AbiMethod): Record<string, unknown> {
+  if (!method.returns_doc) return json;
+  const hint = method.returns && !('$ref' in method.returns) ? json.description : undefined;
+  return { ...json, description: hint ? `${method.returns_doc} (${hint})` : method.returns_doc };
 }
 
 function toolConfig(app: ResolvedApp, method: AbiMethod) {
@@ -101,14 +95,14 @@ function toolConfig(app: ResolvedApp, method: AbiMethod) {
   const output = schemaBuilder(app.manifest, 'output');
   const readOnly = method.intent === 'read_only';
   const returned = method.returns && output.type(method.returns);
-  const returns = returned && output.document(method.returns_nullable ? returned.nullable() : returned, method.returns_doc);
+  const returns = returned && (method.returns_nullable ? returned.nullable() : returned);
   return {
     title: toolTitle(app, method.name),
     description: methodDescription(method),
     inputSchema: advertised(
       input.jsonSchema(z.object({ [HANDLE_PARAM]: input.describe(z.string(), APP_HANDLE_DOC), ...input.params(method) })),
     ),
-    ...(returns ? { outputSchema: advertised(outputJsonSchema(output, returns)) } : {}),
+    ...(returns ? { outputSchema: advertised(documentReturn(output.jsonSchema(returns), method)) } : {}),
     annotations: {
       readOnlyHint: readOnly,
       destructiveHint: method.destructive === true,
