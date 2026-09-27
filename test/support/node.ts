@@ -35,7 +35,6 @@ export function fakeNode(apps: FakeApp[], opts: { aliases?: Record<string, strin
             ...(a.services ? { services: Object.fromEntries(Object.keys(a.services).map((name) => [name, { bytecode: `${a.id}-${name}` }])) } : {}),
           })),
         }),
-        getApplication: async (id: string) => ({ application: apps.find((a) => a.id === id) ?? null }),
         getApplicationAbi: async (id: string, service?: string) => {
           const app = apps.find((a) => a.id === id);
           if (!app?.services) return app?.abi;

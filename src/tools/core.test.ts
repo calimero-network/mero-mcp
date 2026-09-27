@@ -75,7 +75,7 @@ const jsonOf = (result: { content: Array<{ type: 'text'; text: string }> }) => J
 
 /** One installed app, shaped the way the ABI resolver reads it. */
 const listApplications = async () => ({
-  apps: [{ id: 'AppId111', package: 'network.calimero.kv-store', blob: { bytecode: 'Blob111' } }],
+  apps: [{ id: 'AppId111', package: 'network.calimero.kv-store', blob: { bytecode: 'Blob111' }, metadata: [] }],
 });
 
 // HTTPError is absent from mero-js's resolvable types but real at runtime, and it is what

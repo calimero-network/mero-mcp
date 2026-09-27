@@ -2,10 +2,10 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { McpServer, RegisteredTool } from '@modelcontextprotocol/server';
 import type { AbiMethod } from '@calimero-network/abi-codegen';
-import { AppNotFoundError, codeUnit, lastSegment, type AbiLoader, type ResolvedApp } from '../abi.ts';
+import { AppNotFoundError, codeUnit, lastSegment, packageKey, type AbiLoader, type ResolvedApp } from '../abi.ts';
 import type { Catalog } from '../catalog.ts';
 import { errorResult } from '../errors.ts';
-import { advertised, packageKey, type Gate } from '../gate.ts';
+import { advertised, type Gate } from '../gate.ts';
 import type { NodeSession } from '../node.ts';
 import { inputShapeForMethod, renderMethodSignature, schemaBuilder } from '../schema.ts';
 
@@ -24,17 +24,13 @@ function baseSlug(app: ResolvedApp): string {
   return (app.serviceName ? `${base}_${sanitize(app.serviceName)}` : base).slice(0, MAX_SLUG);
 }
 
-// By id within a package, so which of two signers keeps the plain names never depends on node order.
-const namingOrder = (apps: readonly ResolvedApp[]) =>
-  [...apps].sort((a, b) => codeUnit(packageKey(a), packageKey(b)) || codeUnit(a.id, b.id));
-
 const idTail = (app: ResolvedApp) => app.id.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, ID_TAIL);
 
 /** Slug per app, in catalog order; two apps that sanitise alike are told apart by their own id, never by order. */
-export function slugs(apps: readonly ResolvedApp[]): Map<ResolvedApp, string> {
+function slugs(apps: readonly ResolvedApp[]): Map<ResolvedApp, string> {
   const out = new Map<ResolvedApp, string>();
   const taken = new Set<string>();
-  for (const app of namingOrder(apps)) {
+  for (const app of apps) {
     const base = baseSlug(app);
     let slug = base;
     if (taken.has(slug)) {
@@ -48,13 +44,13 @@ export function slugs(apps: readonly ResolvedApp[]): Map<ResolvedApp, string> {
   return out;
 }
 
-export function toolName(slug: string, method: string): string {
+function toolName(slug: string, method: string): string {
   const full = `${slug}_${method}`;
   if (full.length <= MAX_NAME) return full;
   return `${full.slice(0, HASHED_KEEP)}_${createHash('sha256').update(full).digest('hex').slice(0, NAME_HASH_HEX)}`;
 }
 
-export function toolTitle(app: ResolvedApp, method: string): string {
+function toolTitle(app: ResolvedApp, method: string): string {
   const words = method.split('_').filter(Boolean).join(' ');
   return `${words.charAt(0).toUpperCase()}${words.slice(1)} (${app.name ?? packageKey(app)})`;
 }
@@ -73,7 +69,7 @@ export function toolNamesByApp(apps: readonly ResolvedApp[], reserved: ReadonlyS
   const bySlug = slugs(apps);
   const taken = new Set(reserved);
   return new Map(
-    namingOrder(apps).map((app) => {
+    apps.map((app) => {
       const slug = bySlug.get(app)!;
       const names = new Map<string, string>();
       for (const { name: method } of toolMethods(app)) {
@@ -134,7 +130,7 @@ export function registerGeneratedTools(
     const resync = () => catalog.sync().catch(() => {});
     if (!current) {
       await resync();
-      return gate.refuse(app, gate.retryText(app)).refusal;
+      return gate.refuse(app).refusal;
     }
     if (current.version !== app.version) {
       await resync();
@@ -145,7 +141,7 @@ export function registerGeneratedTools(
       const same = upgraded && toolMethods(upgraded).find((m) => m.name === method.name);
       if (upgraded && same) [app, method] = [upgraded, same];
       // The upgrade is unconfirmed or dropped this method; never run the old tool against the new install.
-      else return gate.refuse(current, gate.retryText(current)).refusal;
+      else return gate.refuse(current).refusal;
     }
     const admitted = await gate.admit(current, args[HANDLE_PARAM]);
     if ('refusal' in admitted) return admitted.refusal;
@@ -160,14 +156,12 @@ export function registerGeneratedTools(
   function register() {
     for (const tool of registered.splice(0)) tool.remove();
     const names = toolNamesByApp(catalog.apps(), reserved);
+    // Tracked one by one, so a throw midway still leaves every registered tool removable on the next sync.
     for (const app of catalog.apps()) {
       for (const m of app.manifest.methods.filter(collides)) {
         const where = `${packageKey(app)} ${app.version ?? ''} ${m.name}`;
         console.error(`[mero-mcp] no tool for ${where}: its app_handle parameter would collide; use call`);
       }
-    }
-    // Tracked one by one, so a throw midway still leaves every registered tool removable on the next sync.
-    for (const app of catalog.apps()) {
       for (const method of toolMethods(app)) {
         registered.push(
           server.registerTool(names.get(app)!.get(method.name)!, toolConfig(app, method), async (args: unknown) =>

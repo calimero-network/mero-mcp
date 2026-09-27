@@ -1,6 +1,6 @@
 import { parseAbiManifest, type AbiManifest } from '@calimero-network/abi-codegen';
 import { isHttpError, nodeMessage } from './errors.ts';
-import { guideOf, metadataField } from './guide.ts';
+import { metadataField } from './guide.ts';
 import type { NodeSession } from './node.ts';
 
 const UPGRADE_MEROD =
@@ -34,6 +34,8 @@ export const codeUnit = (x: string, y: string) => (x < y ? -1 : x > y ? 1 : 0);
 
 /** Packages are reverse-DNS dotted; the trailing segment is the name people type and tool names are built from. */
 export const lastSegment = (name: string) => name.split('.').pop() || name;
+
+export const packageKey = (app: Pick<AppIdentity, 'id' | 'package'>) => app.package ?? app.id;
 
 // mero-js ships its admin types behind extensionless directory barrels, which NodeNext
 // will not resolve, so `mero.admin` reaches us as `any`; these are the fields we read.
@@ -102,7 +104,7 @@ export function createAbiLoader(session: NodeSession) {
     package: app.package,
     version: app.version,
     signerId: app.signer_id,
-    guide: guideOf(app.metadata),
+    guide: metadataField(app.metadata, 'guide'),
   });
 
   async function manifestFor(app: InstalledApp, blobId: string, serviceName?: string): Promise<AbiManifest> {
@@ -139,11 +141,6 @@ export function createAbiLoader(session: NodeSession) {
   }
 
   return {
-    async resolveAppId(nameOrId: string): Promise<{ id: string; package?: string; blobId: string }> {
-      const app = await findApp(nameOrId);
-      return { id: app.id, package: app.package, blobId: app.blob.bytecode };
-    },
-
     /** The app `nameOrId` names, without its ABI, so a multi-service app needs no service. */
     async identify(nameOrId: string): Promise<AppIdentity> {
       return identity(await findApp(nameOrId));
@@ -161,13 +158,13 @@ export function createAbiLoader(session: NodeSession) {
       const loaded = await Promise.all(
         units.map(({ app, service }) =>
           resolve(app, service).catch((err: unknown) => {
-            console.error(`[mero-mcp] skipping ${app.package ?? app.id}${service ? `/${service}` : ''}: ${String(err)}`);
+            console.error(`[mero-mcp] skipping ${packageKey(app)}${service ? `/${service}` : ''}: ${String(err)}`);
             return undefined;
           }),
         ),
       );
       const compare = (a: ResolvedApp, b: ResolvedApp): number =>
-        codeUnit(a.package ?? a.id, b.package ?? b.id) || codeUnit(a.id, b.id) || codeUnit(a.serviceName ?? '', b.serviceName ?? '');
+        codeUnit(packageKey(a), packageKey(b)) || codeUnit(a.id, b.id) || codeUnit(a.serviceName ?? '', b.serviceName ?? '');
       return loaded.filter((a): a is ResolvedApp => a !== undefined).sort(compare);
     },
   };

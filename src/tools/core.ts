@@ -31,7 +31,7 @@ const toHex = (bytes: number[]) => Buffer.from(bytes).toString('hex');
 
 export function registerCoreTools(server: McpServer, session: NodeSession, cfg: Config, catalog: Catalog): void {
   const admin = session.mero.admin;
-  const { resolveAppId } = createAbiLoader(session);
+  const { identify } = createAbiLoader(session);
   // The install already happened; a failed refresh only delays the new tools until the next poll.
   const refreshApps = () => catalog.sync().catch((err: unknown) => console.error('[mero-mcp] app list refresh failed:', err));
 
@@ -112,7 +112,7 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
       },
     },
     wrap(async ({ application, namespace, name, service }: { application: string; namespace: string; name?: string; service?: string }) =>
-      admin.createContext({ applicationId: (await resolveAppId(application)).id, groupId: namespace, name, serviceName: service }),
+      admin.createContext({ applicationId: (await identify(application)).id, groupId: namespace, name, serviceName: service }),
     ),
   );
 
@@ -219,7 +219,7 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
         },
       },
       wrap(async ({ application, name }: { application: string; name?: string }) =>
-        admin.createNamespace({ applicationId: (await resolveAppId(application)).id, name }),
+        admin.createNamespace({ applicationId: (await identify(application)).id, name }),
       ),
     );
 

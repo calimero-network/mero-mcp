@@ -1,4 +1,4 @@
-import type { AppIdentity } from './abi.ts';
+import { packageKey, type AppIdentity } from './abi.ts';
 
 const FENCE = /^ *```/;
 const PROCEDURES_HEADING = '## Procedures';
@@ -28,8 +28,6 @@ export function metadataField(bytes: number[], key: string): string | undefined 
   const value = isRecord(metadata) ? metadata[key] : undefined;
   return typeof value === 'string' && value ? value : undefined;
 }
-
-export const guideOf = (bytes: number[]): string | undefined => metadataField(bytes, 'guide');
 
 /** The `###` titles under `## Procedures`, by the registry's heading and fence rules. */
 export function procedures(guide: string): string[] {
@@ -64,7 +62,7 @@ export const guideUri = ({ id, version }: Pick<AppIdentity, 'id' | 'version'>) =
 /** The guide as an embedded resource, labelled so the agent reads it as the author's text, never as this server's. */
 export function guideBlocks(app: AppIdentity) {
   if (!app.guide) return [];
-  const pkg = app.package ?? app.id;
+  const pkg = packageKey(app);
   const uri = guideUri(app);
   const label = { type: 'text' as const, text: `App guide, provided by the app's author (package ${pkg}, signer ${app.signerId}):` };
   if (!uri) return [label, { type: 'text' as const, text: app.guide }];

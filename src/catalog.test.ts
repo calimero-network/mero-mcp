@@ -69,9 +69,9 @@ test('the refresh poll starts with the first sync that reaches the node and runs
   assert.equal(listed, 0, 'nothing polls before the first sync');
   await catalog.sync();
   node.apps.push(app('b-id', 'org.b'));
+  const polled = new Promise<void>((resolve) => catalog.subscribe(resolve));
   mock.timers.tick(WATCH_INTERVAL_MS);
-  await new Promise((resolve) => setImmediate(resolve));
-  await new Promise((resolve) => setImmediate(resolve));
+  await polled;
   assert.equal(listed, 2);
   assert.equal(changes, 2);
 });

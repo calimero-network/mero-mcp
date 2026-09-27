@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import { fromJsonSchema } from '@modelcontextprotocol/server';
-import type { AppIdentity, ResolvedApp } from './abi.ts';
+import { packageKey, type AppIdentity, type ResolvedApp } from './abi.ts';
 import { guideBlocks } from './guide.ts';
-import { guideHash, handles, type HandleKeeper } from './handle.ts';
+import { guideHash, handles } from './handle.ts';
 import type { NodeSession } from './node.ts';
 
 interface AppContext {
@@ -28,8 +28,6 @@ export const advertisedObject = (schema: z.ZodObject) => {
 
 export type Admission = { contextId: string } | { refusal: { isError: true; content: Block[] } };
 
-export const packageKey = (app: Pick<AppIdentity, 'id' | 'package'>) => app.package ?? app.id;
-
 const retry = (app: AppIdentity) => `Call select_app for ${packageKey(app)} and retry with the returned app_handle.`;
 
 const noContext = (app: ResolvedApp) =>
@@ -45,31 +43,30 @@ export const handlePayload = (app: ResolvedApp, contextId: string | null) => ({
   s: app.serviceName ?? null,
 });
 
-export function createGate(session: NodeSession, keeper: HandleKeeper = handles) {
+export function createGate(session: NodeSession) {
   async function contextsOf(applicationId: string): Promise<AppContext[]> {
     return ((await session.mero.admin.getContextsForApplication(applicationId)) as { contexts: AppContext[] }).contexts;
   }
 
-  const refuse = (app: AppIdentity, text: string, withGuide = true) => ({
+  const refuse = (app: AppIdentity, text = retry(app), withGuide = true) => ({
     refusal: { isError: true as const, content: [...(withGuide ? guideBlocks(app) : []), { type: 'text' as const, text }] },
   });
 
   return {
     contextsOf,
-    issue: (app: ResolvedApp, contextId: string | null) => keeper.issue(handlePayload(app, contextId)),
-    read: keeper.read,
-    retryText: retry,
+    issue: (app: ResolvedApp, contextId: string | null) => handles.issue(handlePayload(app, contextId)),
+    read: handles.read,
     refuse,
 
     /** The context a call may run in, or the refusal: a handle must match the installed app, its guide and a live context. */
     async admit(app: ResolvedApp, handle: unknown): Promise<Admission> {
-      const payload = keeper.read(handle);
+      const payload = handles.read(handle);
       const expected = handlePayload(app, null);
-      if (!payload || (['a', 'p', 'v', 'g', 's'] as const).some((key) => payload[key] !== expected[key])) return refuse(app, retry(app));
+      if (!payload || (['a', 'p', 'v', 'g', 's'] as const).some((key) => payload[key] !== expected[key])) return refuse(app);
       if (payload.c === null) return refuse(app, noContext(app), false);
       const target = (await contextsOf(app.id)).find((c) => c.id === payload.c);
       const service = target && (target.serviceName ?? app.soleService);
-      if (!target || (app.serviceName && service !== app.serviceName)) return refuse(app, retry(app));
+      if (!target || (app.serviceName && service !== app.serviceName)) return refuse(app);
       return { contextId: target.id };
     },
   };

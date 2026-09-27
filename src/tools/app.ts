@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
-import { AppNotFoundError, type AbiLoader, type ResolvedApp } from '../abi.ts';
+import { AppNotFoundError, packageKey, type AbiLoader, type ResolvedApp } from '../abi.ts';
 import type { Catalog } from '../catalog.ts';
 import { errorResult, textResult } from '../errors.ts';
 import { advertisedObject, type Gate } from '../gate.ts';
@@ -122,7 +122,7 @@ export function registerAppTools(
   async function refuseWithout(app: unknown) {
     if (typeof app !== 'string') return refusal(NO_HANDLE);
     const named = await loader.identify(app);
-    return gate.refuse(named, gate.retryText(named)).refusal;
+    return gate.refuse(named).refusal;
   }
 
   const describeBlocks = (app: ResolvedApp) => (app.guide ? guideBlocks(app) : [{ type: 'text' as const, text: NO_GUIDE }]);
@@ -223,7 +223,7 @@ export function registerAppTools(
         const abiMethod = resolved.manifest.methods.find((m) => m.name === method);
         if (!abiMethod) {
           const available = resolved.manifest.methods.map((m) => m.name).join(', ') || '(none)';
-          throw new Error(`Method "${method}" not found on "${resolved.package ?? resolved.id}". Available: ${available}`);
+          throw new Error(`Method "${method}" not found on "${packageKey(resolved)}". Available: ${available}`);
         }
         const argsJson = z.object(inputShapeForMethod(abiMethod, resolved.manifest)).parse(args ?? {});
         return textResult(await session.mero.rpc.execute({ contextId: admitted.contextId, method, argsJson }));

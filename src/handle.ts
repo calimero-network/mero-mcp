@@ -41,7 +41,6 @@ export function handleKeeper(key: Buffer) {
   };
 }
 
-export type HandleKeeper = ReturnType<typeof handleKeeper>;
 
 // One key per process, never persisted: a restart invalidates every handle, which select_app reissues.
 export const handles = handleKeeper(randomBytes(KEY_BYTES));

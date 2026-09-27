@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { ResolvedApp } from './abi.ts';
-import { guideBlocks, guideOf, listing, procedures } from './guide.ts';
+import { guideBlocks, listing, metadataField, procedures } from './guide.ts';
 
 const utf8Bytes = (s: string) => [...Buffer.from(s, 'utf8')];
 const lines = (...l: string[]) => l.join('\n');
@@ -53,13 +53,13 @@ test('a tab-indented backtick line is not a fence, so later procedures still cou
   ]);
 });
 
-test('guideOf reads a non-empty string guide from JSON metadata, and nothing else', () => {
-  assert.equal(guideOf(utf8Bytes(JSON.stringify({ guide: '## Overview' }))), '## Overview');
-  assert.equal(guideOf(utf8Bytes(JSON.stringify({ guide: '' }))), undefined);
-  assert.equal(guideOf(utf8Bytes(JSON.stringify({ guide: 7 }))), undefined);
-  assert.equal(guideOf(utf8Bytes(JSON.stringify({ name: 'kv-store' }))), undefined);
-  assert.equal(guideOf(utf8Bytes('plain text')), undefined);
-  assert.equal(guideOf([]), undefined);
+test('metadataField reads a non-empty string field from JSON metadata, and nothing else', () => {
+  assert.equal(metadataField(utf8Bytes(JSON.stringify({ guide: '## Overview' })), 'guide'), '## Overview');
+  assert.equal(metadataField(utf8Bytes(JSON.stringify({ guide: '' })), 'guide'), undefined);
+  assert.equal(metadataField(utf8Bytes(JSON.stringify({ guide: 7 })), 'guide'), undefined);
+  assert.equal(metadataField(utf8Bytes(JSON.stringify({ name: 'kv-store' })), 'guide'), undefined);
+  assert.equal(metadataField(utf8Bytes('plain text'), 'guide'), undefined);
+  assert.equal(metadataField([], 'guide'), undefined);
 });
 
 test('listing drops any guide key from object metadata and passes other metadata through', () => {

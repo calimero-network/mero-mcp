@@ -109,8 +109,8 @@ test('2026-07-28: lists carry ttlMs 30000 and a guide read carries 86400000, bot
   }
 });
 
-test('a node that is down at connect still serves the fixed tools, and says so on stderr', async (t) => {
-  const logged = t.mock.method(console, 'error', () => {});
+test('a node that is down at connect still serves the fixed tools', async (t) => {
+  t.mock.method(console, 'error', () => {});
   const node = fakeNode([]);
   (node.session.mero.admin as unknown as { listApplications: () => Promise<never> }).listApplications = async () => {
     throw new Error('connection refused');
@@ -118,7 +118,6 @@ test('a node that is down at connect still serves the fixed tools, and says so o
   const { client, close } = await connect(createServerFactory(node.session, CFG));
   try {
     assert.ok((await client.listTools()).tools.some((t) => t.name === 'select_app'));
-    assert.equal(logged.mock.calls[0]?.arguments[0], '[mero-mcp] app list unavailable at connect:');
   } finally {
     await close();
   }

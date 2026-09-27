@@ -1,9 +1,9 @@
 import { createRequire } from 'node:module';
 import { McpServer, ResourceNotFoundError, ResourceTemplate } from '@modelcontextprotocol/server';
-import { createAbiLoader } from './abi.ts';
+import { createAbiLoader, packageKey } from './abi.ts';
 import { createCatalog } from './catalog.ts';
 import type { Config } from './config.ts';
-import { createGate, packageKey } from './gate.ts';
+import { createGate } from './gate.ts';
 import { GUIDE_URI_TEMPLATE, guideUri } from './guide.ts';
 import type { NodeSession } from './node.ts';
 import { registerAppTools } from './tools/app.ts';

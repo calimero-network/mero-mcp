@@ -153,11 +153,11 @@ test('a handle with no context is refused with a request to select one, and runs
 });
 
 test('a handle goes stale when the app version, its guide, or its context changes', async () => {
-  for (const [change, toolText] of [
-    [(a: FakeApp) => (a.version = '1.1.0'), RETRY],
-    [(a: FakeApp) => (a.metadata = { ...a.metadata, guide: `${GUIDE}\n### Another` }), RETRY],
-    [(a: FakeApp) => (a.contexts = [ctx('newctx')]), RETRY],
-  ] as const) {
+  for (const change of [
+    (a: FakeApp) => (a.version = '1.1.0'),
+    (a: FakeApp) => (a.metadata = { ...a.metadata, guide: `${GUIDE}\n### Another` }),
+    (a: FakeApp) => (a.contexts = [ctx('newctx')]),
+  ]) {
     const s = await setup();
     try {
       const { app_handle } = await s.json('select_app', { app: 'kv-store' });
@@ -167,7 +167,7 @@ test('a handle goes stale when the app version, its guide, or its context change
       assert.equal(viaCall.content.at(-1)!.text, RETRY);
       const res = await s.call('kv_store_set', { app_handle, key: 'k' });
       assert.equal(res.isError, true);
-      assert.equal(res.content.at(-1)!.text, toolText);
+      assert.equal(res.content.at(-1)!.text, RETRY);
       assert.deepEqual(s.executed, []);
     } finally {
       await s.close();
@@ -827,9 +827,9 @@ for (const entry of ['select_app', 'describe_app', 'call'] as const) {
     const admin = node.session.mero.admin as { listApplications: () => Promise<unknown> };
     const list = admin.listApplications;
     let down = true;
-    let lists = 0;
+    let listed = () => {};
     admin.listApplications = async () => {
-      lists++;
+      listed();
       if (down) throw new Error('connection refused');
       return list();
     };
@@ -844,10 +844,9 @@ for (const entry of ['select_app', 'describe_app', 'call'] as const) {
       if (entry === 'select_app') assert.deepEqual(JSON.parse(res.content[0].text!).tools, ['kv_store_get', 'kv_store_set']);
       assert.ok((await client.listTools()).tools.some((tool) => tool.name === 'kv_store_set'));
 
-      const before = lists;
+      const polled = new Promise<void>((resolve) => (listed = resolve));
       t.mock.timers.tick(WATCH_INTERVAL_MS);
-      await new Promise((resolve) => setImmediate(resolve));
-      assert.equal(lists, before + 1);
+      await polled;
     } finally {
       await close();
     }
