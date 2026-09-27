@@ -183,13 +183,6 @@ async function runChecks({ checks, mcp, api, kv, second }) {
       checks.skip(label, FOREIGN);
     }
   } else {
-    // Derived from the node's own record, so the expected text cannot drift from what was installed.
-    const nodeGuide = async () => {
-      const record = await api.application(kv.id);
-      const { guide } = JSON.parse(Buffer.from(record.metadata).toString('utf8'));
-      return { record, guide };
-    };
-
     await checks.check("list_applications lists the guide's procedures and leaves the guide out", async () => {
       const { apps } = await mcp.call('list_applications');
       const listed = apps.find((a) => a.id === kv.id);
@@ -200,7 +193,9 @@ async function runChecks({ checks, mcp, api, kv, second }) {
     });
 
     await checks.check("describe_app returns the node's guide as an author-labelled embedded resource", async () => {
-      const { record, guide } = await nodeGuide();
+      // Derived from the node's own record, so the expected text cannot drift from what was installed.
+      const record = await api.application(kv.id);
+      const { guide } = JSON.parse(Buffer.from(record.metadata).toString('utf8'));
       const msg = await mcp.callRaw('describe_app', { app: kv.name });
       const [, label, embedded] = msg.result.content;
       assertEqual(label.text, `App guide, provided by the app's author (package ${record.package}, signer ${record.signer_id}):`, 'the author label is wrong');
