@@ -7,7 +7,7 @@ import type { Catalog } from '../catalog.ts';
 import { errorResult } from '../errors.ts';
 import { advertised, type Gate } from '../gate.ts';
 import type { NodeSession } from '../node.ts';
-import { inputShapeForMethod, renderMethodSignature, schemaBuilder } from '../schema.ts';
+import { parseArgs, renderMethodSignature, schemaBuilder } from '../schema.ts';
 
 const MAX_SLUG = 20;
 const MAX_NAME = 49; // 64 minus Claude Code's 15-char `mcp__mero-mcp__` prefix
@@ -145,7 +145,7 @@ export function registerGeneratedTools(
     }
     const admitted = await gate.admit(current, args[HANDLE_PARAM]);
     if ('refusal' in admitted) return admitted.refusal;
-    const argsJson = z.object(inputShapeForMethod(method, app.manifest)).parse(args);
+    const argsJson = parseArgs(method, app.manifest, args);
     const result = await session.mero.rpc.execute({ contextId: admitted.contextId, method: method.name, argsJson });
     return {
       content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) ?? 'null' }],

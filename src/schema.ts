@@ -151,6 +151,8 @@ export function schemaBuilder(m: AbiManifest, mode: SchemaMode = 'input') {
 
 export const inputShapeForMethod = (method: AbiMethod, m: AbiManifest): Record<string, z.ZodType> => schemaBuilder(m).params(method);
 
+export const parseArgs = (method: AbiMethod, m: AbiManifest, args: unknown) => z.object(inputShapeForMethod(method, m)).parse(args);
+
 export function renderMethodSignature(method: AbiMethod): string {
   const kind = method.intent === 'read_only' ? 'view' : 'mut';
   const params = method.params.map((p) => `${p.name}${p.nullable ? '?' : ''}: ${typeName(p.type)}`).join(', ');

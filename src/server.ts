@@ -57,7 +57,7 @@ export function createServerFactory(session: NodeSession, cfg: Config) {
     );
     const reserved = new Set<string>();
     recordToolNames(server, reserved, () => {
-      registerCoreTools(server, session, cfg, catalog);
+      registerCoreTools(server, session, cfg, loader, catalog);
       registerAppTools(server, session, loader, catalog, gate, reserved);
     });
     const unsubscribeTools = registerGeneratedTools(server, catalog, gate, session, loader, reserved);

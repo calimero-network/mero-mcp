@@ -6,10 +6,10 @@ import type { Config } from '../config.ts';
 import { discoverLocalNodes, listConfiguredNodes, resolveNode } from '../config.ts';
 import type { NodeSession } from '../node.ts';
 import type { Catalog } from '../catalog.ts';
-import { createAbiLoader } from '../abi.ts';
+import type { AbiLoader } from '../abi.ts';
 import { errorResult, textResult, toMessage } from '../errors.ts';
 import { listing } from '../guide.ts';
-import { inputShapeForMethod } from '../schema.ts';
+import { parseArgs } from '../schema.ts';
 
 /** Runs an admin call and folds its result or throw into the MCP text-result convention. */
 function wrap<Args>(fn: (args: Args) => Promise<unknown>) {
@@ -37,12 +37,12 @@ const VISIBILITY = z.enum(['open', 'restricted']).describe('open: namespace memb
 function initParams(manifest: AbiManifest, label: string, args: Record<string, unknown>): number[] {
   const init = manifest.methods.find((m) => m.name === 'init');
   if (!init) throw new Error(`Application "${label}" declares no init method, so it takes no init args.`);
-  return [...Buffer.from(JSON.stringify(z.object(inputShapeForMethod(init, manifest)).parse(args)), 'utf8')];
+  return [...Buffer.from(JSON.stringify(parseArgs(init, manifest, args)), 'utf8')];
 }
 
-export function registerCoreTools(server: McpServer, session: NodeSession, cfg: Config, catalog: Catalog): void {
+export function registerCoreTools(server: McpServer, session: NodeSession, cfg: Config, loader: AbiLoader, catalog: Catalog): void {
   const admin = session.mero.admin;
-  const { identify, load } = createAbiLoader(session);
+  const { identify, load } = loader;
   // The install already happened; a failed refresh only delays the new tools until the next poll.
   const refreshApps = () => catalog.sync().catch((err: unknown) => console.error('[mero-mcp] app list refresh failed:', err));
 
@@ -332,26 +332,21 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
           parent: z.string().optional().describe('Group id to nest under; omit to create directly in the namespace.'),
         },
       },
-      async ({ namespace, name, visibility, parent }: { namespace: string; name?: string; visibility?: 'open' | 'restricted'; parent?: string }) => {
-        try {
-          if (!parent) return textResult(await admin.createGroupInNamespace(namespace, { groupName: name, visibility }));
+      wrap(
+        async ({ namespace, name, visibility, parent }: { namespace: string; name?: string; visibility?: z.infer<typeof VISIBILITY>; parent?: string }) => {
+          if (!parent) return admin.createGroupInNamespace(namespace, { groupName: name, visibility });
           const { targetApplicationId } = await admin.getGroupInfo(parent);
           const { groupId } = await admin.createGroup({ applicationId: targetApplicationId, name, parentGroupId: parent });
-          if (!visibility) return textResult({ groupId });
-          try {
-            await admin.setSubgroupVisibility(groupId, { subgroupVisibility: visibility });
-          } catch (err) {
-            return errorResult(
-              new Error(`Group ${groupId} was created under ${parent} but its visibility was not set; retry set_group_visibility. ${toMessage(err)}`, {
+          if (visibility) {
+            await admin.setSubgroupVisibility(groupId, { subgroupVisibility: visibility }).catch((err: unknown) => {
+              throw new Error(`Group ${groupId} was created under ${parent} but its visibility was not set; retry set_group_visibility. ${toMessage(err)}`, {
                 cause: err,
-              }),
-            );
+              });
+            });
           }
-          return textResult({ groupId });
-        } catch (err) {
-          return errorResult(err);
-        }
-      },
+          return { groupId };
+        },
+      ),
     );
 
     server.registerTool(
@@ -360,7 +355,7 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
         description: 'Make a group open (namespace members can join it) or restricted (members must be added).',
         inputSchema: { group: z.string(), visibility: VISIBILITY },
       },
-      wrap(async ({ group, visibility }: { group: string; visibility: 'open' | 'restricted' }) => {
+      wrap(async ({ group, visibility }: { group: string; visibility: z.infer<typeof VISIBILITY> }) => {
         await admin.setSubgroupVisibility(group, { subgroupVisibility: visibility });
         return `Group ${group} is now ${visibility}.`;
       }),
