@@ -42,6 +42,7 @@ An app can ship a guide: Markdown its author writes, carried in the signed bundl
 
 - `describe_app` returns the app's methods, the guide (or `This app ships no guide.`) and an `app_handle` with no context.
   It is the way to plan across several apps.
+  Call it before setting up namespaces, groups or contexts for an app you have not used before, since its guide says how that app expects them to be laid out.
 - `select_app` returns the guide and an `app_handle` bound to one context: the one you pass as `context`, or the app's only context.
 - Every generated tool and `call` take that `app_handle`.
   It names the context the call runs in, so there is no separate context argument.

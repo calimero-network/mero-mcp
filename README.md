@@ -143,6 +143,7 @@ Anything an agent does through this server (installing an application, creating 
 
 **Application** (always registered):
 `describe_app` shows an application's methods and guide and gives a planning handle.
+Call it before setting up contexts for an app you have not used before: its guide says how they should be laid out.
 `select_app` picks an application and a context and returns its guide and `app_handle`.
 `call` invokes a method with that handle.
 

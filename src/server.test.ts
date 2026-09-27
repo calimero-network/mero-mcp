@@ -9,7 +9,8 @@ const CFG = loadConfig({ HOME: '/x' } as NodeJS.ProcessEnv);
 const INSTRUCTIONS =
   'Calimero apps describe themselves. Do not read app source. ' +
   'To use an app: list_applications, then describe_app to plan or select_app to act, ' +
-  'then pass the returned app_handle on every app tool call.';
+  'then pass the returned app_handle on every app tool call. ' +
+  'For an app you have not used before, call describe_app before creating its namespaces, groups or contexts: its guide says how to set them up.';
 
 const guided = (version = '1.0.0'): FakeApp => ({
   id: 'kv-id',

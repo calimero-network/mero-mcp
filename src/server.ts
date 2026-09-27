@@ -14,7 +14,8 @@ import { registerGeneratedTools } from './tools/generated.ts';
 const INSTRUCTIONS =
   'Calimero apps describe themselves. Do not read app source. ' +
   'To use an app: list_applications, then describe_app to plan or select_app to act, ' +
-  'then pass the returned app_handle on every app tool call.';
+  'then pass the returned app_handle on every app tool call. ' +
+  'For an app you have not used before, call describe_app before creating its namespaces, groups or contexts: its guide says how to set them up.';
 
 const LIST_CACHE = { ttlMs: 30_000, cacheScope: 'private' as const };
 const GUIDE_CACHE = { ttlMs: 86_400_000, cacheScope: 'private' as const };

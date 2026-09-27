@@ -140,7 +140,8 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
     {
       description:
         'Create a new context for an application in a group: a namespace, or a subgroup inside one. ' +
-        "Pass `args` when the application's init method takes parameters; describe_app lists init with them.",
+        "For an app you have not used before, call describe_app first: its guide says how the app's contexts should be set up, " +
+        'and it lists init with the parameters `args` takes.',
       inputSchema: {
         application: z.string().describe('Application id, package name, or display name.'),
         group: z.string().optional().describe('Id of the group to create the context in: a namespace, or a subgroup inside one.'),
@@ -289,7 +290,9 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
     server.registerTool(
       'create_namespace',
       {
-        description: 'Create a namespace for an application.',
+        description:
+          'Create a namespace for an application. ' +
+          "For an app you have not used before, call describe_app first: its guide says how the app's namespaces and contexts should be set up.",
         inputSchema: {
           application: z.string().describe('Application id, package name, or display name.'),
           name: z.string().optional(),

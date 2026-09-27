@@ -587,6 +587,14 @@ test('create_context with args for a multi-service app and no service is an erro
   assert.deepEqual(created, []);
 });
 
+test('create_context and create_namespace send an agent to describe_app, whose guide says how to set up an unfamiliar app', () => {
+  const { server, configs } = fakeServer();
+  register(server, fakeSession(), loadConfig(env()), CATALOG);
+  for (const tool of ['create_context', 'create_namespace']) {
+    assert.match(configs.get(tool)!.description!, /For an app you have not used before, call describe_app first: its guide says how/);
+  }
+});
+
 test('create_context takes the target group as group, a namespace or subgroup id, and namespace still works', async () => {
   const { create, created } = initAdmin();
   await create({ application: 'AppNoInit', group: 'Sub111' });
