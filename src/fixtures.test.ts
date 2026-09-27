@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseAbiManifest } from '@calimero-network/abi-codegen';
+import { procedures } from './guide.ts';
 
 const FIXTURES = fileURLToPath(new URL('../test/fixtures/', import.meta.url));
 
@@ -57,3 +58,10 @@ for (const [bundle, abiName] of BUNDLES) {
     );
   });
 }
+
+test('kv-store.mpk carries a guide that names at least one procedure', () => {
+  const manifest = JSON.parse(readBundle('kv-store.mpk').get('manifest.json')!.toString('utf8')) as { metadata?: { guide?: string } };
+  const guide = manifest.metadata?.guide;
+  assert.equal(typeof guide, 'string', 'kv-store.mpk has no metadata.guide: rebundle it from a core kv-store that ships GUIDE.md');
+  assert.ok(procedures(guide!).length > 0, 'the kv-store guide names no ### procedure under ## Procedures');
+});
