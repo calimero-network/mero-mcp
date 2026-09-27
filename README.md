@@ -133,13 +133,13 @@ Anything an agent does through this server (installing an application, creating 
 ## Tools
 
 **Core** (always registered):
-`node_status`, `list_nodes`, `list_applications`, `list_namespaces`, `list_contexts`, `create_context`, `delete_context`, `create_alias`, `lookup_alias`.
+`node_status`, `list_nodes`, `list_applications`, `list_namespaces`, `list_contexts`, `create_context`, `join_context`, `delete_context`, `create_alias`, `lookup_alias`.
 
 **Blobs** (in `CALIMERO_MCP_TOOLSETS` by default):
 `install_application`, `uninstall_application`, `upload_blob`, `list_blobs`, `delete_blob`.
 
 **Governance** (in `CALIMERO_MCP_TOOLSETS` by default):
-`create_namespace`, `delete_namespace`, `invite_to_namespace`, `join_namespace`, `leave_namespace`, `list_group_members`, `add_group_members`.
+`create_namespace`, `delete_namespace`, `invite_to_namespace`, `join_namespace`, `leave_namespace`, `list_group_members`, `add_group_members`, `create_group`, `set_group_visibility`, `set_group_metadata`, `join_open_group`.
 
 **Application** (always registered):
 `describe_app` shows an application's methods and guide and gives a planning handle.

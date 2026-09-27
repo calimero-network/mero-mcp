@@ -6,7 +6,7 @@ import { errorResult, textResult } from '../errors.ts';
 import { advertisedObject, type Gate } from '../gate.ts';
 import { guideBlocks } from '../guide.ts';
 import type { NodeSession } from '../node.ts';
-import { inputShapeForMethod, renderMethodSignature } from '../schema.ts';
+import { parseArgs, renderMethodSignature } from '../schema.ts';
 import { toolNamesByApp } from './generated.ts';
 
 /** Core hex-encodes every 32-byte id (context, group, namespace), always 64 lowercase hex chars. */
@@ -225,7 +225,7 @@ export function registerAppTools(
           const available = resolved.manifest.methods.map((m) => m.name).join(', ') || '(none)';
           throw new Error(`Method "${method}" not found on "${packageKey(resolved)}". Available: ${available}`);
         }
-        const argsJson = z.object(inputShapeForMethod(abiMethod, resolved.manifest)).parse(args ?? {});
+        const argsJson = parseArgs(abiMethod, resolved.manifest, args ?? {});
         return textResult(await session.mero.rpc.execute({ contextId: admitted.contextId, method, argsJson }));
       } catch (err) {
         return errorResult(err);

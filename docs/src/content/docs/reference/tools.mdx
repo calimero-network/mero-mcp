@@ -76,6 +76,11 @@ Create a context for an application under a namespace.
 | `namespace` | string | Namespace id |
 | `name` | string, optional | |
 | `service` | string, optional | Required for a multi-service application |
+| `args` | object, optional | Arguments for the app's `init`, keyed by parameter name; checked against the ABI like a method call |
+
+### `join_context`
+
+Join a context this node is not yet a member of. Takes `context`. Returns `{ contextId, memberPublicKey }`.
 
 ### `delete_context`
 
@@ -191,6 +196,38 @@ Members of a group. Read-only. Takes `group`. Returns a flat `{ members, selfIde
 | --- | --- |
 | `group` | string |
 | `members` | array of `{ identity, role }` |
+
+### `create_group`
+
+Create a group (a subgroup) inside a namespace, or nested under another group. Returns `{ groupId }`.
+
+| Argument | Type | Notes |
+| --- | --- | --- |
+| `namespace` | string | |
+| `name` | string, optional | |
+| `visibility` | `open` or `restricted`, optional | Defaults to `restricted` |
+| `parent` | string, optional | Group id to nest under |
+
+With `parent`, the group is created for the parent's application and the visibility is applied as a second step; if that step fails, the error names the created group so `set_group_visibility` can finish the job.
+
+### `set_group_visibility`
+
+Takes `group` and `visibility` (`open`: namespace members can join; `restricted`: members must be added).
+
+### `set_group_metadata`
+
+Set a group's name and metadata. `data` is stored whole: keys left out of it are removed. An omitted `name` keeps the current one.
+
+| Argument | Type | Notes |
+| --- | --- | --- |
+| `group` | string | |
+| `name` | string, optional | Omitted keeps the current name |
+| `data` | object of string values, optional | The complete key/value set; omitted means empty |
+
+### `join_open_group`
+
+Join an open group through membership of its parent namespace or group. Takes `group`. Returns
+`{ groupId, memberPublicKey, wasInherited }`. Follow it with `join_context` for the contexts inside the group.
 
 ## Application
 

@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import { McpServer, InMemoryTransport } from '@modelcontextprotocol/server';
 import { Client } from '@modelcontextprotocol/client';
 import * as meroJs from '@calimero-network/mero-js';
-import { loadConfig } from '../config.ts';
+import { loadConfig, type Config } from '../config.ts';
 import type { NodeSession } from '../node.ts';
 import { registerCoreTools } from './core.ts';
+import { createAbiLoader } from '../abi.ts';
 import type { Catalog } from '../catalog.ts';
 
 /** Core tools only ask the catalog to refresh after an install or uninstall. */
@@ -18,6 +19,7 @@ const CORE = [
   'list_namespaces',
   'list_contexts',
   'create_context',
+  'join_context',
   'delete_context',
   'create_alias',
   'lookup_alias',
@@ -31,6 +33,10 @@ const GOVERNANCE = [
   'leave_namespace',
   'list_group_members',
   'add_group_members',
+  'create_group',
+  'set_group_visibility',
+  'set_group_metadata',
+  'join_open_group',
 ];
 
 type FakeHandler = (args: Record<string, unknown>) => Promise<{ content: Array<{ type: 'text'; text: string }>; isError?: boolean }>;
@@ -57,12 +63,15 @@ function fakeSession(admin: FakeAdmin = {}, over: Partial<NodeSession> = {}) {
   return { url: 'http://localhost:2528', nodeName: 'test', authMode: 'none', mero: { admin }, ...over } as unknown as NodeSession;
 }
 
+const register = (server: McpServer, session: NodeSession, cfg: Config, catalog: Catalog) =>
+  registerCoreTools(server, session, cfg, createAbiLoader(session), catalog);
+
 const env = (over: Record<string, string> = {}) => ({ HOME: '/x', ...over }) as NodeJS.ProcessEnv;
 
 /** Registers the core tools on a real server so the SDK's own input validation and JSON Schema conversion run. */
 async function realServer(admin: FakeAdmin, over: Record<string, string> = {}) {
   const server = new McpServer({ name: 'core-test', version: '0.0.0' });
-  registerCoreTools(server, fakeSession(admin), loadConfig(env(over)), CATALOG);
+  register(server, fakeSession(admin), loadConfig(env(over)), CATALOG);
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: 'core-test', version: '0.0.0' });
   await Promise.all([server.connect(serverSide), client.connect(clientSide)]);
@@ -89,14 +98,14 @@ const httpError = (status: number, message: string) =>
 
 test('default toolsets register core, blobs, and governance tools', () => {
   const { server, tools } = fakeServer();
-  registerCoreTools(server, fakeSession(), loadConfig(env()), CATALOG);
+  register(server, fakeSession(), loadConfig(env()), CATALOG);
   for (const name of [...CORE, ...BLOBS, ...GOVERNANCE]) assert.ok(tools.has(name), `${name} not registered`);
   assert.equal(tools.size, CORE.length + BLOBS.length + GOVERNANCE.length);
 });
 
 test('CALIMERO_MCP_TOOLSETS=core registers only the core group, and core registers even when the toolset set omits it', () => {
   const { server, tools } = fakeServer();
-  registerCoreTools(server, fakeSession(), loadConfig(env({ CALIMERO_MCP_TOOLSETS: 'core' })), CATALOG);
+  register(server, fakeSession(), loadConfig(env({ CALIMERO_MCP_TOOLSETS: 'core' })), CATALOG);
   for (const name of CORE) assert.ok(tools.has(name), `${name} not registered`);
   for (const name of [...BLOBS, ...GOVERNANCE]) assert.equal(tools.has(name), false, `${name} should not be registered`);
 
@@ -104,7 +113,7 @@ test('CALIMERO_MCP_TOOLSETS=core registers only the core group, and core registe
   // must not gate the core group behind cfg.toolsets.has('core').
   const bare = { ...loadConfig(env()), toolsets: new Set(['blobs']) };
   const { server: server2, tools: tools2 } = fakeServer();
-  registerCoreTools(server2, fakeSession(), bare, CATALOG);
+  register(server2, fakeSession(), bare, CATALOG);
   for (const name of CORE) assert.ok(tools2.has(name), `${name} not registered`);
   assert.equal(tools2.has('install_application'), true);
   assert.equal(tools2.has('create_namespace'), false);
@@ -123,7 +132,7 @@ test('list_contexts calls getContextsForApplication when given an application, e
     },
   };
   const { server, tools } = fakeServer();
-  registerCoreTools(server, fakeSession(admin), loadConfig(env()), CATALOG);
+  register(server, fakeSession(admin), loadConfig(env()), CATALOG);
   const handler = tools.get('list_contexts')!;
   await handler({});
   await handler({ application: 'app1' });
@@ -144,7 +153,7 @@ test('list_applications decodes metadata for display: JSON object, plain string,
     }),
   };
   const { server, tools } = fakeServer();
-  registerCoreTools(server, fakeSession(admin), loadConfig(env()), CATALOG);
+  register(server, fakeSession(admin), loadConfig(env()), CATALOG);
   const { apps } = jsonOf(await tools.get('list_applications')!({})) as unknown as { apps: Array<Record<string, unknown>> };
 
   assert.deepEqual(apps[0].metadata, { name: 'kv-store' });
@@ -165,7 +174,7 @@ test('list_applications adds appVersion, leaves the guide out and lists its proc
     }),
   };
   const { server, tools } = fakeServer();
-  registerCoreTools(server, fakeSession(admin), loadConfig(env()), CATALOG);
+  register(server, fakeSession(admin), loadConfig(env()), CATALOG);
   const { apps } = jsonOf(await tools.get('list_applications')!({})) as unknown as { apps: Array<Record<string, unknown>> };
 
   assert.deepEqual(apps[0].metadata, { name: 'kv-store' });
@@ -194,7 +203,7 @@ test('list_contexts renders dagHeads as hex, keeping every head a multi-head con
     }),
   };
   const { server, tools } = fakeServer();
-  registerCoreTools(server, fakeSession(admin), loadConfig(env()), CATALOG);
+  register(server, fakeSession(admin), loadConfig(env()), CATALOG);
   const { contexts } = jsonOf(await tools.get('list_contexts')!({})) as unknown as { contexts: Array<{ dagHeads: string[] }> };
   assert.deepEqual(contexts[0].dagHeads, ['010203', 'ff0080']);
 });
@@ -261,7 +270,7 @@ test('delete_context is destructive and deletes by id', async () => {
     },
   };
   const { server, tools, configs } = fakeServer();
-  registerCoreTools(server, fakeSession(admin), loadConfig(env()), CATALOG);
+  register(server, fakeSession(admin), loadConfig(env()), CATALOG);
   assert.equal(configs.get('delete_context')?.annotations?.destructiveHint, true);
 
   const handler = tools.get('delete_context')!;
@@ -278,7 +287,7 @@ test('install_application splits package@version, and rejects a coordinate missi
     },
   };
   const { server, tools } = fakeServer();
-  registerCoreTools(server, fakeSession(admin), loadConfig(env()), CATALOG);
+  register(server, fakeSession(admin), loadConfig(env()), CATALOG);
 
   const handler = tools.get('install_application')!;
   assert.match(textOf(await handler({ coords: 'network.calimero.kv-store@1.0.0' })), /"applicationId": "AppId111"/);
@@ -303,7 +312,7 @@ test('install and uninstall refresh the app list after the node answers, and a f
     },
   } as unknown as Catalog;
   const { server, tools } = fakeServer();
-  registerCoreTools(server, fakeSession(admin), loadConfig(env()), catalog);
+  register(server, fakeSession(admin), loadConfig(env()), catalog);
 
   const installed = await tools.get('install_application')!({ coords: 'network.calimero.kv-store@1.0.0' });
   const removed = await tools.get('uninstall_application')!({ application: 'AppId111' });
@@ -328,7 +337,7 @@ test('create_namespace and create_context resolve an application the way describ
     },
   };
   const { server, tools } = fakeServer();
-  registerCoreTools(server, fakeSession(admin), loadConfig(env()), CATALOG);
+  register(server, fakeSession(admin), loadConfig(env()), CATALOG);
 
   // The package tail, the full package name, and the raw id all name the same application.
   await tools.get('create_namespace')!({ application: 'kv-store' });
@@ -348,7 +357,7 @@ test('create_namespace and create_context resolve an application the way describ
 test('create_alias confirms what it created instead of answering null', async () => {
   const admin = { createContextAlias: async () => null };
   const { server, tools } = fakeServer();
-  registerCoreTools(server, fakeSession(admin), loadConfig(env()), CATALOG);
+  register(server, fakeSession(admin), loadConfig(env()), CATALOG);
   assert.equal(textOf(await tools.get('create_alias')!({ alias: 'chat', contextId: 'Ctx111' })), 'Alias "chat" now resolves to context Ctx111.');
 });
 
@@ -356,7 +365,7 @@ test('lookup_alias names the context on a hit and says so on a miss, without cal
   // Core answers a miss with a null value, which on its own is indistinguishable from a failed call.
   const admin = { lookupContextAlias: async (name: string) => ({ value: name === 'chat' ? 'Ctx111' : null }) };
   const { server, tools } = fakeServer();
-  registerCoreTools(server, fakeSession(admin), loadConfig(env()), CATALOG);
+  register(server, fakeSession(admin), loadConfig(env()), CATALOG);
 
   const hit = await tools.get('lookup_alias')!({ name: 'chat' });
   assert.deepEqual(jsonOf(hit), { alias: 'chat', contextId: 'Ctx111' });
@@ -369,7 +378,7 @@ test('lookup_alias names the context on a hit and says so on a miss, without cal
 test('leave_namespace and add_group_members report what they did rather than returning null', async () => {
   const admin = { leaveNamespace: async () => undefined, addGroupMembers: async () => undefined };
   const { server, tools } = fakeServer();
-  registerCoreTools(server, fakeSession(admin), loadConfig(env()), CATALOG);
+  register(server, fakeSession(admin), loadConfig(env()), CATALOG);
 
   assert.equal(textOf(await tools.get('leave_namespace')!({ namespace: 'Ns111' })), 'Left namespace Ns111.');
   const added = await tools.get('add_group_members')!({
@@ -384,14 +393,14 @@ test('node_status reports the node name the session carries, and the discovery s
   // An explicit url keeps resolveNode off the network; its source is a source, never the name.
   const cfg = env({ CALIMERO_NODE_URL: 'http://localhost:2528', CALIMERO_NODE_NAME: 'default' });
   const { server, tools } = fakeServer();
-  registerCoreTools(server, fakeSession(admin, { nodeName: 'default' }), loadConfig(cfg), CATALOG);
+  register(server, fakeSession(admin, { nodeName: 'default' }), loadConfig(cfg), CATALOG);
   const named = jsonOf(await tools.get('node_status')!({}));
   assert.equal(named.nodeName, 'default');
   assert.equal(named.discoverySource, 'env');
 
   // Nothing named this node: an explicit null, not the label for how it was found.
   const { server: server2, tools: tools2 } = fakeServer();
-  registerCoreTools(server2, fakeSession(admin, { nodeName: undefined }), loadConfig(env({ CALIMERO_NODE_URL: 'http://localhost:2528' })), CATALOG);
+  register(server2, fakeSession(admin, { nodeName: undefined }), loadConfig(env({ CALIMERO_NODE_URL: 'http://localhost:2528' })), CATALOG);
   const nameless = jsonOf(await tools2.get('node_status')!({}));
   assert.equal(nameless.nodeName, null);
   assert.equal(nameless.discoverySource, 'env');
@@ -404,7 +413,7 @@ test('a throwing admin call yields isError: true carrying the message', async ()
     },
   };
   const { server, tools } = fakeServer();
-  registerCoreTools(server, fakeSession(admin), loadConfig(env()), CATALOG);
+  register(server, fakeSession(admin), loadConfig(env()), CATALOG);
   const result = await tools.get('list_applications')!({});
   assert.equal(result.isError, true);
   assert.match(result.content[0].text, /boom/);
@@ -423,7 +432,7 @@ test("a rejected admin call reaches the tool result as the node's own message, n
     },
   };
   const { server, tools } = fakeServer();
-  registerCoreTools(server, fakeSession(admin), loadConfig(env()), CATALOG);
+  register(server, fakeSession(admin), loadConfig(env()), CATALOG);
 
   const namespaced = await tools.get('create_namespace')!({ application: 'kv-store' });
   assert.equal(namespaced.isError, true);
@@ -444,7 +453,7 @@ test('a bodyless rejection still names the endpoint and the status, and an unrea
     },
   };
   const { server, tools } = fakeServer();
-  registerCoreTools(server, fakeSession(admin), loadConfig(env({ CALIMERO_NODE_URL: 'http://localhost:2528' })), CATALOG);
+  register(server, fakeSession(admin), loadConfig(env({ CALIMERO_NODE_URL: 'http://localhost:2528' })), CATALOG);
 
   const bodyless = await tools.get('list_blobs')!({});
   assert.equal(bodyless.isError, true);
@@ -456,4 +465,199 @@ test('a bodyless rejection still names the endpoint and the status, and an unrea
   const unreachable = await tools.get('node_status')!({});
   assert.equal(unreachable.isError, true);
   assert.equal(textOf(unreachable), 'Error: Cannot reach the node at http://localhost:2528/admin-api/health: fetch failed');
+});
+
+/** Two installed apps: one whose init takes (name, seed), one whose init takes nothing. */
+const INIT_ABIS: Record<string, unknown> = {
+  AppBlocks: {
+    schema_version: 'wasm-abi/1',
+    types: {},
+    methods: [{ name: 'init', params: [{ name: 'name', type: { kind: 'string' } }, { name: 'seed', type: { kind: 'u64' } }] }],
+    events: [],
+  },
+  AppPlain: { schema_version: 'wasm-abi/1', types: {}, methods: [{ name: 'init', params: [] }], events: [] },
+  AppNoInit: { schema_version: 'wasm-abi/1', types: {}, methods: [{ name: 'ping', params: [] }], events: [] },
+};
+
+/** A two-service bundle, whose ABI core only serves for a named service. */
+const DRIVE_ABIS: Record<string, unknown> = {
+  docs: { schema_version: 'wasm-abi/1', types: {}, methods: [{ name: 'init', params: [{ name: 'title', type: { kind: 'string' } }] }], events: [] },
+  registry: { schema_version: 'wasm-abi/1', types: {}, methods: [{ name: 'init', params: [] }], events: [] },
+};
+
+function initAdmin() {
+  const created: Array<Record<string, unknown>> = [];
+  const abiFetches: string[] = [];
+  const admin = {
+    listApplications: async () => ({
+      apps: [
+        ...Object.keys(INIT_ABIS).map((id) => ({ id, package: `com.example.${id.toLowerCase()}`, metadata: [], blob: { bytecode: `${id}-blob` } })),
+        { id: 'AppDrive', package: 'com.example.appdrive', metadata: [], blob: { bytecode: 'AppDrive-blob' }, services: DRIVE_ABIS },
+      ],
+    }),
+    getApplicationAbi: async (id: string, service?: string) => {
+      abiFetches.push(service ? `${id}/${service}` : id);
+      if (id !== 'AppDrive') return INIT_ABIS[id];
+      if (!service) throw new Error('application has multiple services; pass service_name (available: docs, registry)');
+      return DRIVE_ABIS[service];
+    },
+    createContext: async (request: Record<string, unknown>) => {
+      created.push(request);
+      return { contextId: 'Ctx111', memberPublicKey: 'Member111' };
+    },
+  };
+  const { server, tools } = fakeServer();
+  register(server, fakeSession(admin), loadConfig(env()), CATALOG);
+  return { create: tools.get('create_context')!, created, abiFetches };
+}
+
+test('create_context validates init args against the ABI and sends them as the JSON init input', async () => {
+  const { create, created } = initAdmin();
+  await create({ application: 'AppBlocks', namespace: 'Ns111', args: { name: 'world-1', seed: 7, stray: true } });
+  assert.equal(created.length, 1);
+  assert.deepEqual(JSON.parse(Buffer.from(created[0].initializationParams as number[]).toString('utf8')), { name: 'world-1', seed: 7 });
+});
+
+test('create_context rejects init args that violate the init signature and creates nothing', async () => {
+  const { create, created } = initAdmin();
+  const res = await create({ application: 'AppBlocks', namespace: 'Ns111', args: { name: 'world-1', seed: 'seven' } });
+  assert.equal(res.isError, true);
+  assert.match(textOf(res), /seed/);
+  assert.deepEqual(created, []);
+});
+
+test('create_context without args sends no init input and never fetches the ABI, as before', async () => {
+  const { create, created, abiFetches } = initAdmin();
+  await create({ application: 'AppPlain', namespace: 'Ns111' });
+  assert.deepEqual(created, [{ applicationId: 'AppPlain', groupId: 'Ns111', name: undefined, serviceName: undefined }]);
+  assert.deepEqual(abiFetches, []);
+});
+
+test('create_context with args for an app that declares no init method says so and creates nothing', async () => {
+  const { create, created } = initAdmin();
+  const res = await create({ application: 'AppNoInit', namespace: 'Ns111', args: { name: 'x' } });
+  assert.equal(textOf(res), 'Error: Application "AppNoInit" declares no init method, so it takes no init args.');
+  assert.deepEqual(created, []);
+});
+
+test('create_context with args and a service validates against that service init and creates the context for it', async () => {
+  const { create, created, abiFetches } = initAdmin();
+  await create({ application: 'AppDrive', namespace: 'Ns111', service: 'docs', args: { title: 'Plans' } });
+  assert.deepEqual(abiFetches, ['AppDrive/docs']);
+  assert.equal(created[0].serviceName, 'docs');
+  assert.deepEqual(JSON.parse(Buffer.from(created[0].initializationParams as number[]).toString('utf8')), { title: 'Plans' });
+});
+
+test('create_context with args for a multi-service app and no service is an error naming the services, and creates nothing', async () => {
+  const { create, created } = initAdmin();
+  const res = await create({ application: 'AppDrive', namespace: 'Ns111', args: { title: 'Plans' } });
+  assert.equal(res.isError, true);
+  assert.match(textOf(res), /multiple services; pass service_name \(available: docs, registry\)/);
+  assert.deepEqual(created, []);
+});
+
+function groupAdmin(opts: { failVisibility?: boolean; failInfo?: boolean; failCreate?: boolean } = {}) {
+  const calls: Array<[string, ...unknown[]]> = [];
+  const admin = {
+    createGroupInNamespace: async (namespaceId: string, request: unknown) => {
+      calls.push(['createGroupInNamespace', namespaceId, request]);
+      return { groupId: 'Grp111' };
+    },
+    getGroupInfo: async (groupId: string) => {
+      calls.push(['getGroupInfo', groupId]);
+      if (opts.failInfo) throw new Error(`group ${groupId} not found`);
+      return { groupId, targetApplicationId: 'AppId111' };
+    },
+    createGroup: async (request: unknown) => {
+      calls.push(['createGroup', request]);
+      if (opts.failCreate) throw new Error('not an admin of the parent');
+      return { groupId: 'Grp222' };
+    },
+    setSubgroupVisibility: async (groupId: string, request: unknown) => {
+      calls.push(['setSubgroupVisibility', groupId, request]);
+      if (opts.failVisibility) throw new Error('not an admin of the group');
+    },
+    setGroupMetadata: async (groupId: string, request: unknown) => {
+      calls.push(['setGroupMetadata', groupId, request]);
+    },
+  };
+  const { server, tools } = fakeServer();
+  register(server, fakeSession(admin), loadConfig(env()), CATALOG);
+  return { tools, calls };
+}
+
+test('create_group without a parent creates the group in the namespace with its name and visibility', async () => {
+  const { tools, calls } = groupAdmin();
+  assert.deepEqual(jsonOf(await tools.get('create_group')!({ namespace: 'Ns111', name: 'Design', visibility: 'open' })), { groupId: 'Grp111' });
+  assert.deepEqual(calls, [['createGroupInNamespace', 'Ns111', { groupName: 'Design', visibility: 'open' }]]);
+});
+
+test('create_group with a parent nests under it for the parent application, then sets the visibility', async () => {
+  const { tools, calls } = groupAdmin();
+  assert.deepEqual(jsonOf(await tools.get('create_group')!({ namespace: 'Ns111', name: 'Specs', visibility: 'open', parent: 'Grp111' })), { groupId: 'Grp222' });
+  assert.deepEqual(calls, [
+    ['getGroupInfo', 'Grp111'],
+    ['createGroup', { applicationId: 'AppId111', name: 'Specs', parentGroupId: 'Grp111' }],
+    ['setSubgroupVisibility', 'Grp222', { subgroupVisibility: 'open' }],
+  ]);
+});
+
+test('create_group with a parent and no visibility creates the group and sets nothing', async () => {
+  const { tools, calls } = groupAdmin();
+  assert.deepEqual(jsonOf(await tools.get('create_group')!({ namespace: 'Ns111', parent: 'Grp111' })), { groupId: 'Grp222' });
+  assert.deepEqual(calls, [
+    ['getGroupInfo', 'Grp111'],
+    ['createGroup', { applicationId: 'AppId111', name: undefined, parentGroupId: 'Grp111' }],
+  ]);
+});
+
+test('create_group whose visibility step fails after creation is an error naming the created group', async () => {
+  const { tools } = groupAdmin({ failVisibility: true });
+  const res = await tools.get('create_group')!({ namespace: 'Ns111', visibility: 'open', parent: 'Grp111' });
+  assert.equal(res.isError, true);
+  assert.match(
+    textOf(res),
+    /^Error: Group Grp222 was created under Grp111 but its visibility was not set; retry set_group_visibility\. .*not an admin of the group/,
+  );
+});
+
+test('create_group whose parent lookup or creation fails is that error, and goes no further', async () => {
+  for (const [opts, message, steps] of [
+    [{ failInfo: true }, 'Error: group Grp111 not found', ['getGroupInfo']],
+    [{ failCreate: true }, 'Error: not an admin of the parent', ['getGroupInfo', 'createGroup']],
+  ] as const) {
+    const { tools, calls } = groupAdmin(opts);
+    const res = await tools.get('create_group')!({ namespace: 'Ns111', visibility: 'open', parent: 'Grp111' });
+    assert.equal(res.isError, true);
+    assert.equal(textOf(res), message);
+    assert.deepEqual(calls.map(([step]) => step), steps);
+  }
+});
+
+test('set_group_visibility and set_group_metadata send what core expects, metadata as a whole record', async () => {
+  const { tools, calls } = groupAdmin();
+  assert.equal(textOf(await tools.get('set_group_visibility')!({ group: 'Grp111', visibility: 'restricted' })), 'Group Grp111 is now restricted.');
+  await tools.get('set_group_metadata')!({ group: 'Grp111', name: 'Design', data: { kind: 'board' } });
+  await tools.get('set_group_metadata')!({ group: 'Grp111', name: 'Renamed' });
+  assert.deepEqual(calls, [
+    ['setSubgroupVisibility', 'Grp111', { subgroupVisibility: 'restricted' }],
+    ['setGroupMetadata', 'Grp111', { name: 'Design', data: { kind: 'board' } }],
+    ['setGroupMetadata', 'Grp111', { name: 'Renamed', data: {} }],
+  ]);
+});
+
+test('an unknown visibility is rejected by the input schema before any admin call', async () => {
+  const calls: string[] = [];
+  const { client, close } = await realServer({
+    setSubgroupVisibility: async (groupId: string) => {
+      calls.push(groupId);
+    },
+  });
+  try {
+    const res = (await client.callTool({ name: 'set_group_visibility', arguments: { group: 'Grp111', visibility: 'public' } })) as { isError?: boolean };
+    assert.equal(res.isError, true);
+    assert.deepEqual(calls, []);
+  } finally {
+    await close();
+  }
 });
