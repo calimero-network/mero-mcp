@@ -6,10 +6,10 @@ import type { Config } from '../config.ts';
 import { discoverLocalNodes, listConfiguredNodes, resolveNode } from '../config.ts';
 import type { NodeSession } from '../node.ts';
 import type { Catalog } from '../catalog.ts';
-import type { AbiLoader } from '../abi.ts';
+import { INIT_METHOD, type AbiLoader } from '../abi.ts';
 import { errorResult, textResult, toMessage } from '../errors.ts';
 import { listing } from '../guide.ts';
-import { parseArgs } from '../schema.ts';
+import { inputShapeForMethod, methodReference } from '../schema.ts';
 
 /** Runs an admin call and folds its result or throw into the MCP text-result convention. */
 function wrap<Args>(fn: (args: Args) => Promise<unknown>) {
@@ -33,11 +33,35 @@ const toHex = (bytes: number[]) => Buffer.from(bytes).toString('hex');
 
 const VISIBILITY = z.enum(['open', 'restricted']).describe('open: namespace members can join; restricted: members must be added.');
 
-/** init takes the same JSON args object a method call does, so it is validated the way method calls are. */
-function initParams(manifest: AbiManifest, label: string, args: Record<string, unknown>): number[] {
-  const init = manifest.methods.find((m) => m.name === 'init');
-  if (!init) throw new Error(`Application "${label}" declares no init method, so it takes no init args.`);
-  return [...Buffer.from(JSON.stringify(parseArgs(init, manifest, args)), 'utf8')];
+/** Each zod issue as a missing top-level parameter or an invalid value at its path. */
+function initProblems(error: z.ZodError, args: Record<string, unknown>): string {
+  const missing = new Set<string>();
+  const invalid: string[] = [];
+  for (const { path, message } of error.issues) {
+    const top = String(path[0]);
+    if (path.length && !(top in args)) missing.add(top);
+    else invalid.push(`${path.join('.') || 'args'} (${message})`);
+  }
+  return [missing.size ? `missing ${[...missing].join(', ')}` : '', invalid.length ? `invalid ${invalid.join(', ')}` : '']
+    .filter(Boolean)
+    .join('; ');
+}
+
+/** init takes the same JSON args object a method call does, so it is validated the way method calls are, before the node runs it. */
+function initParams(manifest: AbiManifest, label: string, args: Record<string, unknown> | undefined): number[] | undefined {
+  const init = manifest.methods.find((m) => m.name === INIT_METHOD);
+  if (!init) {
+    if (args) throw new Error(`Application "${label}" declares no init method, so it takes no init args.`);
+    return undefined;
+  }
+  const parsed = z.object(inputShapeForMethod(init, manifest)).safeParse(args ?? {});
+  if (!parsed.success) {
+    throw new Error(
+      `Application "${label}" cannot be initialized with these args: ${initProblems(parsed.error, args ?? {})}.\n` +
+        `Its init: ${methodReference(init)}\nPass these as create_context's args, keyed by parameter name.`,
+    );
+  }
+  return [...Buffer.from(JSON.stringify(parsed.data), 'utf8')];
 }
 
 export function registerCoreTools(server: McpServer, session: NodeSession, cfg: Config, loader: AbiLoader, catalog: Catalog): void {
@@ -139,10 +163,15 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
         service?: string;
         args?: Record<string, unknown>;
       }) => {
-        const request = { groupId: namespace, name, serviceName: service };
-        if (!args) return admin.createContext({ ...request, applicationId: (await identify(application)).id });
         const { id, manifest } = await load(application, service);
-        return admin.createContext({ ...request, applicationId: id, initializationParams: initParams(manifest, application, args) });
+        const initializationParams = initParams(manifest, application, args);
+        return admin.createContext({
+          applicationId: id,
+          groupId: namespace,
+          name,
+          serviceName: service,
+          ...(initializationParams ? { initializationParams } : {}),
+        });
       },
     ),
   );

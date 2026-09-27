@@ -59,6 +59,7 @@ This is the step people miss, and it is why the app's tools are listed while `se
    them as `args`, keyed by parameter name - for example
    `args {"name": "world-1", "seed": 42, "now": 1727000000}` for mero-blocks. They are checked against the ABI
    before anything reaches the node.
+   Leaving them out, or getting one wrong, returns an error naming each missing or invalid parameter, with the `init` signature, and creates nothing.
 
 4. **Select the app and call it:**
 

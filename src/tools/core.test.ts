@@ -84,8 +84,11 @@ const jsonOf = (result: { content: Array<{ type: 'text'; text: string }> }) => J
 
 /** One installed app, shaped the way the ABI resolver reads it. */
 const listApplications = async () => ({
-  apps: [{ id: 'AppId111', package: 'network.calimero.kv-store', blob: { bytecode: 'Blob111' }, metadata: [] }],
+  apps: [{ id: 'AppId111', package: 'network.calimero.kv-store', metadata: [], blob: { bytecode: 'Blob111' } }],
 });
+
+/** Its ABI declares no init, so create_context sends no init input. */
+const getApplicationAbi = async () => ({ schema_version: 'wasm-abi/1', types: {}, methods: [], events: [] });
 
 // HTTPError is absent from mero-js's resolvable types but real at runtime, and it is what
 // every rejected admin call throws, so use the genuine class rather than a stand-in.
@@ -327,6 +330,7 @@ test('create_namespace and create_context resolve an application the way describ
   const created: Array<Record<string, unknown>> = [];
   const admin = {
     listApplications,
+    getApplicationAbi,
     createNamespace: async (request: Record<string, unknown>) => {
       created.push(request);
       return { namespaceId: 'Ns111' };
@@ -424,6 +428,7 @@ test("a rejected admin call reaches the tool result as the node's own message, n
   const needsService = 'application has multiple services; pass service_name (available: api, worker)';
   const admin = {
     listApplications,
+    getApplicationAbi,
     createNamespace: async () => {
       throw httpError(400, noNamespace);
     },
@@ -467,7 +472,7 @@ test('a bodyless rejection still names the endpoint and the status, and an unrea
   assert.equal(textOf(unreachable), 'Error: Cannot reach the node at http://localhost:2528/admin-api/health: fetch failed');
 });
 
-/** Two installed apps: one whose init takes (name, seed), one whose init takes nothing. */
+/** Installed apps whose init takes (name, seed), nothing, only an optional note, or that declare no init. */
 const INIT_ABIS: Record<string, unknown> = {
   AppBlocks: {
     schema_version: 'wasm-abi/1',
@@ -476,6 +481,12 @@ const INIT_ABIS: Record<string, unknown> = {
     events: [],
   },
   AppPlain: { schema_version: 'wasm-abi/1', types: {}, methods: [{ name: 'init', params: [] }], events: [] },
+  AppOptional: {
+    schema_version: 'wasm-abi/1',
+    types: {},
+    methods: [{ name: 'init', params: [{ name: 'note', type: { kind: 'string' }, nullable: true }] }],
+    events: [],
+  },
   AppNoInit: { schema_version: 'wasm-abi/1', types: {}, methods: [{ name: 'ping', params: [] }], events: [] },
 };
 
@@ -518,19 +529,39 @@ test('create_context validates init args against the ABI and sends them as the J
   assert.deepEqual(JSON.parse(Buffer.from(created[0].initializationParams as number[]).toString('utf8')), { name: 'world-1', seed: 7 });
 });
 
-test('create_context rejects init args that violate the init signature and creates nothing', async () => {
+const BLOCKS_INIT = 'Its init: [mut] init(name: string, seed: u64) -> unit\nPass these as create_context\'s args, keyed by parameter name.';
+
+test('create_context rejects init args that violate the init signature, naming each field and the signature, and creates nothing', async () => {
   const { create, created } = initAdmin();
-  const res = await create({ application: 'AppBlocks', namespace: 'Ns111', args: { name: 'world-1', seed: 'seven' } });
+  const res = await create({ application: 'AppBlocks', namespace: 'Ns111', args: { seed: 'seven' } });
   assert.equal(res.isError, true);
-  assert.match(textOf(res), /seed/);
+  assert.equal(
+    textOf(res),
+    'Error: Application "AppBlocks" cannot be initialized with these args: missing name; invalid seed (Invalid input: expected number, received string).\n' +
+      BLOCKS_INIT,
+  );
   assert.deepEqual(created, []);
 });
 
-test('create_context without args sends no init input and never fetches the ABI, as before', async () => {
-  const { create, created, abiFetches } = initAdmin();
-  await create({ application: 'AppPlain', namespace: 'Ns111' });
-  assert.deepEqual(created, [{ applicationId: 'AppPlain', groupId: 'Ns111', name: undefined, serviceName: undefined }]);
-  assert.deepEqual(abiFetches, []);
+test('create_context without args for an app whose init takes parameters names the missing ones and creates nothing', async () => {
+  const { create, created } = initAdmin();
+  const res = await create({ application: 'AppBlocks', namespace: 'Ns111' });
+  assert.equal(res.isError, true);
+  assert.equal(textOf(res), `Error: Application "AppBlocks" cannot be initialized with these args: missing name, seed.\n${BLOCKS_INIT}`);
+  assert.deepEqual(created, []);
+});
+
+test('create_context without args sends {} to an init with no required parameters, and no init input to an app without init', async () => {
+  const { create, created } = initAdmin();
+  for (const application of ['AppPlain', 'AppOptional', 'AppNoInit']) await create({ application, namespace: 'Ns111' });
+  assert.deepEqual(
+    created.map((c) => [c.applicationId, c.initializationParams && Buffer.from(c.initializationParams as number[]).toString('utf8')]),
+    [
+      ['AppPlain', '{}'],
+      ['AppOptional', '{}'],
+      ['AppNoInit', undefined],
+    ],
+  );
 });
 
 test('create_context with args for an app that declares no init method says so and creates nothing', async () => {

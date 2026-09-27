@@ -27,7 +27,7 @@ import {
   toolText,
 } from './e2e-lib.mjs';
 
-const PLANNED = 22;
+const PLANNED = 23;
 
 const { values: opts } = parseArgs({
   options: { node: { type: 'string' }, app: { type: 'string' } },
@@ -180,6 +180,7 @@ async function runChecks({ checks, mcp, api, kv, second }) {
       "a plain-text node rejection also carries the node's own message",
       'a mutating tool without an app_handle is refused and changes nothing',
       'init has no tool, and call refuses it on a live context without running it',
+      'create_context without args creates a callable context when the init the node serves takes none',
       "list_applications lists the guide's procedures and leaves the guide out",
       "describe_app returns the node's guide as an author-labelled embedded resource",
       'generated tools and parameters carry the method docs the node serves',
@@ -321,6 +322,15 @@ async function runChecks({ checks, mcp, api, kv, second }) {
       assert(/has no application published at/.test(text), `the node's own message is missing: ${text}`);
       assert(!/^Error: HTTP \d+ [A-Za-z ]+$/.test(text), `a bare status line reached the caller instead: ${text}`);
       return text.slice(0, 140);
+    });
+
+    // create_context reads init from the node's ABI before creating anything, so an app whose init takes no parameters needs no args.
+    await checks.check('create_context without args creates a callable context when the init the node serves takes none', async () => {
+      const init = kv.abi.methods.find((m) => m.name === 'init');
+      assertEqual(init?.params, [], `${kv.name}'s init does not take zero parameters, so this proves nothing`);
+      const { contextId } = await mcp.call('create_context', { application: kv.name, namespace: await api.createNamespace(kv.id) });
+      assertEqual(await api.execute(contextId, 'get', { key: 'absent' }), null, 'the new context does not answer a read');
+      return `context ${contextId}`;
     });
   }
 

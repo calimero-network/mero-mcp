@@ -78,6 +78,9 @@ Create a context for an application under a namespace.
 | `service` | string, optional | Required for a multi-service application |
 | `args` | object, optional | Arguments for the app's `init`, keyed by parameter name; checked against the ABI like a method call |
 
+`args` is checked against the app's `init` before anything is created, and may be left out only when `init` takes no required parameters.
+A missing or invalid argument returns `isError: true` naming each one, followed by the `init` signature and its parameter docs.
+
 ### `join_context`
 
 Join a context this node is not yet a member of. Takes `context`. Returns `{ contextId, memberPublicKey }`.
