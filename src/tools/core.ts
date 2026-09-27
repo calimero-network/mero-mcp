@@ -172,10 +172,15 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
         }
         const groupId = group || namespace;
         if (!groupId) throw new Error('Pass group: the id of the namespace, or of a subgroup in one, to create the context in.');
-        const { id, manifest } = await load(application, service);
-        const initializationParams = initParams(manifest, application, args);
+        // Without args an unreadable ABI (an app built without one) must not block setup; args that cannot be checked are never sent.
+        const loaded = await load(application, service).catch((err: unknown) => {
+          if (args) throw err;
+          return undefined;
+        });
+        const applicationId = loaded ? loaded.id : (await identify(application)).id;
+        const initializationParams = loaded && initParams(loaded.manifest, application, args);
         return admin.createContext({
-          applicationId: id,
+          applicationId,
           groupId,
           name,
           serviceName: service,

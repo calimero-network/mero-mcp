@@ -488,6 +488,7 @@ const INIT_ABIS: Record<string, unknown> = {
     events: [],
   },
   AppNoInit: { schema_version: 'wasm-abi/1', types: {}, methods: [{ name: 'ping', params: [] }], events: [] },
+  AppNoAbi: null,
 };
 
 /** A two-service bundle, whose ABI core only serves for a named service. */
@@ -495,6 +496,8 @@ const DRIVE_ABIS: Record<string, unknown> = {
   docs: { schema_version: 'wasm-abi/1', types: {}, methods: [{ name: 'init', params: [{ name: 'title', type: { kind: 'string' } }] }], events: [] },
   registry: { schema_version: 'wasm-abi/1', types: {}, methods: [{ name: 'init', params: [] }], events: [] },
 };
+
+const NO_ABI = 'application has no usable embedded ABI; rebuild it with `cargo mero build`';
 
 function initAdmin() {
   const created: Array<Record<string, unknown>> = [];
@@ -508,7 +511,10 @@ function initAdmin() {
     }),
     getApplicationAbi: async (id: string, service?: string) => {
       abiFetches.push(service ? `${id}/${service}` : id);
-      if (id !== 'AppDrive') return INIT_ABIS[id];
+      if (id !== 'AppDrive') {
+        if (INIT_ABIS[id] === null) throw httpError(400, NO_ABI);
+        return INIT_ABIS[id];
+      }
       if (!service) throw new Error('application has multiple services; pass service_name (available: docs, registry)');
       return DRIVE_ABIS[service];
     },
@@ -572,6 +578,20 @@ test('create_context without args sends {} to an init with no required parameter
       ['AppNoInit', undefined],
     ],
   );
+});
+
+test('create_context without args for an app whose ABI cannot be read creates the context with no init input, as core would', async () => {
+  const { create, created } = initAdmin();
+  const res = await create({ application: 'AppNoAbi', group: 'Ns111' });
+  assert.equal(res.isError, undefined);
+  assert.deepEqual(created, [{ applicationId: 'AppNoAbi', groupId: 'Ns111', name: undefined, serviceName: undefined }]);
+});
+
+test('create_context with args for an app whose ABI cannot be read refuses, since they cannot be checked, and creates nothing', async () => {
+  const { create, created } = initAdmin();
+  const res = await create({ application: 'AppNoAbi', group: 'Ns111', args: { name: 'x' } });
+  assert.equal(textOf(res), `Error: ${NO_ABI}`);
+  assert.deepEqual(created, []);
 });
 
 test('create_context with args for an app that declares no init method says so and creates nothing', async () => {

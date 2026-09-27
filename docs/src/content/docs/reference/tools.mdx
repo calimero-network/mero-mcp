@@ -81,6 +81,7 @@ Create a context for an application in a group: a namespace, or a subgroup insid
 
 `args` is checked against the app's `init` before anything is created, and may be left out only when `init` takes no required parameters.
 A missing or invalid argument returns `isError: true` naming each one, followed by the `init` signature and its parameter docs.
+When `args` is left out and the app's ABI cannot be read, the context is created with no init input and the node reports any init failure; `args` that cannot be checked are refused.
 
 ### `join_context`
 
