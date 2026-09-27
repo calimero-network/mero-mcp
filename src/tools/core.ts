@@ -33,17 +33,21 @@ const toHex = (bytes: number[]) => Buffer.from(bytes).toString('hex');
 
 const VISIBILITY = z.enum(['open', 'restricted']).describe('open: namespace members can join; restricted: members must be added.');
 
-/** Each zod issue as a missing top-level parameter or an invalid value at its path. */
+/** Each zod issue as a missing top-level parameter, an undeclared one, or an invalid value at its path. */
 function initProblems(error: z.ZodError, args: Record<string, unknown>): string {
   const missing = new Set<string>();
+  const unknown: string[] = [];
   const invalid: string[] = [];
-  for (const { path, message } of error.issues) {
-    const top = String(path[0]);
-    if (path.length && !(top in args)) missing.add(top);
-    else invalid.push(`${path.join('.') || 'args'} (${message})`);
+  for (const issue of error.issues) {
+    const top = String(issue.path[0]);
+    if (issue.code === 'unrecognized_keys' && !issue.path.length) unknown.push(...issue.keys);
+    else if (issue.path.length && !(top in args)) missing.add(top);
+    else invalid.push(`${issue.path.join('.') || 'args'} (${issue.message})`);
   }
-  return [missing.size ? `missing ${[...missing].join(', ')}` : '', invalid.length ? `invalid ${invalid.join(', ')}` : '']
-    .filter(Boolean)
+  const parts = { missing: [...missing], invalid, unknown };
+  return Object.entries(parts)
+    .filter(([, names]) => names.length)
+    .map(([kind, names]) => `${kind} ${names.join(', ')}`)
     .join('; ');
 }
 
@@ -54,7 +58,8 @@ function initParams(manifest: AbiManifest, label: string, args: Record<string, u
     if (args) throw new Error(`Application "${label}" declares no init method, so it takes no init args.`);
     return undefined;
   }
-  const parsed = z.object(inputShapeForMethod(init, manifest)).safeParse(args ?? {});
+  // Strict, so a misspelt optional parameter is refused rather than silently left unset.
+  const parsed = z.strictObject(inputShapeForMethod(init, manifest)).safeParse(args ?? {});
   if (!parsed.success) {
     throw new Error(
       `Application "${label}" cannot be initialized with these args: ${initProblems(parsed.error, args ?? {})}.\n` +

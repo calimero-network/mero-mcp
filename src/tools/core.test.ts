@@ -540,7 +540,7 @@ test('create_context reads the ABI through the shared loader, so one the catalog
 
 test('create_context validates init args against the ABI and sends them as the JSON init input', async () => {
   const { create, created } = initAdmin();
-  await create({ application: 'AppBlocks', namespace: 'Ns111', args: { name: 'world-1', seed: 7, stray: true } });
+  await create({ application: 'AppBlocks', namespace: 'Ns111', args: { name: 'world-1', seed: 7 } });
   assert.equal(created.length, 1);
   assert.deepEqual(JSON.parse(Buffer.from(created[0].initializationParams as number[]).toString('utf8')), { name: 'world-1', seed: 7 });
 });
@@ -556,6 +556,13 @@ test('create_context rejects init args that violate the init signature, naming e
     'Error: Application "AppBlocks" cannot be initialized with these args: missing name; invalid seed (Invalid input: expected number, received string).\n' +
       BLOCKS_INIT,
   );
+  assert.deepEqual(created, []);
+});
+
+test('create_context refuses init args the ABI does not declare, naming them, instead of dropping them', async () => {
+  const { create, created } = initAdmin();
+  const res = await create({ application: 'AppBlocks', namespace: 'Ns111', args: { name: 'world-1', seed: 7, stray: true, extra: 1 } });
+  assert.equal(textOf(res), `Error: Application "AppBlocks" cannot be initialized with these args: unknown stray, extra.\n${BLOCKS_INIT}`);
   assert.deepEqual(created, []);
 });
 
