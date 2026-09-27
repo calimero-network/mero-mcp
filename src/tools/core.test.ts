@@ -6,7 +6,7 @@ import * as meroJs from '@calimero-network/mero-js';
 import { loadConfig, type Config } from '../config.ts';
 import type { NodeSession } from '../node.ts';
 import { registerCoreTools } from './core.ts';
-import { createAbiLoader } from '../abi.ts';
+import { createAbiLoader, type AbiLoader } from '../abi.ts';
 import type { Catalog } from '../catalog.ts';
 
 /** Core tools only ask the catalog to refresh after an install or uninstall. */
@@ -518,9 +518,19 @@ function initAdmin() {
     },
   };
   const { server, tools } = fakeServer();
-  register(server, fakeSession(admin), loadConfig(env()), CATALOG);
-  return { create: tools.get('create_context')!, created, abiFetches };
+  const session = fakeSession(admin);
+  const loader = createAbiLoader(session);
+  registerCoreTools(server, session, loadConfig(env()), loader, CATALOG);
+  return { create: tools.get('create_context')!, created, abiFetches, loader };
 }
+
+test('create_context reads the ABI through the shared loader, so one the catalog already cached is not fetched again', async () => {
+  const { create, created, abiFetches, loader } = initAdmin();
+  await loader.load('AppBlocks');
+  await create({ application: 'AppBlocks', group: 'Ns111', args: { name: 'world-1', seed: 7 } });
+  assert.equal(created.length, 1);
+  assert.deepEqual(abiFetches, ['AppBlocks']);
+});
 
 test('create_context validates init args against the ABI and sends them as the JSON init input', async () => {
   const { create, created } = initAdmin();
@@ -638,6 +648,10 @@ function groupAdmin(opts: { failVisibility?: boolean; failInfo?: boolean; failCr
     setGroupMetadata: async (groupId: string, request: unknown) => {
       calls.push(['setGroupMetadata', groupId, request]);
     },
+    joinSubgroupInheritance: async (groupId: string) => {
+      calls.push(['joinSubgroupInheritance', groupId]);
+      return { groupId, memberPublicKey: 'Member111', wasInherited: true };
+    },
   };
   const { server, tools } = fakeServer();
   register(server, fakeSession(admin), loadConfig(env()), CATALOG);
@@ -718,4 +732,24 @@ test('an unknown visibility is rejected by the input schema before any admin cal
   } finally {
     await close();
   }
+});
+
+test('join_context joins the named context and returns what the node answers', async () => {
+  const joined: string[] = [];
+  const admin = {
+    joinContext: async (contextId: string) => {
+      joined.push(contextId);
+      return { contextId, memberPublicKey: 'Member111' };
+    },
+  };
+  const { server, tools } = fakeServer();
+  register(server, fakeSession(admin), loadConfig(env()), CATALOG);
+  assert.deepEqual(jsonOf(await tools.get('join_context')!({ context: 'Ctx111' })), { contextId: 'Ctx111', memberPublicKey: 'Member111' });
+  assert.deepEqual(joined, ['Ctx111']);
+});
+
+test('join_open_group joins through inheritance and returns what the node answers', async () => {
+  const { tools, calls } = groupAdmin();
+  assert.deepEqual(jsonOf(await tools.get('join_open_group')!({ group: 'Grp111' })), { groupId: 'Grp111', memberPublicKey: 'Member111', wasInherited: true });
+  assert.deepEqual(calls, [['joinSubgroupInheritance', 'Grp111']]);
 });
