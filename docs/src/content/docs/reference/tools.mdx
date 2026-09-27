@@ -73,7 +73,7 @@ Create a context for an application in a group: a namespace, or a subgroup insid
 | Argument | Type | Notes |
 | --- | --- | --- |
 | `application` | string | Id, package name, unambiguous trailing segment, or display name |
-| `group` | string | Namespace or subgroup id to create the context in |
+| `group` | string, required unless `namespace` is given | Namespace or subgroup id to create the context in |
 | `namespace` | string, optional | Older name for `group`, still accepted; passing both with different values is an error |
 | `name` | string, optional | |
 | `service` | string, optional | Required for a multi-service application |
