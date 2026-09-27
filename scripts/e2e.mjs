@@ -328,7 +328,7 @@ async function runChecks({ checks, mcp, api, kv, second }) {
     await checks.check('create_context without args creates a callable context when the init the node serves takes none', async () => {
       const init = kv.abi.methods.find((m) => m.name === 'init');
       assertEqual(init?.params, [], `${kv.name}'s init does not take zero parameters, so this proves nothing`);
-      const { contextId } = await mcp.call('create_context', { application: kv.name, namespace: await api.createNamespace(kv.id) });
+      const { contextId } = await mcp.call('create_context', { application: kv.name, group: await api.createNamespace(kv.id) });
       assertEqual(await api.execute(contextId, 'get', { key: 'absent' }), null, 'the new context does not answer a read');
       return `context ${contextId}`;
     });

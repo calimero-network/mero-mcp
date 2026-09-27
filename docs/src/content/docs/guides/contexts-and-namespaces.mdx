@@ -49,8 +49,10 @@ This is the step people miss, and it is why the app's tools are listed while `se
 3. **Create a context in that namespace:**
 
    ```text
-   Call create_context with application "kv-store" and namespace "<namespace-id>".
+   Call create_context with application "kv-store" and group "<namespace-id>".
    ```
+
+   `group` takes a namespace id or the id of a subgroup inside one, for an app whose guide sets its contexts up in a subgroup.
 
    For a multi-service application, pass `service` too — `describe_app` reports the
    service names existing contexts use, and that is the value this wants.

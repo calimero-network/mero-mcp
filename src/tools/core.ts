@@ -139,11 +139,12 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
     'create_context',
     {
       description:
-        'Create a new context for an application under a namespace. ' +
+        'Create a new context for an application in a group: a namespace, or a subgroup inside one. ' +
         "Pass `args` when the application's init method takes parameters; describe_app lists init with them.",
       inputSchema: {
         application: z.string().describe('Application id or package name.'),
-        namespace: z.string(),
+        group: z.string().optional().describe('Id of the group to create the context in: a namespace, or a subgroup inside one.'),
+        namespace: z.string().optional().describe('Older name for group, still accepted; pass group instead.'),
         name: z.string().optional(),
         service: z.string().optional(),
         args: z.record(z.string(), z.unknown()).optional().describe("Arguments for the application's init method, keyed by parameter name."),
@@ -152,22 +153,29 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
     wrap(
       async ({
         application,
+        group,
         namespace,
         name,
         service,
         args,
       }: {
         application: string;
-        namespace: string;
+        group?: string;
+        namespace?: string;
         name?: string;
         service?: string;
         args?: Record<string, unknown>;
       }) => {
+        if (group && namespace && group !== namespace) {
+          throw new Error(`group "${group}" and namespace "${namespace}" name different groups; pass only group.`);
+        }
+        const groupId = group || namespace;
+        if (!groupId) throw new Error('Pass group: the id of the namespace, or of a subgroup in one, to create the context in.');
         const { id, manifest } = await load(application, service);
         const initializationParams = initParams(manifest, application, args);
         return admin.createContext({
           applicationId: id,
-          groupId: namespace,
+          groupId,
           name,
           serviceName: service,
           ...(initializationParams ? { initializationParams } : {}),

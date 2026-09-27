@@ -587,6 +587,25 @@ test('create_context with args for a multi-service app and no service is an erro
   assert.deepEqual(created, []);
 });
 
+test('create_context takes the target group as group, a namespace or subgroup id, and namespace still works', async () => {
+  const { create, created } = initAdmin();
+  await create({ application: 'AppNoInit', group: 'Sub111' });
+  await create({ application: 'AppNoInit', namespace: 'Ns111' });
+  await create({ application: 'AppNoInit', group: 'Ns111', namespace: 'Ns111' });
+  assert.deepEqual(created.map((c) => c.groupId), ['Sub111', 'Ns111', 'Ns111']);
+});
+
+test('create_context refuses two different targets, or none, before reading the app or creating anything', async () => {
+  const { create, created, abiFetches } = initAdmin();
+  const both = await create({ application: 'AppNoInit', group: 'Sub111', namespace: 'Ns111' });
+  assert.equal(both.isError, true);
+  assert.equal(textOf(both), 'Error: group "Sub111" and namespace "Ns111" name different groups; pass only group.');
+  const neither = await create({ application: 'AppNoInit' });
+  assert.equal(neither.isError, true);
+  assert.equal(textOf(neither), 'Error: Pass group: the id of the namespace, or of a subgroup in one, to create the context in.');
+  assert.deepEqual([created, abiFetches], [[], []]);
+});
+
 function groupAdmin(opts: { failVisibility?: boolean; failInfo?: boolean; failCreate?: boolean } = {}) {
   const calls: Array<[string, ...unknown[]]> = [];
   const admin = {

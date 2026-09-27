@@ -68,12 +68,13 @@ Contexts on this node. Read-only.
 
 ### `create_context`
 
-Create a context for an application under a namespace.
+Create a context for an application in a group: a namespace, or a subgroup inside one.
 
 | Argument | Type | Notes |
 | --- | --- | --- |
 | `application` | string | Id, package name, or unambiguous trailing segment |
-| `namespace` | string | Namespace id |
+| `group` | string | Namespace or subgroup id to create the context in |
+| `namespace` | string, optional | Older name for `group`, still accepted; passing both with different values is an error |
 | `name` | string, optional | |
 | `service` | string, optional | Required for a multi-service application |
 | `args` | object, optional | Arguments for the app's `init`, keyed by parameter name; checked against the ABI like a method call |
