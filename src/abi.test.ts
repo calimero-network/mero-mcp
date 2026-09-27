@@ -134,6 +134,17 @@ test('a display name two apps share is ambiguous, listing both packages, never a
   );
 });
 
+test("a name that is one app's short name and another's display name is ambiguous, while an app's own two forms agree", async () => {
+  const apps = [
+    app({ package: 'com.example.notes', metadata: named('Scratchpad') }),
+    app({ id: 'other', package: 'org.example.memo', metadata: named('Notes') }),
+    app({ id: 'kv', package: 'com.calimero.kv-store', metadata: named('KV-Store') }),
+  ];
+  const { loader } = fake({ apps });
+  await assert.rejects(loader.identify('notes'), /ambiguous: com\.example\.notes, org\.example\.memo\./);
+  assert.equal((await loader.identify('kv-store')).id, 'kv');
+});
+
 test('identify matches whole segments only, never a prefix of one', async () => {
   const { loader } = fake({ apps: [app({ package: 'com.calimero.mero-chat-v2' })] });
   await assert.rejects(loader.identify('mero-chat'), /not found\. Installed: com\.calimero\.mero-chat-v2/);

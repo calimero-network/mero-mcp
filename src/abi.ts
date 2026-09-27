@@ -79,10 +79,12 @@ export function createAbiLoader(session: NodeSession) {
     const lower = nameOrId.toLowerCase();
     const byId = apps.filter((a) => a.id === nameOrId);
     const byPackage = apps.filter((a) => a.package === nameOrId);
+    // One tier for both short forms, so one app's segment and another's display name collide as ambiguous.
     // Whole segments only, never a prefix: "mero-chat" must not resolve to "mero-chat-v2".
-    const bySegment = apps.filter((a) => a.package && lastSegment(a.package).toLowerCase() === lower);
-    const byName = apps.filter((a) => metadataField(a.metadata, 'name')?.toLowerCase() === lower);
-    const matches = [byId, byPackage, bySegment, byName].find((m) => m.length) ?? [];
+    const byShortName = apps.filter(
+      (a) => (a.package && lastSegment(a.package).toLowerCase() === lower) || metadataField(a.metadata, 'name')?.toLowerCase() === lower,
+    );
+    const matches = [byId, byPackage, byShortName].find((m) => m.length) ?? [];
 
     const packages = [...new Set(matches.map((a) => a.package))];
     if (packages.length > 1) {

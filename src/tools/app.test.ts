@@ -619,6 +619,19 @@ test("call refuses a handle for one app when app names another, with that app's 
 
 const kvBy = (id: string, signer: string, context: string): FakeApp => ({ ...kv(), id, signer_id: signer, contexts: [ctx(context)] });
 
+test("call refuses a handle for one app when app gives another app's display name, and runs nothing", async () => {
+  const s = await setup();
+  try {
+    const { app_handle } = await s.json('select_app', { app: 'org.example.notes' });
+    const res = await s.call('call', { app_handle, method: 'add', args: { body: 'b' }, app: 'KV Store' });
+    assert.equal(res.isError, true);
+    assert.equal(res.content.at(-1)!.text, RETRY);
+    assert.deepEqual(s.executed, []);
+  } finally {
+    await s.close();
+  }
+});
+
 test('one package from two signers is two apps: own tools, no silent pick by name, and a handle per signer', async () => {
   // Same package, version and guide, so only the signer tells the two handles apart.
   const s = await setup([kvBy('kv-a', 'SignerA', 'ctxa'), kvBy('kv-b', 'SignerB', 'ctxb')]);

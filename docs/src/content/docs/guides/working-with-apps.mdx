@@ -19,8 +19,8 @@ Anywhere a tool takes an application, four forms work:
 | Trailing package segment | `kv-store` |
 | Display name, the bundle's `metadata.name`, in any case | `Mero Blocks` |
 
-The forms are tried in that order, and the first that matches anything decides.
-A display name that more than one installed application carries is ambiguous, and the error lists their packages.
+An id is tried first, then a full package name, then the two short forms together.
+A short form that matches more than one installed application, such as one app's trailing segment and another's display name, is ambiguous, and the error lists their packages.
 
 The short form is matched on **whole segments only**, so `mero-chat` never
 resolves to `mero-chat-v2`. If the segment is ambiguous across installed
