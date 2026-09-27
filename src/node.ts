@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { MeroJs, type TokenStore, type TokenData } from '@calimero-network/mero-js';
 import type { Config, DiscoveredNode, Handoff } from './config.ts';
 import { resolveNode, readHandoff, listConfiguredNodes } from './config.ts';
+import { tracedFetch } from './trace.ts';
 
 export type AuthMode = 'handoff' | 'token' | 'credentials' | 'none';
 
@@ -108,6 +109,7 @@ export async function createSession(cfg: Config): Promise<NodeSession> {
   const mero = new MeroJs({
     baseUrl: node.url,
     tokenStore: store,
+    fetch: tracedFetch,
     ...(authMode === 'credentials' ? { credentials: { username: cfg.username!, password: cfg.password! } } : {}),
   });
 
