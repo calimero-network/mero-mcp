@@ -6,9 +6,6 @@ const current = new AsyncLocalStorage<string>();
 /** W3C trace-context format, excluding the all-zero trace/parent ids and the reserved `ff` version. */
 const TRACEPARENT_FORMAT = /^(?!ff-)[0-9a-f]{2}-(?!0{32}-)[0-9a-f]{32}-(?!0{16}-)[0-9a-f]{16}-[0-9a-f]{2}$/;
 
-/** The W3C traceparent of the MCP request being handled, if the client sent one. */
-export const currentTraceparent = (): string | undefined => current.getStore();
-
 /** Every tool registered after this runs with its request's traceparent in scope, for node requests to forward. */
 export function traceTools(server: McpServer): void {
   const register = server.registerTool.bind(server) as (name: string, config: unknown, cb: (...args: unknown[]) => unknown) => unknown;
