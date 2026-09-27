@@ -277,10 +277,11 @@ Call an application method by name.
 | `app` | string, optional | Shows that app's guide on a refusal; a handle for another app is refused |
 
 An unknown `method` returns the list of methods that exist.
+`init` is refused, after the handle check, with a pointer to `create_context`'s `args`: it runs once, when the context is created.
 
 ## Generated method tools
 
-One per method of every installed application, sorted by package, then application id, then service, then method, for every client alike.
+One per method of every installed application except `init`, which `create_context` runs, sorted by package, then application id, then service, then method, for every client alike.
 Named `<app>_<method>`, or `<app>_<service>_<method>` for a multi-service application, where `<app>` is the sanitised trailing package segment cut to 20 characters; a name longer than 49 characters keeps its first 42 and ends in `_` plus 6 hex of its sha256.
 A name never repeats a fixed tool's name or another app's: a clash adds `_` plus 6 alphanumerics of the application id (see [tool naming](/reference/abi-mapping/#tool-naming)).
 

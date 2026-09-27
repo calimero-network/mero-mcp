@@ -94,6 +94,40 @@ test('the tool list is every method of every installed app, sorted by package th
   }
 });
 
+const withInit = (): FakeApp => ({
+  ...kv(),
+  abi: manifest([method('init', [{ name: 'name', type: { kind: 'string' } }]), method('set', [{ name: 'key', type: { kind: 'string' } }])]),
+});
+
+const INIT_REFUSED =
+  "init runs once, when create_context creates the context; pass its arguments as create_context's args. It cannot be called on a context.";
+
+test('init gets no generated tool and select_app names none, since create_context runs it', async () => {
+  const s = await setup([withInit()]);
+  try {
+    const names = (await s.client.listTools()).tools.map((t) => t.name).filter((n) => n.startsWith('kv_store_'));
+    assert.deepEqual(names, ['kv_store_set']);
+    assert.deepEqual((await s.json('select_app', { app: 'kv-store' })).tools, ['kv_store_set']);
+  } finally {
+    await s.close();
+  }
+});
+
+test('call refuses init after the handle check, pointing at create_context, and runs nothing', async () => {
+  const s = await setup([withInit()]);
+  try {
+    const unhandled = await s.call('call', { method: 'init', args: { name: 'x' }, app: 'kv-store' });
+    assert.equal(unhandled.content.at(-1)!.text, RETRY);
+    const { app_handle } = await s.json('select_app', { app: 'kv-store' });
+    const res = await s.call('call', { app_handle, method: 'init', args: { name: 'x' } });
+    assert.equal(res.isError, true);
+    assert.deepEqual(res.content.map((b) => b.text), [INIT_REFUSED]);
+    assert.deepEqual(s.executed, []);
+  } finally {
+    await s.close();
+  }
+});
+
 test('a generated tool called without an app_handle is refused with the guide and runs nothing', async () => {
   const s = await setup();
   try {

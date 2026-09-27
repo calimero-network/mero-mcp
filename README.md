@@ -151,7 +151,7 @@ Handles are per application, so one instruction can span several apps by holding
 Anywhere an application is named you can pass its id, its full package name, or just the last dot-separated segment of that package (`kv-store` for `com.calimero.kv-store`), as long as that segment is unambiguous among the installed applications.
 The same package from two signers is two apps; name either by its application id.
 
-**Generated** (always registered): one tool per method of every installed app, from the moment a client connects, and each takes that app's `app_handle`.
+**Generated** (always registered): one tool per method of every installed app except `init`, which `create_context` runs, from the moment a client connects, and each takes that app's `app_handle`.
 Those tools are named `<app>_<method>`, or `<app>_<service>_<method>` for a multi-service application, where `<app>` is that same trailing package segment: `com.calimero.kv-store` yields `kv_store_get`.
 The list changes only when an app is installed, upgraded or uninstalled.
 

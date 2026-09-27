@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
-import { AppNotFoundError, packageKey, type AbiLoader, type ResolvedApp } from '../abi.ts';
+import { AppNotFoundError, INIT_METHOD, packageKey, type AbiLoader, type ResolvedApp } from '../abi.ts';
 import type { Catalog } from '../catalog.ts';
 import { errorResult, textResult } from '../errors.ts';
 import { advertisedObject, type Gate } from '../gate.ts';
@@ -15,6 +15,9 @@ const CONTEXT_ID = /^[0-9a-f]{64}$/;
 const NO_GUIDE = 'This app ships no guide.';
 
 const NO_HANDLE = 'Call select_app for the application and retry with the returned app_handle.';
+
+const INIT_REFUSED =
+  "init runs once, when create_context creates the context; pass its arguments as create_context's args. It cannot be called on a context.";
 
 const TOOLS_NOTE =
   'These are the server-side tool names. An MCP client may expose them under a prefix of its own ' +
@@ -219,6 +222,7 @@ export function registerAppTools(
         const admitted = await gate.admit(resolved, app_handle);
         if ('refusal' in admitted) return admitted.refusal;
         const { method, args } = CALL_INPUT.parse(raw);
+        if (method === INIT_METHOD) return refusal(INIT_REFUSED);
 
         const abiMethod = resolved.manifest.methods.find((m) => m.name === method);
         if (!abiMethod) {

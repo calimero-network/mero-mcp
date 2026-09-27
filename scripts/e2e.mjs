@@ -27,7 +27,7 @@ import {
   toolText,
 } from './e2e-lib.mjs';
 
-const PLANNED = 21;
+const PLANNED = 22;
 
 const { values: opts } = parseArgs({
   options: { node: { type: 'string' }, app: { type: 'string' } },
@@ -38,6 +38,9 @@ const attached = Boolean(opts.node);
 const FOREIGN = 'not run against a node this script did not provision';
 
 const kvToolName = (slug, method) => `${slug}_${method}`;
+
+// create_context runs init, so it is the one method with no generated tool.
+const toolMethods = (abi) => abi.methods.filter((m) => m.name !== 'init');
 
 async function main() {
   const launcher = installServerBin();
@@ -129,7 +132,7 @@ async function runChecks({ checks, mcp, api, kv, second }) {
       );
     }
     if (kv.abi) {
-      for (const m of kv.abi.methods) {
+      for (const m of toolMethods(kv.abi)) {
         const name = kvToolName(kv.slug, m.name);
         assert(before.some((t) => t.name === name), `${name} is not listed although ${kv.name} is installed`);
       }
@@ -151,7 +154,7 @@ async function runChecks({ checks, mcp, api, kv, second }) {
     selected = await mcp.call('select_app', { app: kv.name });
     assert(typeof selected.app_handle === 'string' && selected.app_handle.includes('.'), `select_app returned no app_handle: ${JSON.stringify(selected).slice(0, 200)}`);
     if (kv.abi) {
-      const expected = kv.abi.methods.map((m) => kvToolName(kv.slug, m.name)).sort();
+      const expected = toolMethods(kv.abi).map((m) => kvToolName(kv.slug, m.name)).sort();
       assertEqual([...selected.tools].sort(), expected, 'the named tools do not match the ABI read out of band');
       return `${expected.length} methods from the node's own ABI`;
     }
@@ -176,6 +179,7 @@ async function runChecks({ checks, mcp, api, kv, second }) {
       "a real node rejection carries the node's own message, not a bare status line",
       "a plain-text node rejection also carries the node's own message",
       'a mutating tool without an app_handle is refused and changes nothing',
+      'init has no tool, and call refuses it on a live context without running it',
       "list_applications lists the guide's procedures and leaves the guide out",
       "describe_app returns the node's guide as an author-labelled embedded resource",
       'generated tools and parameters carry the method docs the node serves',
@@ -205,7 +209,7 @@ async function runChecks({ checks, mcp, api, kv, second }) {
     });
 
     await checks.check('generated tools and parameters carry the method docs the node serves', async () => {
-      const documented = kv.abi.methods.filter((m) => m.doc);
+      const documented = toolMethods(kv.abi).filter((m) => m.doc);
       assert(documented.length > 0, "the node served kv-store's ABI without docs: rebuild the fixture, or the released merod drops doc");
       const tools = await mcp.listTools();
       for (const m of documented) {
@@ -280,6 +284,20 @@ async function runChecks({ checks, mcp, api, kv, second }) {
       }
       assertEqual(await api.execute(kv.context, 'get', { key }), 'untouched', 'a refused call still changed state');
       return 'missing and forged handles both refused; state unchanged';
+    });
+
+    await checks.check('init has no tool, and call refuses it on a live context without running it', async () => {
+      const init = kvToolName(kv.slug, 'init');
+      assert(kv.abi.methods.some((m) => m.name === 'init'), `${kv.name} declares no init, so this proves nothing`);
+      assert(!(await mcp.listTools()).some((t) => t.name === init), `${init} is listed`);
+      const key = `init-${Date.now().toString(36)}`;
+      await api.execute(kv.context, 'set', { key, value: 'untouched' });
+      const msg = await mcp.callRaw('call', { app_handle: selected.app_handle, method: 'init' });
+      const text = toolText(msg);
+      assert(msg.result?.isError, `call ran init on a live context: ${text}`);
+      assert(/pass its arguments as create_context's args/.test(text), `the refusal does not point at create_context: ${text}`);
+      assertEqual(await api.execute(kv.context, 'get', { key }), 'untouched', 'the refused init still changed state');
+      return text;
     });
 
     // A real node rejection, not a fake in a unit test: core answers create_context with

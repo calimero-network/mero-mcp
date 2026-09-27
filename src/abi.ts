@@ -7,6 +7,8 @@ const UPGRADE_MEROD =
   "This node's merod does not support the ABI endpoint (GET /admin-api/applications/:id/abi). " +
   'Upgrade merod to a release that includes it.';
 
+export const INIT_METHOD = 'init';
+
 export interface ResolvedApp {
   id: string;
   package?: string;
