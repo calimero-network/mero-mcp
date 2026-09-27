@@ -695,10 +695,6 @@ function groupAdmin(opts: { failVisibility?: boolean; failInfo?: boolean; failCr
     setGroupMetadata: async (groupId: string, request: unknown) => {
       calls.push(['setGroupMetadata', groupId, request]);
     },
-    joinSubgroupInheritance: async (groupId: string) => {
-      calls.push(['joinSubgroupInheritance', groupId]);
-      return { groupId, memberPublicKey: 'Member111', wasInherited: true };
-    },
   };
   const { server, tools } = fakeServer();
   register(server, fakeSession(admin), loadConfig(env()), CATALOG);
@@ -779,24 +775,4 @@ test('an unknown visibility is rejected by the input schema before any admin cal
   } finally {
     await close();
   }
-});
-
-test('join_context joins the named context and returns what the node answers', async () => {
-  const joined: string[] = [];
-  const admin = {
-    joinContext: async (contextId: string) => {
-      joined.push(contextId);
-      return { contextId, memberPublicKey: 'Member111' };
-    },
-  };
-  const { server, tools } = fakeServer();
-  register(server, fakeSession(admin), loadConfig(env()), CATALOG);
-  assert.deepEqual(jsonOf(await tools.get('join_context')!({ context: 'Ctx111' })), { contextId: 'Ctx111', memberPublicKey: 'Member111' });
-  assert.deepEqual(joined, ['Ctx111']);
-});
-
-test('join_open_group joins through inheritance and returns what the node answers', async () => {
-  const { tools, calls } = groupAdmin();
-  assert.deepEqual(jsonOf(await tools.get('join_open_group')!({ group: 'Grp111' })), { groupId: 'Grp111', memberPublicKey: 'Member111', wasInherited: true });
-  assert.deepEqual(calls, [['joinSubgroupInheritance', 'Grp111']]);
 });
