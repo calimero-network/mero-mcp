@@ -72,7 +72,7 @@ Create a context for an application in a group: a namespace, or a subgroup insid
 
 | Argument | Type | Notes |
 | --- | --- | --- |
-| `application` | string | Id, package name, or unambiguous trailing segment |
+| `application` | string | Id, package name, unambiguous trailing segment, or display name |
 | `group` | string | Namespace or subgroup id to create the context in |
 | `namespace` | string, optional | Older name for `group`, still accepted; passing both with different values is an error |
 | `name` | string, optional | |
@@ -158,7 +158,7 @@ In `CALIMERO_MCP_TOOLSETS` by default.
 
 | Argument | Type | Notes |
 | --- | --- | --- |
-| `application` | string | Id, package name, or trailing segment |
+| `application` | string | Id, package name, trailing segment, or display name |
 | `name` | string, optional | |
 
 ### `delete_namespace`
@@ -243,7 +243,7 @@ Show an application's methods and guide without choosing a context. Read-only.
 
 | Argument | Type | Notes |
 | --- | --- | --- |
-| `app` | string | Id, package name, or trailing segment |
+| `app` | string | Id, package name, trailing segment, or display name |
 | `service` | string, optional | For an app bundling several services |
 
 Returns, as JSON: `application`, `package`, `appVersion`, resolved `service`, `contextServices`, every method as a signature (with its doc and documented parameters when the ABI carries them; see [ABI mapping](/reference/abi-mapping/#docs-and-hints)), and an `app_handle` with no context.
@@ -258,7 +258,7 @@ Choose an application and the context to act in. Read-only.
 
 | Argument | Type | Notes |
 | --- | --- | --- |
-| `app` | string | Id, package name, or trailing segment |
+| `app` | string | Id, package name, trailing segment, or display name |
 | `context` | string, optional | Context id or alias; defaults to the app's only context |
 | `service` | string, optional | Only when no context is chosen; a chosen context decides the service |
 

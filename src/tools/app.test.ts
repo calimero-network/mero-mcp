@@ -70,6 +70,19 @@ test('describe_app returns the author-labelled guide as an embedded resource, an
   }
 });
 
+test('describe_app, select_app and call name an app by its display name too', async () => {
+  const s = await setup();
+  try {
+    assert.equal((await s.json('describe_app', { app: 'kv store' })).package, 'com.calimero.kv-store');
+    const { app_handle, package: pkg } = await s.json('select_app', { app: 'KV Store' });
+    assert.equal(pkg, 'com.calimero.kv-store');
+    await s.call('call', { app_handle, method: 'set', args: { key: 'k' }, app: 'kv store' });
+    assert.deepEqual(s.executed, [{ contextId: ctx('kvctx'), method: 'set', argsJson: { key: 'k' } }]);
+  } finally {
+    await s.close();
+  }
+});
+
 test('describe_app on an app without a guide says so and still issues a handle', async () => {
   const s = await setup();
   try {

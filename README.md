@@ -149,6 +149,7 @@ Anything an agent does through this server (installing an application, creating 
 Handles are per application, so one instruction can span several apps by holding a handle for each.
 
 Anywhere an application is named you can pass its id, its full package name, or just the last dot-separated segment of that package (`kv-store` for `com.calimero.kv-store`), as long as that segment is unambiguous among the installed applications.
+The app's display name (its bundle `metadata.name`, such as `Mero Blocks`, in any case) works too, under the same rule.
 The same package from two signers is two apps; name either by its application id.
 
 **Generated** (always registered): one tool per method of every installed app except `init`, which `create_context` runs, from the moment a client connects, and each takes that app's `app_handle`.

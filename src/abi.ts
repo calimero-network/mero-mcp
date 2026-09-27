@@ -76,14 +76,13 @@ export function createAbiLoader(session: NodeSession) {
   /** The one installed app `nameOrId` names; core keys a bundle by package and signer, so an upgrade replaces it in place. */
   async function findApp(nameOrId: string): Promise<InstalledApp> {
     const apps = await installed();
+    const lower = nameOrId.toLowerCase();
     const byId = apps.filter((a) => a.id === nameOrId);
     const byPackage = apps.filter((a) => a.package === nameOrId);
     // Whole segments only, never a prefix: "mero-chat" must not resolve to "mero-chat-v2".
-    const matches = byId.length
-      ? byId
-      : byPackage.length
-        ? byPackage
-        : apps.filter((a) => a.package && lastSegment(a.package).toLowerCase() === nameOrId.toLowerCase());
+    const bySegment = apps.filter((a) => a.package && lastSegment(a.package).toLowerCase() === lower);
+    const byName = apps.filter((a) => metadataField(a.metadata, 'name')?.toLowerCase() === lower);
+    const matches = [byId, byPackage, bySegment, byName].find((m) => m.length) ?? [];
 
     const packages = [...new Set(matches.map((a) => a.package))];
     if (packages.length > 1) {

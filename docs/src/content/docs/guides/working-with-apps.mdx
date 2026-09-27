@@ -10,13 +10,17 @@ Every installed application's methods are tools from the start: one tool per met
 
 ## Naming an application
 
-Anywhere a tool takes an application, three forms work:
+Anywhere a tool takes an application, four forms work:
 
 | Form | Example |
 | --- | --- |
 | Application id | `5w8XyQ…` (base58) |
 | Full package name | `com.calimero.kv-store` |
 | Trailing package segment | `kv-store` |
+| Display name, the bundle's `metadata.name`, in any case | `Mero Blocks` |
+
+The forms are tried in that order, and the first that matches anything decides.
+A display name that more than one installed application carries is ambiguous, and the error lists their packages.
 
 The short form is matched on **whole segments only**, so `mero-chat` never
 resolves to `mero-chat-v2`. If the segment is ambiguous across installed

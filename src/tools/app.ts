@@ -34,7 +34,7 @@ const CALL_INPUT = z.object({
   app: z
     .string()
     .optional()
-    .describe('Application id or package name; a refusal shows its guide, and a handle for another app is refused.'),
+    .describe('Application id, package name, or display name; a refusal shows its guide, and a handle for another app is refused.'),
 });
 
 const noContexts = (label: string) =>
@@ -138,7 +138,7 @@ export function registerAppTools(
         'plus an app_handle for planning. Does not pick a context. ' +
         'For a multi-service app, omitting `service` returns an error naming the available services.',
       inputSchema: {
-        app: z.string().describe('Application id or package name.'),
+        app: z.string().describe('Application id, package name, or display name.'),
         service: z.string().optional().describe('Service name, for an app that bundles several.'),
       },
       annotations: { readOnlyHint: true },
@@ -161,7 +161,7 @@ export function registerAppTools(
         "Pick an application and the context to act in. Returns the app's guide and the app_handle " +
         'every app tool and `call` require; the handle names the context, so pass it unchanged.',
       inputSchema: {
-        app: z.string().describe('Application id or package name.'),
+        app: z.string().describe('Application id, package name, or display name.'),
         service: z
           .string()
           .optional()
