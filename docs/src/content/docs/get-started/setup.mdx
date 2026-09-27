@@ -9,7 +9,7 @@ import { Tabs, TabItem, Aside, Steps } from '@astrojs/starlight/components';
 
 The server is published as `@calimero-network/mero-mcp` and runs over stdio, so
 there is nothing to deploy and no port to pick. Your MCP client spawns it, and it
-connects to a node lazily on the first tool call.
+connects to a node when the client opens the connection.
 
 ## Prerequisites
 

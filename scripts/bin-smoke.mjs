@@ -27,7 +27,7 @@ const failures = [];
 
 try {
   launcher = installServerBin();
-  const env = { ...process.env, MERO_MCP_NODE_URL: 'http://127.0.0.1:1' };
+  const env = { ...process.env, CALIMERO_NODE_URL: 'http://127.0.0.1:1' };
   mcp = new McpClient(launcher, env);
 
   const init = await mcp.initialize();

@@ -95,8 +95,8 @@ async function main() {
         await mcp.initialize();
         const status = await mcp.call('node_status');
         const key = `${label}-${Date.now().toString(36)}`;
-        await mcp.call('select_app', { app: 'kv-store' });
-        await mcp.call('kv_store_set', { key, value: `written-${label}` });
+        const { app_handle } = await mcp.call('select_app', { app: 'kv-store' });
+        await mcp.call('kv_store_set', { app_handle, key, value: `written-${label}` });
         assertEqual(mcp.frameViolations, [], 'a non-protocol line reached stdout');
         return { status, key };
       } finally {

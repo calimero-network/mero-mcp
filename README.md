@@ -142,18 +142,20 @@ Anything an agent does through this server (installing an application, creating 
 `create_namespace`, `delete_namespace`, `invite_to_namespace`, `join_namespace`, `leave_namespace`, `list_group_members`, `add_group_members`.
 
 **Application** (always registered):
-`describe_app` shows an application's ABI without selecting it.
-`select_app` picks an application and a context to run it against.
-`deselect_app` drops one application again, leaving any others selected.
-`call` invokes a method on a selected (or an explicitly named) application.
+`describe_app` shows an application's methods and guide and gives a planning handle.
+`select_app` picks an application and a context and returns its guide and `app_handle`.
+`call` invokes a method with that handle.
 
-Several applications can be selected at once, so one instruction can span two of them without losing the first one's tools.
-Each keeps its own pinned context, and `deselect_app` or a re-`select_app` affects only the application named.
+Handles are per application, so one instruction can span several apps by holding a handle for each.
 
 Anywhere an application is named you can pass its id, its full package name, or just the last dot-separated segment of that package (`kv-store` for `com.calimero.kv-store`), as long as that segment is unambiguous among the installed applications.
+The same package from two signers is two apps; name either by its application id.
 
-Once `select_app` has run, one more tool appears per ABI method for as long as this server process stays up.
+**Generated** (always registered): one tool per method of every installed app, from the moment a client connects, and each takes that app's `app_handle`.
 Those tools are named `<app>_<method>`, or `<app>_<service>_<method>` for a multi-service application, where `<app>` is that same trailing package segment: `com.calimero.kv-store` yields `kv_store_get`.
+The list changes only when an app is installed, upgraded or uninstalled.
+
+Each app's guide is also a resource at `calimero://apps/<application id>/<version>/guide`, keyed by application id so two signers of one package never share one.
 
 ## Verifying it works
 
@@ -161,7 +163,7 @@ Two harnesses drive the built server over real MCP stdio against a real node.
 Both boot their own `merod` on port 2571 in a temp home and tear it down on the way out, so neither touches `~/.calimero` or your real state directory.
 
 ```bash
-npm run e2e          # 16 assertions: the protocol, the ABI-derived tools, and a round trip verified out of band
+npm run e2e          # 17 assertions: the protocol, the ABI-derived tools, and a round trip verified out of band
 npm run e2e:cycle    # 8 assertions: admin login -> client key -> agent.json handoff, with zero credentials in the environment
 ```
 

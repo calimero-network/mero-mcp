@@ -358,8 +358,9 @@ export class McpClient {
   async call(name, args = {}) {
     const msg = await this.callRaw(name, args);
     if (msg.error) throw new E2eError(`tools/call ${name}: ${JSON.stringify(msg.error).slice(0, 300)}`);
-    const text = (msg.result.content ?? []).map((c) => c.text ?? '').join('');
-    if (msg.result.isError) throw new E2eError(`${name} returned an error: ${text}`);
+    if (msg.result.isError) throw new E2eError(`${name} returned an error: ${toolText(msg)}`);
+    // The first block is the structured result; later ones (an app guide) are prose.
+    const text = msg.result.content?.[0]?.text ?? '';
     try {
       return JSON.parse(text);
     } catch {

@@ -61,11 +61,13 @@ test('FileTokenStore.setTokens still writes the final file 0600', () => {
   });
 });
 
-test('FileTokenStore.getTokens returns null and does not throw on invalid JSON', () => {
+test('FileTokenStore.getTokens returns null and does not throw on invalid JSON', (t) => {
+  const logged = t.mock.method(console, 'error', () => {});
   withDir((dir) => {
     const store = new FileTokenStore(dir, 'http://localhost:2528');
     writeFileSync(store.path, 'not json', { mode: 0o600 });
     assert.equal(store.getTokens(), null);
+    assert.equal(logged.mock.callCount(), 1);
   });
 });
 

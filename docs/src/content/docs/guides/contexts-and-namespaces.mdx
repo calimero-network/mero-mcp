@@ -22,9 +22,8 @@ So a method call needs a context, a context needs a namespace, and a namespace n
 an installed application.
 
 <Aside type="caution">
-Installing an application from the registry does **not** create a context. This is
-the step people miss, and it is why `select_app` can succeed — it only needs the
-ABI — while every call against it fails.
+Installing an application from the registry does **not** create a context.
+This is the step people miss, and it is why the app's tools are listed while `select_app` finds no context to act in.
 </Aside>
 
 ## From nothing to a callable app
@@ -62,7 +61,7 @@ ABI — while every call against it fails.
    Select kv-store, then call its get method for key "greeting".
    ```
 
-   With exactly one context, `select_app` pins it automatically.
+   With exactly one context, `select_app` chooses it, and the `app_handle` it returns names it.
 
 </Steps>
 
@@ -79,9 +78,8 @@ Create an alias "staging" for context 8Hk2….
 lookup that misses is reported as a result, not an error — "No alias named …" is a
 true answer to a fair question.
 
-Anywhere a tool takes a context — `_context` on a generated tool, `context` on
-`call`, `select_app`'s pin — an alias works in place of the id. Resolved aliases are
-cached for the session.
+Anywhere a tool takes a context, including `select_app`'s `context`, an alias works in place of the id.
+Resolved aliases are cached for the session.
 
 ## Members
 

@@ -64,26 +64,29 @@ function fake(
   return { loader: createAbiLoader(session), calls, setApps: (next: ReturnType<typeof app>[]) => { apps = next; } };
 }
 
-test('resolveAppId matches an exact application id', async () => {
+test('identify matches an exact application id', async () => {
   const { loader } = fake();
-  assert.deepEqual(await loader.resolveAppId(APP_ID), { id: APP_ID, package: 'kv-store', blobId: 'blob-v1' });
+  const { id, package: pkg } = await loader.identify(APP_ID);
+  assert.deepEqual([id, pkg], [APP_ID, 'kv-store']);
 });
 
-test('resolveAppId matches a package name', async () => {
+test('identify matches a package name', async () => {
   const { loader } = fake();
-  assert.deepEqual(await loader.resolveAppId('kv-store'), { id: APP_ID, package: 'kv-store', blobId: 'blob-v1' });
+  const { id, package: pkg } = await loader.identify('kv-store');
+  assert.deepEqual([id, pkg], [APP_ID, 'kv-store']);
 });
 
-test('resolveAppId matches the last segment of a dotted package name, ignoring case', async () => {
+test('identify matches the last segment of a dotted package name, ignoring case', async () => {
   const { loader } = fake({ apps: [app({ package: 'com.calimero.KV-Store' })] });
-  assert.deepEqual(await loader.resolveAppId('kv-store'), { id: APP_ID, package: 'com.calimero.KV-Store', blobId: 'blob-v1' });
+  const { id, package: pkg } = await loader.identify('kv-store');
+  assert.deepEqual([id, pkg], [APP_ID, 'com.calimero.KV-Store']);
 });
 
-test('resolveAppId on a segment two applications share names both by full package', async () => {
+test('identify on a segment two applications share names both by full package', async () => {
   const apps = [app({ package: 'com.calimero.kv-store' }), app({ id: 'other', package: 'org.example.kv-store' })];
   const { loader } = fake({ apps });
   await assert.rejects(
-    loader.resolveAppId('kv-store'),
+    loader.identify('kv-store'),
     /ambiguous: com\.calimero\.kv-store, org\.example\.kv-store\. Pass the full package name or the application id/,
   );
 });
@@ -91,35 +94,53 @@ test('resolveAppId on a segment two applications share names both by full packag
 test('an exact package name resolves even when its last segment is ambiguous', async () => {
   const apps = [app({ package: 'com.calimero.kv-store' }), app({ id: 'other', package: 'org.example.kv-store' })];
   const { loader } = fake({ apps });
-  assert.equal((await loader.resolveAppId('org.example.kv-store')).id, 'other');
+  assert.equal((await loader.identify('org.example.kv-store')).id, 'other');
 });
 
-test('resolveAppId matches whole segments only, never a prefix of one', async () => {
+test('one package from two signers is ambiguous by package or segment, listing each id and signer, and an id picks one', async () => {
+  const apps = [
+    app({ id: 'app-a', package: 'com.calimero.kv-store', signer_id: 'signer-a' }),
+    app({ id: 'app-b', package: 'com.calimero.kv-store', signer_id: 'signer-b' }),
+  ];
+  const { loader } = fake({ apps });
+  for (const name of ['kv-store', 'com.calimero.kv-store']) {
+    await assert.rejects(
+      loader.identify(name),
+      new RegExp(
+        `^Error: Application "${name}" is published by several signers: ` +
+          'app-a \\(signer signer-a\\), app-b \\(signer signer-b\\)\\. Pass the application id\\.$',
+      ),
+    );
+  }
+  assert.equal((await loader.identify('app-b')).id, 'app-b');
+});
+
+test('identify matches whole segments only, never a prefix of one', async () => {
   const { loader } = fake({ apps: [app({ package: 'com.calimero.mero-chat-v2' })] });
-  await assert.rejects(loader.resolveAppId('mero-chat'), /not found\. Installed: com\.calimero\.mero-chat-v2/);
+  await assert.rejects(loader.identify('mero-chat'), /not found\. Installed: com\.calimero\.mero-chat-v2/);
 });
 
-test('resolveAppId on a miss lists what is installed', async () => {
+test('identify on a miss lists what is installed', async () => {
   const { loader } = fake({ apps: [app(), app({ id: 'other', package: 'mero-drive' })] });
-  await assert.rejects(loader.resolveAppId('nope'), /not found\. Installed: kv-store, mero-drive/);
+  await assert.rejects(loader.identify('nope'), /not found\. Installed: kv-store, mero-drive/);
 });
 
-test('resolveAppId on an empty node says (none)', async () => {
+test('identify on an empty node says (none)', async () => {
   const { loader } = fake({ apps: [] });
-  await assert.rejects(loader.resolveAppId('kv-store'), /Installed: \(none\)/);
+  await assert.rejects(loader.identify('kv-store'), /Installed: \(none\)/);
 });
 
-test("resolveAppId on a transport failure surfaces the node's message, not the bare HTTP line", async () => {
+test("identify on a transport failure surfaces the node's message, not the bare HTTP line", async () => {
   const { loader } = fake({ list: () => { throw httpError(0, 'merod is not reachable'); } });
-  await assert.rejects(loader.resolveAppId('kv-store'), (err: Error) => {
+  await assert.rejects(loader.identify('kv-store'), (err: Error) => {
     assert.equal(err.message, 'merod is not reachable');
     return true;
   });
 });
 
-test("resolveAppId on an expired token surfaces the node's message, not the bare HTTP line", async () => {
+test("identify on an expired token surfaces the node's message, not the bare HTTP line", async () => {
   const { loader } = fake({ list: () => { throw httpError(401, 'token expired'); } });
-  await assert.rejects(loader.resolveAppId('kv-store'), (err: Error) => {
+  await assert.rejects(loader.identify('kv-store'), (err: Error) => {
     assert.equal(err.message, 'token expired');
     return true;
   });
