@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseAbiManifest, type AbiManifest } from '@calimero-network/abi-codegen';
+import { parseAbiManifest, type AbiManifest, type AbiMethod } from '@calimero-network/abi-codegen';
 import { McpServer, InMemoryTransport } from '@modelcontextprotocol/server';
 import { Client } from '@modelcontextprotocol/client';
 import { z } from 'zod';
@@ -59,6 +59,13 @@ const degradedMethods = (m: AbiManifest): string[] =>
     )
     .map((method) => method.name);
 
+// Same construction as production's toolConfig (tools/generated.ts): schemaBuilder(...).jsonSchema() + advertised(),
+// never the SDK's own zod-to-JSON-Schema conversion, so a bug in that path fails here too.
+const productionToolConfig = (b: ReturnType<typeof schemaBuilder>, method: AbiMethod) => ({
+  description: methodDescription(method),
+  inputSchema: advertised(b.jsonSchema(z.object(b.params(method)))),
+});
+
 test('the unknown-detector fires on a construct the deriver cannot represent, even inside a named type', () => {
   // Control case: without it, "zero degraded methods" would also hold if the walker simply never looked.
   // Built by hand: parseAbiManifest would reject the unknown kind before the deriver ever saw it.
@@ -88,9 +95,10 @@ for (const [name, count] of Object.entries(EXPECTED_METHOD_COUNTS)) {
 
   test(`${name}: every method registers and converts to JSON Schema through the MCP SDK`, async () => {
     const m = load(name);
+    const b = schemaBuilder(m);
     const server = new McpServer({ name: 'conformance', version: '0.0.0' });
     for (const method of m.methods) {
-      server.registerTool(`app_${method.name}`, { description: method.name, inputSchema: inputShapeForMethod(method, m) }, async () => ({
+      server.registerTool(`app_${method.name}`, productionToolConfig(b, method), async () => ({
         content: [{ type: 'text' as const, text: '' }],
       }));
     }
@@ -115,9 +123,10 @@ for (const [name, count] of Object.entries(EXPECTED_METHOD_COUNTS)) {
 
 test('scaffolding-e2e: 91 methods register under one server at once', async () => {
   const m = load('scaffolding-e2e');
+  const b = schemaBuilder(m);
   const server = new McpServer({ name: 'scale', version: '0.0.0' });
   for (const method of m.methods) {
-    server.registerTool(`scaffolding_e2e_${method.name}`, { description: method.name, inputSchema: inputShapeForMethod(method, m) }, async () => ({
+    server.registerTool(`scaffolding_e2e_${method.name}`, productionToolConfig(b, method), async () => ({
       content: [{ type: 'text' as const, text: '' }],
     }));
   }
@@ -140,8 +149,9 @@ test('kv-store: set(key, value) advertises exactly those two required properties
   const set = m.methods.find((x) => x.name === 'set');
   assert.ok(set, 'kv-store fixture has no set method');
 
+  const b = schemaBuilder(m);
   const server = new McpServer({ name: 'kv', version: '0.0.0' });
-  server.registerTool('kv_store_set', { description: 'set', inputSchema: inputShapeForMethod(set, m) }, async () => ({
+  server.registerTool('kv_store_set', productionToolConfig(b, set), async () => ({
     content: [{ type: 'text' as const, text: '' }],
   }));
 
@@ -164,15 +174,11 @@ test('abi_conformance: its method and parameter docs reach tools/list', async ()
   const documented = m.methods.filter((x) => x.doc);
   assert.ok(documented.length > 0, 'abi_conformance carries no docs: refresh it from core apps/abi_conformance/abi.expected.json');
   const server = new McpServer({ name: 'docs', version: '0.0.0' });
-  // Docs live in schemaBuilder's own per-manifest registry, so tools must advertise via its jsonSchema(),
-  // the same path production uses (tools/generated.ts), not the raw zod shape the SDK converts on its own.
   const b = schemaBuilder(m);
   for (const method of documented) {
-    server.registerTool(
-      `app_${method.name}`,
-      { description: methodDescription(method), inputSchema: advertised(b.jsonSchema(z.object(b.params(method)))) },
-      async () => ({ content: [{ type: 'text' as const, text: '' }] }),
-    );
+    server.registerTool(`app_${method.name}`, productionToolConfig(b, method), async () => ({
+      content: [{ type: 'text' as const, text: '' }],
+    }));
   }
 
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
