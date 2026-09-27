@@ -196,7 +196,7 @@ async function runChecks({ checks, mcp, api, kv, second }) {
       assert(listed, `${kv.id} is missing from list_applications`);
       assert(!('guide' in (listed.metadata ?? {})), 'the full guide leaked into the listing');
       assert(Array.isArray(listed.procedures) && listed.procedures.length > 0, `no procedures listed: ${JSON.stringify(listed.procedures)}`);
-      return listed.procedures.join(', ');
+      return JSON.stringify(listed.procedures);
     });
 
     await checks.check("describe_app returns the node's guide as an author-labelled embedded resource", async () => {
