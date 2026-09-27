@@ -5,9 +5,9 @@
 // against an embedded-auth node is a browser round trip (crates/meroctl/src/auth.rs), so
 // it cannot run unattended. One HTTP path runs identically locally and in CI.
 import { spawn, execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, openSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -57,14 +57,6 @@ export function installServerBin() {
     const tarball = readdirSync(work).find((f) => f.endsWith('.tgz'));
     if (!tarball) throw new E2eError('npm pack produced no tarball');
     execFileSync('npm', ['init', '-y'], { cwd: work, stdio: 'ignore' });
-    // Local stand-in for a dependency that is not published yet: ABI_CODEGEN_OVERRIDE forces the
-    // scratch install onto a local tarball instead of resolving the range against the npm registry.
-    if (process.env.ABI_CODEGEN_OVERRIDE) {
-      const pkgPath = join(work, 'package.json');
-      const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
-      pkg.overrides = { '@calimero-network/abi-codegen': `file:${resolve(process.env.ABI_CODEGEN_OVERRIDE)}` };
-      writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
-    }
     execFileSync('npm', ['install', '--no-audit', '--no-fund', join(work, tarball)], {
       cwd: work,
       stdio: 'pipe',
