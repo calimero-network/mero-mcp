@@ -171,6 +171,10 @@ export class NodeApi {
     return JSON.parse(text).data;
   }
 
+  async application(applicationId) {
+    return (await this.#json(`/admin-api/applications/${applicationId}`)).data.application;
+  }
+
   async createNamespace(applicationId) {
     return (await this.#post('/admin-api/namespaces', { applicationId })).data.namespaceId;
   }

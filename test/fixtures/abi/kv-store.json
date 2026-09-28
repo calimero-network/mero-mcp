@@ -73,13 +73,18 @@
   "methods": [
     {
       "name": "clear",
+      "doc": "Removes every key.\n\nEmits `Cleared` only when the store was not already empty.\n\n# Examples\n\n```json\n{}\n```",
       "params": [],
       "returns": {
         "kind": "unit"
-      }
+      },
+      "intent": "mutating",
+      "destructive": true,
+      "idempotent": true
     },
     {
       "name": "entries",
+      "doc": "Returns every key with its value, as a JSON object ordered by key.\n\n# Examples\n\n```json\n{}\n```",
       "params": [],
       "returns": {
         "kind": "map",
@@ -89,72 +94,93 @@
         "value": {
           "kind": "string"
         }
-      }
+      },
+      "returns_doc": "A JSON object mapping every key to its value, ordered by key; `{}` when the\nstore is empty.",
+      "intent": "read_only"
     },
     {
       "name": "get",
+      "doc": "Returns the value under `key`, or `null` when the key is absent.\n\n# Examples\n\n```json\n{\"key\": \"greeting\"}\n```",
       "params": [
         {
           "name": "key",
           "type": {
             "kind": "string"
-          }
+          },
+          "doc": "The key to read."
         }
       ],
       "returns": {
         "kind": "string"
-      }
+      },
+      "returns_doc": "The value stored under `key`, or `null` when `key` is absent.",
+      "intent": "read_only"
     },
     {
       "name": "get_or_insert",
+      "doc": "Returns the value under `key`, first storing `value` there if the key is\nabsent.\n\nAn existing value is returned unchanged and `value` is ignored. Emits\n`Inserted` only when the key was absent.\n\n# Examples\n\n```json\n{\"key\": \"greeting\", \"value\": \"hello\"}\n```",
       "params": [
         {
           "name": "key",
           "type": {
             "kind": "string"
-          }
+          },
+          "doc": "The key to read, or to create when absent."
         },
         {
           "name": "value",
           "type": {
             "kind": "string"
-          }
+          },
+          "doc": "The value to store when `key` is absent."
         }
       ],
       "returns": {
         "kind": "string"
-      }
+      },
+      "returns_doc": "The value `key` holds after the call: the existing value when `key` was\npresent, otherwise `value`.",
+      "intent": "mutating",
+      "idempotent": true
     },
     {
       "name": "get_result",
+      "doc": "Returns the value under `key`, failing with a typed error when it is absent.\n\n# Errors\n\nFails with `{\"kind\": \"NotFound\", \"data\": \"<key>\"}` when `key` is absent.\n\n# Examples\n\n```json\n{\"key\": \"greeting\"}\n```",
       "params": [
         {
           "name": "key",
           "type": {
             "kind": "string"
-          }
+          },
+          "doc": "The key to read."
         }
       ],
       "returns": {
         "kind": "string"
-      }
+      },
+      "returns_doc": "The value stored under `key`. An absent key yields no value: the call fails\nwith `NotFound`.",
+      "intent": "read_only"
     },
     {
       "name": "get_unchecked",
+      "doc": "Returns the value under `key`, aborting the call when the key is absent.\n\nKept to show what a guest panic looks like; use `get` or `get_result`.\n\n# Errors\n\nFails with a guest panic (`key not found`) when `key` is absent.\n\n# Examples\n\n```json\n{\"key\": \"greeting\"}\n```",
       "params": [
         {
           "name": "key",
           "type": {
             "kind": "string"
-          }
+          },
+          "doc": "The key to read. It must exist."
         }
       ],
       "returns": {
         "kind": "string"
-      }
+      },
+      "returns_doc": "The value stored under `key`. An absent key yields no value: the call aborts.",
+      "intent": "read_only"
     },
     {
       "name": "init",
+      "doc": "Creates the empty store. The node runs it once, when the context is created.\n\n# Errors\n\nFails with `Cannot initialize over already existing state.` when the\ncontext already has a store.\n\n# Examples\n\n```json\n{}\n```",
       "params": [],
       "returns": {
         "kind": "unit"
@@ -162,64 +188,84 @@
     },
     {
       "name": "len",
+      "doc": "Returns the number of keys in the store.\n\n# Examples\n\n```json\n{}\n```",
       "params": [],
       "returns": {
         "kind": "u32"
-      }
+      },
+      "returns_doc": "The number of keys in the store; `0` when it is empty.",
+      "intent": "read_only"
     },
     {
       "name": "remove",
+      "doc": "Removes `key` and returns the value it held, or `null` when it was absent.\n\nEmits `Removed` only when a value was actually removed.\n\n# Examples\n\n```json\n{\"key\": \"greeting\"}\n```",
       "params": [
         {
           "name": "key",
           "type": {
             "kind": "string"
-          }
+          },
+          "doc": "The key to remove."
         }
       ],
       "returns": {
         "kind": "string"
-      }
+      },
+      "returns_doc": "The value `key` held before the call, or `null` when `key` was absent.",
+      "intent": "mutating",
+      "destructive": true,
+      "idempotent": true
     },
     {
       "name": "set",
+      "doc": "Stores `value` under `key`, replacing any value already there.\n\nEmits `Inserted` for a new key and `Updated` for an existing one.\nConcurrent writes to the same key from different members converge to the\nlatest write.\n\n# Examples\n\n```json\n{\"key\": \"greeting\", \"value\": \"hello\"}\n```",
       "params": [
         {
           "name": "key",
           "type": {
             "kind": "string"
-          }
+          },
+          "doc": "The key to write. Any string, including the empty string."
         },
         {
           "name": "value",
           "type": {
             "kind": "string"
-          }
+          },
+          "doc": "The value to store."
         }
       ],
       "returns": {
         "kind": "unit"
-      }
+      },
+      "intent": "mutating",
+      "destructive": true
     },
     {
       "name": "update_if_exists",
+      "doc": "Replaces the value under `key` only if the key already exists, and returns\nwhether it did.\n\nReturns `false` and writes nothing when `key` is absent. Emits `Updated`\nwhen the value is replaced.\n\n# Examples\n\n```json\n{\"key\": \"greeting\", \"value\": \"hi\"}\n```",
       "params": [
         {
           "name": "key",
           "type": {
             "kind": "string"
-          }
+          },
+          "doc": "The key to update. It must already exist for anything to change."
         },
         {
           "name": "value",
           "type": {
             "kind": "string"
-          }
+          },
+          "doc": "The new value."
         }
       ],
       "returns": {
         "kind": "bool"
-      }
+      },
+      "returns_doc": "`true` when `key` existed and now holds `value`; `false` when `key` was\nabsent, in which case nothing was written.",
+      "intent": "mutating",
+      "destructive": true
     }
   ],
   "events": [

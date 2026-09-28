@@ -27,7 +27,7 @@ import {
   toolText,
 } from './e2e-lib.mjs';
 
-const PLANNED = 18;
+const PLANNED = 21;
 
 const { values: opts } = parseArgs({
   options: { node: { type: 'string' }, app: { type: 'string' } },
@@ -176,10 +176,48 @@ async function runChecks({ checks, mcp, api, kv, second }) {
       "a real node rejection carries the node's own message, not a bare status line",
       "a plain-text node rejection also carries the node's own message",
       'a mutating tool without an app_handle is refused and changes nothing',
+      "list_applications lists the guide's procedures and leaves the guide out",
+      "describe_app returns the node's guide as an author-labelled embedded resource",
+      'generated tools and parameters carry the method docs the node serves',
     ]) {
       checks.skip(label, FOREIGN);
     }
   } else {
+    await checks.check("list_applications lists the guide's procedures and leaves the guide out", async () => {
+      const { apps } = await mcp.call('list_applications');
+      const listed = apps.find((a) => a.id === kv.id);
+      assert(listed, `${kv.id} is missing from list_applications`);
+      assert(!('guide' in (listed.metadata ?? {})), 'the full guide leaked into the listing');
+      assert(Array.isArray(listed.procedures) && listed.procedures.length > 0, `no procedures listed: ${JSON.stringify(listed.procedures)}`);
+      return JSON.stringify(listed.procedures);
+    });
+
+    await checks.check("describe_app returns the node's guide as an author-labelled embedded resource", async () => {
+      // Derived from the node's own record, so the expected text cannot drift from what was installed.
+      const record = await api.application(kv.id);
+      const { guide } = JSON.parse(Buffer.from(record.metadata).toString('utf8'));
+      const msg = await mcp.callRaw('describe_app', { app: kv.name });
+      const [, label, embedded] = msg.result.content;
+      assertEqual(label.text, `App guide, provided by the app's author (package ${record.package}, signer ${record.signer_id}):`, 'the author label is wrong');
+      assertEqual(embedded.resource.text, guide, 'describe_app did not return the guide the node stores');
+      assertEqual(embedded.resource.uri, `calimero://apps/${record.id}/${record.version}/guide`, 'the guide resource URI is wrong');
+      return `${guide.length} characters of guide`;
+    });
+
+    await checks.check('generated tools and parameters carry the method docs the node serves', async () => {
+      const documented = kv.abi.methods.filter((m) => m.doc);
+      assert(documented.length > 0, "the node served kv-store's ABI without docs: rebuild the fixture, or the released merod drops doc");
+      const tools = await mcp.listTools();
+      for (const m of documented) {
+        const tool = tools.find((t) => t.name === kvToolName(kv.slug, m.name));
+        assert(tool?.description?.startsWith(`${m.doc}\n\n`), `${m.name}: its doc is not the start of its description`);
+        for (const p of m.params.filter((x) => x.doc)) {
+          assert(tool.inputSchema.properties[p.name]?.description?.startsWith(p.doc), `${m.name}(${p.name}): its doc is missing`);
+        }
+      }
+      return `${documented.length} documented methods`;
+    });
+
     await checks.check('the derived schema matches the ABI: set(key, value)', async () => {
       const tools = await mcp.listTools();
       const set = tools.find((t) => t.name === kvToolName(kv.slug, 'set'));
