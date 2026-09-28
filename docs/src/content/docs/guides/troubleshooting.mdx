@@ -94,7 +94,7 @@ If the node was down when the client connected, the first `select_app`, `describ
 Two separate things go wrong here:
 
 1. **The name is prefixed.** `kv_store_get` may be exposed as
-   `mcp__calimero__kv_store_get`. Look for the prefixed form before concluding it is
+   `mcp__mero-mcp__kv_store_get`. Look for the prefixed form before concluding it is
    missing.
 2. **The client did not pick up the new tool list.** Not every client refreshes on
    a `tools/list_changed` notification. The `call` tool exists for exactly this: it

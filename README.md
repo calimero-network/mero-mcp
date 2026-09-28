@@ -16,16 +16,16 @@ It exposes node administration (contexts, namespaces, blobs) as MCP tools, and o
 
 ## Quickstart
 
-Paste this into any AI harness (Claude Code, Cursor, Codex CLI, Claude Desktop, Zed, ...) and let it register the server for you:
+Paste this into any AI harness (Claude Code, Cursor, Codex CLI, Claude Desktop, Zed, ...) and let it register the server for you. If you already have it registered under a different name, there's no need to re-register it - the name only sets the tool prefix and the label your client shows.
 
 ```text
 Set up the mero-mcp MCP server for me.
 
 It is on npm as @calimero-network/mero-mcp and runs over stdio. Register a
-server named "calimero" that runs `npx -y @calimero-network/mero-mcp`.
+server named "mero-mcp" that runs `npx -y @calimero-network/mero-mcp`.
 
 In Claude Code that is one command:
-  claude mcp add -s local calimero -- npx -y @calimero-network/mero-mcp
+  claude mcp add -s local mero-mcp -- npx -y @calimero-network/mero-mcp
 
 Otherwise find where your own harness keeps its MCP server config - Claude
 Desktop uses claude_desktop_config.json, Cursor/Windsurf use .cursor/mcp.json,
@@ -62,7 +62,7 @@ Add this to your MCP client's config:
 ```json
 {
   "mcpServers": {
-    "calimero": {
+    "mero-mcp": {
       "command": "npx",
       "args": ["-y", "@calimero-network/mero-mcp"]
     }
@@ -75,7 +75,7 @@ Add this to your MCP client's config:
 | Claude Code | `.mcp.json` in the project, or `~/.claude.json` for a user-wide server |
 | Claude Desktop | `claude_desktop_config.json` |
 | Cursor / Windsurf | `.cursor/mcp.json` |
-| Codex CLI | `~/.codex/config.toml`, same fields in TOML: `[mcp_servers.calimero]` / `command = "npx"` / `args = ["-y", "@calimero-network/mero-mcp"]` |
+| Codex CLI | `~/.codex/config.toml`, same fields in TOML: `[mcp_servers.mero-mcp]` / `command = "npx"` / `args = ["-y", "@calimero-network/mero-mcp"]` |
 
 ### Prerequisites
 

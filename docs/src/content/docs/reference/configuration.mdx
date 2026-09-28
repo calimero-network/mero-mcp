@@ -97,7 +97,7 @@ In an MCP client config, under `env`:
 ```json title=".mcp.json"
 {
   "mcpServers": {
-    "calimero": {
+    "mero-mcp": {
       "command": "npx",
       "args": ["-y", "@calimero-network/mero-mcp"],
       "env": {
@@ -112,11 +112,11 @@ In an MCP client config, under `env`:
 TOML, for Codex CLI:
 
 ```toml title="~/.codex/config.toml"
-[mcp_servers.calimero]
+[mcp_servers.mero-mcp]
 command = "npx"
 args = ["-y", "@calimero-network/mero-mcp"]
 
-[mcp_servers.calimero.env]
+[mcp_servers.mero-mcp.env]
 CALIMERO_NODE_URL = "http://localhost:2428"
 ```
 
