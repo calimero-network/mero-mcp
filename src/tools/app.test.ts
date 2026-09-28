@@ -70,6 +70,19 @@ test('describe_app returns the author-labelled guide as an embedded resource, an
   }
 });
 
+test('describe_app, select_app and call name an app by its display name too', async () => {
+  const s = await setup();
+  try {
+    assert.equal((await s.json('describe_app', { app: 'kv store' })).package, 'com.calimero.kv-store');
+    const { app_handle, package: pkg } = await s.json('select_app', { app: 'KV Store' });
+    assert.equal(pkg, 'com.calimero.kv-store');
+    await s.call('call', { app_handle, method: 'set', args: { key: 'k' }, app: 'kv store' });
+    assert.deepEqual(s.executed, [{ contextId: ctx('kvctx'), method: 'set', argsJson: { key: 'k' } }]);
+  } finally {
+    await s.close();
+  }
+});
+
 test('describe_app on an app without a guide says so and still issues a handle', async () => {
   const s = await setup();
   try {
@@ -89,6 +102,40 @@ test('the tool list is every method of every installed app, sorted by package th
     const set = (await s.client.listTools()).tools.find((t) => t.name === 'kv_store_set')!;
     assert.deepEqual(Object.keys(set.inputSchema.properties ?? {}), ['app_handle', 'key']);
     assert.deepEqual(set.inputSchema.required, ['app_handle', 'key']);
+  } finally {
+    await s.close();
+  }
+});
+
+const withInit = (): FakeApp => ({
+  ...kv(),
+  abi: manifest([method('init', [{ name: 'name', type: { kind: 'string' } }]), method('set', [{ name: 'key', type: { kind: 'string' } }])]),
+});
+
+const INIT_REFUSED =
+  "init runs once, when create_context creates the context; pass its arguments as create_context's args. It cannot be called on a context.";
+
+test('init gets no generated tool and select_app names none, since create_context runs it', async () => {
+  const s = await setup([withInit()]);
+  try {
+    const names = (await s.client.listTools()).tools.map((t) => t.name).filter((n) => n.startsWith('kv_store_'));
+    assert.deepEqual(names, ['kv_store_set']);
+    assert.deepEqual((await s.json('select_app', { app: 'kv-store' })).tools, ['kv_store_set']);
+  } finally {
+    await s.close();
+  }
+});
+
+test('call refuses init after the handle check, pointing at create_context, and runs nothing', async () => {
+  const s = await setup([withInit()]);
+  try {
+    const unhandled = await s.call('call', { method: 'init', args: { name: 'x' }, app: 'kv-store' });
+    assert.equal(unhandled.content.at(-1)!.text, RETRY);
+    const { app_handle } = await s.json('select_app', { app: 'kv-store' });
+    const res = await s.call('call', { app_handle, method: 'init', args: { name: 'x' } });
+    assert.equal(res.isError, true);
+    assert.deepEqual(res.content.map((b) => b.text), [INIT_REFUSED]);
+    assert.deepEqual(s.executed, []);
   } finally {
     await s.close();
   }
@@ -571,6 +618,19 @@ test("call refuses a handle for one app when app names another, with that app's 
 });
 
 const kvBy = (id: string, signer: string, context: string): FakeApp => ({ ...kv(), id, signer_id: signer, contexts: [ctx(context)] });
+
+test("call refuses a handle for one app when app gives another app's display name, and runs nothing", async () => {
+  const s = await setup();
+  try {
+    const { app_handle } = await s.json('select_app', { app: 'org.example.notes' });
+    const res = await s.call('call', { app_handle, method: 'add', args: { body: 'b' }, app: 'KV Store' });
+    assert.equal(res.isError, true);
+    assert.equal(res.content.at(-1)!.text, RETRY);
+    assert.deepEqual(s.executed, []);
+  } finally {
+    await s.close();
+  }
+});
 
 test('one package from two signers is two apps: own tools, no silent pick by name, and a handle per signer', async () => {
   // Same package, version and guide, so only the signer tells the two handles apart.

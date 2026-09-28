@@ -81,7 +81,7 @@ and the server passes that through verbatim rather than blaming the version.
 
 ## The generated tools do not appear
 
-The generated tools are listed from the moment the client connects, one per method of every installed app.
+The generated tools are listed from the moment the client connects, one per method of every installed app except `init`, which `create_context` runs.
 If an app was installed after that and its tools are missing, wait for the 30-second refresh or reconnect.
 If the node was down when the client connected, the first `select_app`, `describe_app` or `call` that reaches the node reads the list again, adds the app tools and starts the 30-second refresh.
 
@@ -139,6 +139,7 @@ Pass `context` to `select_app`; the handle it returns names that context.
 The short name you used — the trailing package segment — matches more than one
 installed application. Use the full package name or the application id. Matching is
 on whole segments, so this is never a prefix collision.
+A display name that several installed applications carry is refused the same way.
 
 ## `Application "x" is published by several signers`
 

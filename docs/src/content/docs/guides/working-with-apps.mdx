@@ -5,18 +5,22 @@ sidebar:
   order: 1
 ---
 
-Every installed application's methods are tools from the start: one tool per method, listed for the whole session.
+Every installed application's methods are tools from the start: one tool per method except `init`, which `create_context` runs, listed for the whole session.
 `describe_app` and `select_app` hand over the app's guide and the `app_handle` those tools require, and `call` is the fixed-name route to the same methods.
 
 ## Naming an application
 
-Anywhere a tool takes an application, three forms work:
+Anywhere a tool takes an application, four forms work:
 
 | Form | Example |
 | --- | --- |
 | Application id | `5w8XyQ…` (base58) |
 | Full package name | `com.calimero.kv-store` |
 | Trailing package segment | `kv-store` |
+| Display name, the bundle's `metadata.name`, in any case | `Mero Blocks` |
+
+An id is tried first, then a full package name, then the two short forms together.
+A short form that matches more than one installed application, such as one app's trailing segment and another's display name, is ambiguous, and the error lists their packages.
 
 The short form is matched on **whole segments only**, so `mero-chat` never
 resolves to `mero-chat-v2`. If the segment is ambiguous across installed
@@ -38,6 +42,7 @@ An app can ship a guide: Markdown its author writes, carried in the signed bundl
 
 - `describe_app` returns the app's methods, the guide (or `This app ships no guide.`) and an `app_handle` with no context.
   It is the way to plan across several apps.
+  Call it before setting up namespaces, groups or contexts for an app you have not used before, since its guide says how that app expects them to be laid out.
 - `select_app` returns the guide and an `app_handle` bound to one context: the one you pass as `context`, or the app's only context.
 - Every generated tool and `call` take that `app_handle`.
   It names the context the call runs in, so there is no separate context argument.

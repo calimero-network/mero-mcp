@@ -52,7 +52,7 @@ It registers two kinds of tools:
 - **Fixed tools** for the node itself — `node_status`, `list_contexts`,
   `create_context`, `install_application`, `create_namespace` and the rest,
   grouped into [toolsets](/reference/configuration/#toolsets) you can trim.
-- **Generated tools**, one per method of every installed application.
+- **Generated tools**, one per method of every installed application except `init`, which `create_context` runs.
   The server reads each application's ABI from the node and turns each method into an MCP tool with a real JSON Schema for its arguments.
   `select_app` returns the app's guide and the `app_handle` every one of those tools requires.
 

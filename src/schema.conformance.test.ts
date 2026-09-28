@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseAbiManifest, type AbiManifest } from '@calimero-network/abi-codegen';
+import { INIT_METHOD } from './abi.ts';
 import { loadConfig } from './config.ts';
 import { inputShapeForMethod } from './schema.ts';
 import { createServerFactory } from './server.ts';
@@ -103,9 +104,13 @@ for (const [name, count] of Object.entries(EXPECTED_METHOD_COUNTS)) {
   });
 
   // tools/list is where the SDK converts every registered shape, so a schema it cannot render fails here and nowhere earlier.
+  // init runs once through create_context, so it never gets its own generated tool.
   test(`${name}: every method registers as a generated tool and converts to JSON Schema through the MCP SDK`, async () => {
     const tools = await listTools(name);
-    assert.deepEqual([...tools.keys()].sort(), load(name).methods.map((x) => x.name).sort());
+    const expected = load(name)
+      .methods.filter((x) => x.name !== INIT_METHOD)
+      .map((x) => x.name);
+    assert.deepEqual([...tools.keys()].sort(), expected.sort());
     for (const [method, tool] of tools) {
       assert.equal(tool.inputSchema.type, 'object', `${method} is not an object schema`);
       assert.equal(typeof tool.inputSchema.properties, 'object', `${method} advertises no properties`);
@@ -113,8 +118,8 @@ for (const [name, count] of Object.entries(EXPECTED_METHOD_COUNTS)) {
   });
 }
 
-test('scaffolding-e2e: 91 methods register under one server at once, each under its own name', async () => {
-  assert.equal((await listTools('scaffolding-e2e')).size, 91);
+test('scaffolding-e2e: 90 methods register under one server at once, each under its own name', async () => {
+  assert.equal((await listTools('scaffolding-e2e')).size, 90);
 });
 
 test('kv-store: set(key, value) advertises exactly those two required properties beside the app_handle', async () => {

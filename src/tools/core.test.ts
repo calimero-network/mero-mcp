@@ -6,7 +6,7 @@ import * as meroJs from '@calimero-network/mero-js';
 import { loadConfig, type Config } from '../config.ts';
 import type { NodeSession } from '../node.ts';
 import { registerCoreTools } from './core.ts';
-import { createAbiLoader } from '../abi.ts';
+import { createAbiLoader, type AbiLoader } from '../abi.ts';
 import type { Catalog } from '../catalog.ts';
 
 /** Core tools only ask the catalog to refresh after an install or uninstall. */
@@ -84,8 +84,11 @@ const jsonOf = (result: { content: Array<{ type: 'text'; text: string }> }) => J
 
 /** One installed app, shaped the way the ABI resolver reads it. */
 const listApplications = async () => ({
-  apps: [{ id: 'AppId111', package: 'network.calimero.kv-store', blob: { bytecode: 'Blob111' }, metadata: [] }],
+  apps: [{ id: 'AppId111', package: 'network.calimero.kv-store', metadata: [], blob: { bytecode: 'Blob111' } }],
 });
+
+/** Its ABI declares no init, so create_context sends no init input. */
+const getApplicationAbi = async () => ({ schema_version: 'wasm-abi/1', types: {}, methods: [], events: [] });
 
 // HTTPError is absent from mero-js's resolvable types but real at runtime, and it is what
 // every rejected admin call throws, so use the genuine class rather than a stand-in.
@@ -122,6 +125,7 @@ test('CALIMERO_MCP_TOOLSETS=core registers only the core group, and core registe
 test('list_contexts calls getContextsForApplication when given an application, else getContexts', async () => {
   const calls: string[] = [];
   const admin = {
+    listApplications,
     getContexts: async () => {
       calls.push('getContexts');
       return { contexts: [] };
@@ -135,8 +139,26 @@ test('list_contexts calls getContextsForApplication when given an application, e
   register(server, fakeSession(admin), loadConfig(env()), CATALOG);
   const handler = tools.get('list_contexts')!;
   await handler({});
-  await handler({ application: 'app1' });
-  assert.deepEqual(calls, ['getContexts', 'getContextsForApplication:app1']);
+  await handler({ application: 'AppId111' });
+  assert.deepEqual(calls, ['getContexts', 'getContextsForApplication:AppId111']);
+});
+
+test('list_contexts and uninstall_application resolve a package or short name to the id core takes, and refuse an unknown one', async () => {
+  const calls: string[] = [];
+  const admin = {
+    listApplications,
+    getContextsForApplication: async (id: string) => (calls.push(`contexts:${id}`), { contexts: [] }),
+    uninstallApplication: async (id: string) => (calls.push(`uninstall:${id}`), { applicationId: id }),
+  };
+  const { server, tools } = fakeServer();
+  register(server, fakeSession(admin), loadConfig(env()), CATALOG);
+  await tools.get('list_contexts')!({ application: 'kv-store' });
+  await tools.get('uninstall_application')!({ application: 'network.calimero.kv-store' });
+  for (const tool of ['list_contexts', 'uninstall_application']) {
+    const res = await tools.get(tool)!({ application: 'nope' });
+    assert.match(textOf(res), /Application "nope" not found\. Installed: network\.calimero\.kv-store/);
+  }
+  assert.deepEqual(calls, ['contexts:AppId111', 'uninstall:AppId111']);
 });
 
 const utf8Bytes = (s: string) => [...Buffer.from(s, 'utf8')];
@@ -302,6 +324,7 @@ test('install and uninstall refresh the app list after the node answers, and a f
   const logged = t.mock.method(console, 'error', () => {});
   const order: string[] = [];
   const admin = {
+    listApplications,
     installApplication: async () => (order.push('install'), { applicationId: 'AppId111' }),
     uninstallApplication: async () => (order.push('uninstall'), { applicationId: 'AppId111' }),
   };
@@ -327,6 +350,7 @@ test('create_namespace and create_context resolve an application the way describ
   const created: Array<Record<string, unknown>> = [];
   const admin = {
     listApplications,
+    getApplicationAbi,
     createNamespace: async (request: Record<string, unknown>) => {
       created.push(request);
       return { namespaceId: 'Ns111' };
@@ -424,6 +448,7 @@ test("a rejected admin call reaches the tool result as the node's own message, n
   const needsService = 'application has multiple services; pass service_name (available: api, worker)';
   const admin = {
     listApplications,
+    getApplicationAbi,
     createNamespace: async () => {
       throw httpError(400, noNamespace);
     },
@@ -467,7 +492,7 @@ test('a bodyless rejection still names the endpoint and the status, and an unrea
   assert.equal(textOf(unreachable), 'Error: Cannot reach the node at http://localhost:2528/admin-api/health: fetch failed');
 });
 
-/** Two installed apps: one whose init takes (name, seed), one whose init takes nothing. */
+/** Installed apps whose init takes (name, seed), nothing, only an optional note, or that declare no init. */
 const INIT_ABIS: Record<string, unknown> = {
   AppBlocks: {
     schema_version: 'wasm-abi/1',
@@ -476,7 +501,14 @@ const INIT_ABIS: Record<string, unknown> = {
     events: [],
   },
   AppPlain: { schema_version: 'wasm-abi/1', types: {}, methods: [{ name: 'init', params: [] }], events: [] },
+  AppOptional: {
+    schema_version: 'wasm-abi/1',
+    types: {},
+    methods: [{ name: 'init', params: [{ name: 'note', type: { kind: 'string' }, nullable: true }] }],
+    events: [],
+  },
   AppNoInit: { schema_version: 'wasm-abi/1', types: {}, methods: [{ name: 'ping', params: [] }], events: [] },
+  AppNoAbi: null,
 };
 
 /** A two-service bundle, whose ABI core only serves for a named service. */
@@ -484,6 +516,8 @@ const DRIVE_ABIS: Record<string, unknown> = {
   docs: { schema_version: 'wasm-abi/1', types: {}, methods: [{ name: 'init', params: [{ name: 'title', type: { kind: 'string' } }] }], events: [] },
   registry: { schema_version: 'wasm-abi/1', types: {}, methods: [{ name: 'init', params: [] }], events: [] },
 };
+
+const NO_ABI = 'application has no usable embedded ABI; rebuild it with `cargo mero build`';
 
 function initAdmin() {
   const created: Array<Record<string, unknown>> = [];
@@ -497,7 +531,10 @@ function initAdmin() {
     }),
     getApplicationAbi: async (id: string, service?: string) => {
       abiFetches.push(service ? `${id}/${service}` : id);
-      if (id !== 'AppDrive') return INIT_ABIS[id];
+      if (id !== 'AppDrive') {
+        if (INIT_ABIS[id] === null) throw httpError(400, NO_ABI);
+        return INIT_ABIS[id];
+      }
       if (!service) throw new Error('application has multiple services; pass service_name (available: docs, registry)');
       return DRIVE_ABIS[service];
     },
@@ -507,30 +544,81 @@ function initAdmin() {
     },
   };
   const { server, tools } = fakeServer();
-  register(server, fakeSession(admin), loadConfig(env()), CATALOG);
-  return { create: tools.get('create_context')!, created, abiFetches };
+  const session = fakeSession(admin);
+  const loader = createAbiLoader(session);
+  registerCoreTools(server, session, loadConfig(env()), loader, CATALOG);
+  return { create: tools.get('create_context')!, created, abiFetches, loader };
 }
+
+test('create_context reads the ABI through the shared loader, so one the catalog already cached is not fetched again', async () => {
+  const { create, created, abiFetches, loader } = initAdmin();
+  await loader.load('AppBlocks');
+  await create({ application: 'AppBlocks', group: 'Ns111', args: { name: 'world-1', seed: 7 } });
+  assert.equal(created.length, 1);
+  assert.deepEqual(abiFetches, ['AppBlocks']);
+});
 
 test('create_context validates init args against the ABI and sends them as the JSON init input', async () => {
   const { create, created } = initAdmin();
-  await create({ application: 'AppBlocks', namespace: 'Ns111', args: { name: 'world-1', seed: 7, stray: true } });
+  await create({ application: 'AppBlocks', namespace: 'Ns111', args: { name: 'world-1', seed: 7 } });
   assert.equal(created.length, 1);
   assert.deepEqual(JSON.parse(Buffer.from(created[0].initializationParams as number[]).toString('utf8')), { name: 'world-1', seed: 7 });
 });
 
-test('create_context rejects init args that violate the init signature and creates nothing', async () => {
+const BLOCKS_INIT = 'Its init: [mut] init(name: string, seed: u64) -> unit\nPass these as create_context\'s args, keyed by parameter name.';
+
+test('create_context rejects init args that violate the init signature, naming each field and the signature, and creates nothing', async () => {
   const { create, created } = initAdmin();
-  const res = await create({ application: 'AppBlocks', namespace: 'Ns111', args: { name: 'world-1', seed: 'seven' } });
+  const res = await create({ application: 'AppBlocks', namespace: 'Ns111', args: { seed: 'seven' } });
   assert.equal(res.isError, true);
-  assert.match(textOf(res), /seed/);
+  assert.equal(
+    textOf(res),
+    'Error: Application "AppBlocks" cannot be initialized with these args: missing name; invalid seed (Invalid input: expected number, received string).\n' +
+      BLOCKS_INIT,
+  );
   assert.deepEqual(created, []);
 });
 
-test('create_context without args sends no init input and never fetches the ABI, as before', async () => {
-  const { create, created, abiFetches } = initAdmin();
-  await create({ application: 'AppPlain', namespace: 'Ns111' });
-  assert.deepEqual(created, [{ applicationId: 'AppPlain', groupId: 'Ns111', name: undefined, serviceName: undefined }]);
-  assert.deepEqual(abiFetches, []);
+test('create_context refuses init args the ABI does not declare, naming them, instead of dropping them', async () => {
+  const { create, created } = initAdmin();
+  const res = await create({ application: 'AppBlocks', namespace: 'Ns111', args: { name: 'world-1', seed: 7, stray: true, extra: 1 } });
+  assert.equal(textOf(res), `Error: Application "AppBlocks" cannot be initialized with these args: unknown stray, extra.\n${BLOCKS_INIT}`);
+  assert.deepEqual(created, []);
+});
+
+test('create_context without args for an app whose init takes parameters names the missing ones and creates nothing', async () => {
+  const { create, created } = initAdmin();
+  const res = await create({ application: 'AppBlocks', namespace: 'Ns111' });
+  assert.equal(res.isError, true);
+  assert.equal(textOf(res), `Error: Application "AppBlocks" cannot be initialized with these args: missing name, seed.\n${BLOCKS_INIT}`);
+  assert.deepEqual(created, []);
+});
+
+test('create_context without args sends {} to an init with no required parameters, and no init input to an app without init', async () => {
+  const { create, created } = initAdmin();
+  for (const application of ['AppPlain', 'AppOptional', 'AppNoInit']) await create({ application, namespace: 'Ns111' });
+  assert.deepEqual(
+    created.map((c) => [c.applicationId, c.initializationParams && Buffer.from(c.initializationParams as number[]).toString('utf8')]),
+    [
+      ['AppPlain', '{}'],
+      ['AppOptional', '{}'],
+      ['AppNoInit', undefined],
+    ],
+  );
+});
+
+test('create_context without args for an app whose ABI cannot be read creates the context with no init input, as core would', async () => {
+  const { create, created } = initAdmin();
+  const res = await create({ application: 'AppNoAbi', group: 'Ns111' });
+  assert.equal(res.isError, undefined);
+  assert.deepEqual(created, [{ applicationId: 'AppNoAbi', groupId: 'Ns111', name: undefined, serviceName: undefined }]);
+});
+
+test('create_context with args for an app whose ABI cannot be read refuses, since they cannot be checked, and creates nothing', async () => {
+  const { create, created } = initAdmin();
+  const res = await create({ application: 'AppNoAbi', group: 'Ns111', args: { name: 'x' } });
+  assert.equal(textOf(res), `Error: ${NO_ABI}`);
+  assert.deepEqual(created, []);
 });
 
 test('create_context with args for an app that declares no init method says so and creates nothing', async () => {
@@ -554,6 +642,33 @@ test('create_context with args for a multi-service app and no service is an erro
   assert.equal(res.isError, true);
   assert.match(textOf(res), /multiple services; pass service_name \(available: docs, registry\)/);
   assert.deepEqual(created, []);
+});
+
+test('create_context and create_namespace send an agent to describe_app, whose guide says how to set up an unfamiliar app', () => {
+  const { server, configs } = fakeServer();
+  register(server, fakeSession(), loadConfig(env()), CATALOG);
+  for (const tool of ['create_context', 'create_namespace']) {
+    assert.match(configs.get(tool)!.description!, /For an app you have not used before, call describe_app first: its guide says how/);
+  }
+});
+
+test('create_context takes the target group as group, a namespace or subgroup id, and namespace still works', async () => {
+  const { create, created } = initAdmin();
+  await create({ application: 'AppNoInit', group: 'Sub111' });
+  await create({ application: 'AppNoInit', namespace: 'Ns111' });
+  await create({ application: 'AppNoInit', group: 'Ns111', namespace: 'Ns111' });
+  assert.deepEqual(created.map((c) => c.groupId), ['Sub111', 'Ns111', 'Ns111']);
+});
+
+test('create_context refuses two different targets, or none, before reading the app or creating anything', async () => {
+  const { create, created, abiFetches } = initAdmin();
+  const both = await create({ application: 'AppNoInit', group: 'Sub111', namespace: 'Ns111' });
+  assert.equal(both.isError, true);
+  assert.equal(textOf(both), 'Error: group "Sub111" and namespace "Ns111" name different groups; pass only group.');
+  const neither = await create({ application: 'AppNoInit' });
+  assert.equal(neither.isError, true);
+  assert.equal(textOf(neither), 'Error: Pass group: the id of the namespace, or of a subgroup in one, to create the context in.');
+  assert.deepEqual([created, abiFetches], [[], []]);
 });
 
 function groupAdmin(opts: { failVisibility?: boolean; failInfo?: boolean; failCreate?: boolean } = {}) {

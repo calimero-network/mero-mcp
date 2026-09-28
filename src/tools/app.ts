@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
-import { AppNotFoundError, packageKey, type AbiLoader, type ResolvedApp } from '../abi.ts';
+import { AppNotFoundError, INIT_METHOD, packageKey, type AbiLoader, type ResolvedApp } from '../abi.ts';
 import type { Catalog } from '../catalog.ts';
 import { errorResult, textResult } from '../errors.ts';
 import { advertisedObject, type Gate } from '../gate.ts';
@@ -15,6 +15,9 @@ const CONTEXT_ID = /^[0-9a-f]{64}$/;
 const NO_GUIDE = 'This app ships no guide.';
 
 const NO_HANDLE = 'Call select_app for the application and retry with the returned app_handle.';
+
+const INIT_REFUSED =
+  "init runs once, when create_context creates the context; pass its arguments as create_context's args. It cannot be called on a context.";
 
 const TOOLS_NOTE =
   'These are the server-side tool names. An MCP client may expose them under a prefix of its own ' +
@@ -31,7 +34,7 @@ const CALL_INPUT = z.object({
   app: z
     .string()
     .optional()
-    .describe('Application id or package name; a refusal shows its guide, and a handle for another app is refused.'),
+    .describe('Application id, package name, or display name; a refusal shows its guide, and a handle for another app is refused.'),
 });
 
 const noContexts = (label: string) =>
@@ -135,7 +138,7 @@ export function registerAppTools(
         'plus an app_handle for planning. Does not pick a context. ' +
         'For a multi-service app, omitting `service` returns an error naming the available services.',
       inputSchema: {
-        app: z.string().describe('Application id or package name.'),
+        app: z.string().describe('Application id, package name, or display name.'),
         service: z.string().optional().describe('Service name, for an app that bundles several.'),
       },
       annotations: { readOnlyHint: true },
@@ -158,7 +161,7 @@ export function registerAppTools(
         "Pick an application and the context to act in. Returns the app's guide and the app_handle " +
         'every app tool and `call` require; the handle names the context, so pass it unchanged.',
       inputSchema: {
-        app: z.string().describe('Application id or package name.'),
+        app: z.string().describe('Application id, package name, or display name.'),
         service: z
           .string()
           .optional()
@@ -219,6 +222,7 @@ export function registerAppTools(
         const admitted = await gate.admit(resolved, app_handle);
         if ('refusal' in admitted) return admitted.refusal;
         const { method, args } = CALL_INPUT.parse(raw);
+        if (method === INIT_METHOD) return refusal(INIT_REFUSED);
 
         const abiMethod = resolved.manifest.methods.find((m) => m.name === method);
         if (!abiMethod) {

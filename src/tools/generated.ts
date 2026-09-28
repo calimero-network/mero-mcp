@@ -2,7 +2,15 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { McpServer, RegisteredTool } from '@modelcontextprotocol/server';
 import type { AbiMethod } from '@calimero-network/abi-codegen';
-import { AppNotFoundError, codeUnit, lastSegment, packageKey, type AbiLoader, type ResolvedApp } from '../abi.ts';
+import {
+  AppNotFoundError,
+  INIT_METHOD,
+  codeUnit,
+  lastSegment,
+  packageKey,
+  type AbiLoader,
+  type ResolvedApp,
+} from '../abi.ts';
 import type { Catalog } from '../catalog.ts';
 import { errorResult } from '../errors.ts';
 import { advertised, type Gate } from '../gate.ts';
@@ -58,8 +66,9 @@ function toolTitle(app: ResolvedApp, method: string): string {
 // A method's own app_handle parameter would collide with the injected one, so only call reaches it, with args kept apart.
 const collides = (method: AbiMethod) => method.params.some((p) => p.name === HANDLE_PARAM);
 
+// create_context runs init, so a tool for it would only invite a second run on a live context.
 const toolMethods = (app: ResolvedApp) =>
-  app.manifest.methods.filter((m) => !collides(m)).sort((a, b) => codeUnit(a.name, b.name));
+  app.manifest.methods.filter((m) => m.name !== INIT_METHOD && !collides(m)).sort((a, b) => codeUnit(a.name, b.name));
 
 /**
  * Tool name per method of every app, unique against `reserved` and each other: what select_app reports and tools/list shows.
@@ -169,7 +178,7 @@ export function registerGeneratedTools(
     const names = toolNamesByApp(catalog.apps(), reserved);
     // Tracked one by one, so a throw midway still leaves every registered tool removable on the next sync.
     for (const app of catalog.apps()) {
-      for (const m of app.manifest.methods.filter(collides)) {
+      for (const m of app.manifest.methods.filter((x) => x.name !== INIT_METHOD && collides(x))) {
         const where = `${packageKey(app)} ${app.version ?? ''} ${m.name}`;
         console.error(`[mero-mcp] no tool for ${where}: its app_handle parameter would collide; use call`);
       }

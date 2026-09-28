@@ -62,21 +62,26 @@ Contexts on this node. Read-only.
 
 | Argument | Type | Notes |
 | --- | --- | --- |
-| `application` | string, optional | Filter to one application |
+| `application` | string, optional | Filter to one application: id, package name, trailing segment, or display name |
 
 `dagHeads` are rendered as hex.
 
 ### `create_context`
 
-Create a context for an application under a namespace.
+Create a context for an application in a group: a namespace, or a subgroup inside one.
 
 | Argument | Type | Notes |
 | --- | --- | --- |
-| `application` | string | Id, package name, or unambiguous trailing segment |
-| `namespace` | string | Namespace id |
+| `application` | string | Id, package name, unambiguous trailing segment, or display name |
+| `group` | string, required unless `namespace` is given | Namespace or subgroup id to create the context in |
+| `namespace` | string, optional | Older name for `group`, still accepted; passing both with different values is an error |
 | `name` | string, optional | |
 | `service` | string, optional | Required for a multi-service application |
 | `args` | object, optional | Arguments for the app's `init`, keyed by parameter name; checked against the ABI like a method call |
+
+`args` is checked against the app's `init` before anything is created, and may be left out only when `init` takes no required parameters.
+A missing, invalid or undeclared argument returns `isError: true` naming each one, followed by the `init` signature and its parameter docs.
+When `args` is left out and the app's ABI cannot be read, the context is created with no init input and the node reports any init failure; `args` that cannot be checked are refused.
 
 ### `join_context`
 
@@ -128,7 +133,7 @@ Install a published application from the node's own configured registry, by
 
 ### `uninstall_application`
 
-**Destructive.** Takes `application` (id, package, or trailing segment).
+**Destructive.** Takes `application` (id, package name, trailing segment, or display name), resolved to one installed application before anything is removed.
 
 ### `upload_blob`
 
@@ -154,7 +159,7 @@ In `CALIMERO_MCP_TOOLSETS` by default.
 
 | Argument | Type | Notes |
 | --- | --- | --- |
-| `application` | string | Id, package name, or trailing segment |
+| `application` | string | Id, package name, trailing segment, or display name |
 | `name` | string, optional | |
 
 ### `delete_namespace`
@@ -239,7 +244,7 @@ Show an application's methods and guide without choosing a context. Read-only.
 
 | Argument | Type | Notes |
 | --- | --- | --- |
-| `app` | string | Id, package name, or trailing segment |
+| `app` | string | Id, package name, trailing segment, or display name |
 | `service` | string, optional | For an app bundling several services |
 
 Returns, as JSON: `application`, `package`, `appVersion`, resolved `service`, `contextServices`, every method as a signature (with its doc and documented parameters when the ABI carries them; see [ABI mapping](/reference/abi-mapping/#docs-and-hints)), and an `app_handle` with no context.
@@ -254,7 +259,7 @@ Choose an application and the context to act in. Read-only.
 
 | Argument | Type | Notes |
 | --- | --- | --- |
-| `app` | string | Id, package name, or trailing segment |
+| `app` | string | Id, package name, trailing segment, or display name |
 | `context` | string, optional | Context id or alias; defaults to the app's only context |
 | `service` | string, optional | Only when no context is chosen; a chosen context decides the service |
 
@@ -277,10 +282,11 @@ Call an application method by name.
 | `app` | string, optional | Shows that app's guide on a refusal; a handle for another app is refused |
 
 An unknown `method` returns the list of methods that exist.
+`init` is refused, after the handle check, with a pointer to `create_context`'s `args`: it runs once, when the context is created.
 
 ## Generated method tools
 
-One per method of every installed application, sorted by package, then application id, then service, then method, for every client alike.
+One per method of every installed application except `init`, which `create_context` runs, sorted by package, then application id, then service, then method, for every client alike.
 Named `<app>_<method>`, or `<app>_<service>_<method>` for a multi-service application, where `<app>` is the sanitised trailing package segment cut to 20 characters; a name longer than 49 characters keeps its first 42 and ends in `_` plus 6 hex of its sha256.
 A name never repeats a fixed tool's name or another app's: a clash adds `_` plus 6 alphanumerics of the application id (see [tool naming](/reference/abi-mapping/#tool-naming)).
 

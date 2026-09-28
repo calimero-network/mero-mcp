@@ -6,10 +6,10 @@ import type { Config } from '../config.ts';
 import { discoverLocalNodes, listConfiguredNodes, resolveNode } from '../config.ts';
 import type { NodeSession } from '../node.ts';
 import type { Catalog } from '../catalog.ts';
-import type { AbiLoader } from '../abi.ts';
+import { INIT_METHOD, type AbiLoader } from '../abi.ts';
 import { errorResult, textResult, toMessage } from '../errors.ts';
 import { listing } from '../guide.ts';
-import { parseArgs } from '../schema.ts';
+import { inputShapeForMethod, methodReference } from '../schema.ts';
 
 /** Runs an admin call and folds its result or throw into the MCP text-result convention. */
 function wrap<Args>(fn: (args: Args) => Promise<unknown>) {
@@ -33,11 +33,40 @@ const toHex = (bytes: number[]) => Buffer.from(bytes).toString('hex');
 
 const VISIBILITY = z.enum(['open', 'restricted']).describe('open: namespace members can join; restricted: members must be added.');
 
-/** init takes the same JSON args object a method call does, so it is validated the way method calls are. */
-function initParams(manifest: AbiManifest, label: string, args: Record<string, unknown>): number[] {
-  const init = manifest.methods.find((m) => m.name === 'init');
-  if (!init) throw new Error(`Application "${label}" declares no init method, so it takes no init args.`);
-  return [...Buffer.from(JSON.stringify(parseArgs(init, manifest, args)), 'utf8')];
+/** Each zod issue as a missing top-level parameter, an undeclared one, or an invalid value at its path. */
+function initProblems(error: z.ZodError, args: Record<string, unknown>): string {
+  const missing = new Set<string>();
+  const unknown: string[] = [];
+  const invalid: string[] = [];
+  for (const issue of error.issues) {
+    const top = String(issue.path[0]);
+    if (issue.code === 'unrecognized_keys' && !issue.path.length) unknown.push(...issue.keys);
+    else if (issue.path.length && !(top in args)) missing.add(top);
+    else invalid.push(`${issue.path.join('.') || 'args'} (${issue.message})`);
+  }
+  const parts = { missing: [...missing], invalid, unknown };
+  return Object.entries(parts)
+    .filter(([, names]) => names.length)
+    .map(([kind, names]) => `${kind} ${names.join(', ')}`)
+    .join('; ');
+}
+
+/** init takes the same JSON args object a method call does, so it is validated the way method calls are, before the node runs it. */
+function initParams(manifest: AbiManifest, label: string, args: Record<string, unknown> | undefined): number[] | undefined {
+  const init = manifest.methods.find((m) => m.name === INIT_METHOD);
+  if (!init) {
+    if (args) throw new Error(`Application "${label}" declares no init method, so it takes no init args.`);
+    return undefined;
+  }
+  // Strict, so a misspelt optional parameter is refused rather than silently left unset.
+  const parsed = z.strictObject(inputShapeForMethod(init, manifest)).safeParse(args ?? {});
+  if (!parsed.success) {
+    throw new Error(
+      `Application "${label}" cannot be initialized with these args: ${initProblems(parsed.error, args ?? {})}.\n` +
+        `Its init: ${methodReference(init)}\nPass these as create_context's args, keyed by parameter name.`,
+    );
+  }
+  return [...Buffer.from(JSON.stringify(parsed.data), 'utf8')];
 }
 
 export function registerCoreTools(server: McpServer, session: NodeSession, cfg: Config, loader: AbiLoader, catalog: Catalog): void {
@@ -102,11 +131,13 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
     'list_contexts',
     {
       description: 'Contexts on this node, optionally filtered to one application.',
-      inputSchema: { application: z.string().optional() },
+      inputSchema: { application: z.string().optional().describe('Application id, package name, or display name.') },
       annotations: { readOnlyHint: true },
     },
     wrap(async ({ application }: { application?: string }) => {
-      const { contexts } = application ? await admin.getContextsForApplication(application) : await admin.getContexts();
+      const { contexts } = application
+        ? await admin.getContextsForApplication((await identify(application)).id)
+        : await admin.getContexts();
       return { contexts: contexts.map((ctx: ContextWithGroup) => ({ ...ctx, dagHeads: ctx.dagHeads?.map(toHex) })) };
     }),
   );
@@ -115,11 +146,13 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
     'create_context',
     {
       description:
-        'Create a new context for an application under a namespace. ' +
-        "Pass `args` when the application's init method takes parameters; describe_app lists init with them.",
+        'Create a new context for an application in a group: a namespace, or a subgroup inside one. ' +
+        "For an app you have not used before, call describe_app first: its guide says how the app's contexts should be set up, " +
+        'and it lists init with the parameters `args` takes.',
       inputSchema: {
-        application: z.string().describe('Application id or package name.'),
-        namespace: z.string(),
+        application: z.string().describe('Application id, package name, or display name.'),
+        group: z.string().optional().describe('Id of the group to create the context in: a namespace, or a subgroup inside one.'),
+        namespace: z.string().optional().describe('Older name for group, still accepted; pass group instead.'),
         name: z.string().optional(),
         service: z.string().optional(),
         args: z.record(z.string(), z.unknown()).optional().describe("Arguments for the application's init method, keyed by parameter name."),
@@ -128,21 +161,38 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
     wrap(
       async ({
         application,
+        group,
         namespace,
         name,
         service,
         args,
       }: {
         application: string;
-        namespace: string;
+        group?: string;
+        namespace?: string;
         name?: string;
         service?: string;
         args?: Record<string, unknown>;
       }) => {
-        const request = { groupId: namespace, name, serviceName: service };
-        if (!args) return admin.createContext({ ...request, applicationId: (await identify(application)).id });
-        const { id, manifest } = await load(application, service);
-        return admin.createContext({ ...request, applicationId: id, initializationParams: initParams(manifest, application, args) });
+        if (group && namespace && group !== namespace) {
+          throw new Error(`group "${group}" and namespace "${namespace}" name different groups; pass only group.`);
+        }
+        const groupId = group || namespace;
+        if (!groupId) throw new Error('Pass group: the id of the namespace, or of a subgroup in one, to create the context in.');
+        // Without args an unreadable ABI (an app built without one) must not block setup; args that cannot be checked are never sent.
+        const loaded = await load(application, service).catch((err: unknown) => {
+          if (args) throw err;
+          return undefined;
+        });
+        const applicationId = loaded ? loaded.id : (await identify(application)).id;
+        const initializationParams = loaded && initParams(loaded.manifest, application, args);
+        return admin.createContext({
+          applicationId,
+          groupId,
+          name,
+          serviceName: service,
+          ...(initializationParams ? { initializationParams } : {}),
+        });
       },
     ),
   );
@@ -210,11 +260,11 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
       'uninstall_application',
       {
         description: 'Uninstall an application from this node.',
-        inputSchema: { application: z.string() },
+        inputSchema: { application: z.string().describe('Application id, package name, or display name.') },
         annotations: { destructiveHint: true },
       },
       wrap(async ({ application }: { application: string }) => {
-        const removed = await admin.uninstallApplication(application);
+        const removed = await admin.uninstallApplication((await identify(application)).id);
         await refreshApps();
         return removed;
       }),
@@ -252,9 +302,11 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
     server.registerTool(
       'create_namespace',
       {
-        description: 'Create a namespace for an application.',
+        description:
+          'Create a namespace for an application. ' +
+          "For an app you have not used before, call describe_app first: its guide says how the app's namespaces and contexts should be set up.",
         inputSchema: {
-          application: z.string().describe('Application id or package name.'),
+          application: z.string().describe('Application id, package name, or display name.'),
           name: z.string().optional(),
         },
       },

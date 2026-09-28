@@ -143,15 +143,17 @@ Anything an agent does through this server (installing an application, creating 
 
 **Application** (always registered):
 `describe_app` shows an application's methods and guide and gives a planning handle.
+Call it before setting up contexts for an app you have not used before: its guide says how they should be laid out.
 `select_app` picks an application and a context and returns its guide and `app_handle`.
 `call` invokes a method with that handle.
 
 Handles are per application, so one instruction can span several apps by holding a handle for each.
 
 Anywhere an application is named you can pass its id, its full package name, or just the last dot-separated segment of that package (`kv-store` for `com.calimero.kv-store`), as long as that segment is unambiguous among the installed applications.
+The app's display name (its bundle `metadata.name`, such as `Mero Blocks`, in any case) works too, under the same rule.
 The same package from two signers is two apps; name either by its application id.
 
-**Generated** (always registered): one tool per method of every installed app, from the moment a client connects, and each takes that app's `app_handle`.
+**Generated** (always registered): one tool per method of every installed app except `init`, which `create_context` runs, from the moment a client connects, and each takes that app's `app_handle`.
 Those tools are named `<app>_<method>`, or `<app>_<service>_<method>` for a multi-service application, where `<app>` is that same trailing package segment: `com.calimero.kv-store` yields `kv_store_get`.
 The list changes only when an app is installed, upgraded or uninstalled.
 

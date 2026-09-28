@@ -100,6 +100,7 @@ The catalog, `describe_app`, `select_app`, `call` and every generated tool go th
 package segment all resolve to one installed application — or to an error that names
 the candidates (ambiguous) or the installed set (no match). Matching on the short
 form is whole-segment only, so `mero-chat` cannot resolve to `mero-chat-v2`.
+A display name (the bundle's `metadata.name`, in any case) is matched together with the trailing segment, so a name that is one app's segment and another's display name is ambiguous.
 
 **Fetch and cache the manifest.** The cache key is
 `<blobId>:<serviceName>` — the application's **bytecode blob id**, not its

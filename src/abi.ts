@@ -7,6 +7,8 @@ const UPGRADE_MEROD =
   "This node's merod does not support the ABI endpoint (GET /admin-api/applications/:id/abi). " +
   'Upgrade merod to a release that includes it.';
 
+export const INIT_METHOD = 'init';
+
 export interface ResolvedApp {
   id: string;
   package?: string;
@@ -74,14 +76,15 @@ export function createAbiLoader(session: NodeSession) {
   /** The one installed app `nameOrId` names; core keys a bundle by package and signer, so an upgrade replaces it in place. */
   async function findApp(nameOrId: string): Promise<InstalledApp> {
     const apps = await installed();
+    const lower = nameOrId.toLowerCase();
     const byId = apps.filter((a) => a.id === nameOrId);
     const byPackage = apps.filter((a) => a.package === nameOrId);
+    // One tier for both short forms, so one app's segment and another's display name collide as ambiguous.
     // Whole segments only, never a prefix: "mero-chat" must not resolve to "mero-chat-v2".
-    const matches = byId.length
-      ? byId
-      : byPackage.length
-        ? byPackage
-        : apps.filter((a) => a.package && lastSegment(a.package).toLowerCase() === nameOrId.toLowerCase());
+    const byShortName = apps.filter(
+      (a) => (a.package && lastSegment(a.package).toLowerCase() === lower) || metadataField(a.metadata, 'name')?.toLowerCase() === lower,
+    );
+    const matches = [byId, byPackage, byShortName].find((m) => m.length) ?? [];
 
     const packages = [...new Set(matches.map((a) => a.package))];
     if (packages.length > 1) {
