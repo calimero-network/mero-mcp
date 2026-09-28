@@ -4,19 +4,24 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseAbiManifest, type AbiManifest } from '@calimero-network/abi-codegen';
-import { McpServer, InMemoryTransport } from '@modelcontextprotocol/server';
-import { Client } from '@modelcontextprotocol/client';
+import { loadConfig } from './config.ts';
 import { inputShapeForMethod } from './schema.ts';
+import { createServerFactory } from './server.ts';
+import { connect } from '../test/support/connect.ts';
+import { fakeNode } from '../test/support/node.ts';
 
 // Committed straight from core's own builds, so a change to the ABI format fails here rather than in production.
 const FIXTURES = join(fileURLToPath(new URL('../test/fixtures/abi/', import.meta.url)));
 
-const load = (name: string): AbiManifest =>
-  parseAbiManifest(JSON.parse(readFileSync(join(FIXTURES, `${name}.json`), 'utf8')) as unknown);
+const raw = (name: string): unknown => JSON.parse(readFileSync(join(FIXTURES, `${name}.json`), 'utf8'));
+
+const load = (name: string): AbiManifest => parseAbiManifest(raw(name));
+
+const CFG = loadConfig({ HOME: '/x' } as NodeJS.ProcessEnv);
 
 const EXPECTED_METHOD_COUNTS: Record<string, number> = {
   'kv-store': 11,
-  abi_conformance: 40,
+  abi_conformance: 41,
   'scaffolding-e2e': 91,
 };
 
@@ -57,6 +62,19 @@ const degradedMethods = (m: AbiManifest): string[] =>
     )
     .map((method) => method.name);
 
+/** The fixture installed as package `name` on a fake node, and the tools a real server generates for it, keyed by method. */
+async function listTools(name: string) {
+  const { session } = fakeNode([{ id: `${name}-id`, package: name, version: '1.0.0', abi: raw(name) }]);
+  const { client, close } = await connect(createServerFactory(session, CFG), '2026-07-28');
+  try {
+    const prefix = `${name.replace(/[^a-z0-9_]+/g, '_')}_`;
+    const tools = (await client.listTools()).tools.filter((t) => t.name.startsWith(prefix));
+    return new Map(tools.map((t) => [t.name.slice(prefix.length), t]));
+  } finally {
+    await close();
+  }
+}
+
 test('the unknown-detector fires on a construct the deriver cannot represent, even inside a named type', () => {
   // Control case: without it, "zero degraded methods" would also hold if the walker simply never looked.
   // Built by hand: parseAbiManifest would reject the unknown kind before the deriver ever saw it.
@@ -84,75 +102,49 @@ for (const [name, count] of Object.entries(EXPECTED_METHOD_COUNTS)) {
     assert.deepEqual(degradedMethods(load(name)), UNREPRESENTABLE);
   });
 
-  test(`${name}: every method registers and converts to JSON Schema through the MCP SDK`, async () => {
-    const m = load(name);
-    const server = new McpServer({ name: 'conformance', version: '0.0.0' });
-    for (const method of m.methods) {
-      server.registerTool(`app_${method.name}`, { description: method.name, inputSchema: inputShapeForMethod(method, m) }, async () => ({
-        content: [{ type: 'text' as const, text: '' }],
-      }));
-    }
-
-    // tools/list is where the SDK converts every registered shape, so a schema it cannot render fails here and nowhere earlier.
-    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-    const client = new Client({ name: 'conformance', version: '0.0.0' });
-    await Promise.all([server.connect(serverSide), client.connect(clientSide)]);
-    try {
-      const { tools } = await client.listTools();
-      assert.equal(tools.length, m.methods.length);
-      for (const tool of tools) {
-        assert.equal(tool.inputSchema.type, 'object', `${tool.name} is not an object schema`);
-        assert.equal(typeof tool.inputSchema.properties, 'object', `${tool.name} advertises no properties`);
-      }
-    } finally {
-      await client.close();
-      await server.close();
+  // tools/list is where the SDK converts every registered shape, so a schema it cannot render fails here and nowhere earlier.
+  test(`${name}: every method registers as a generated tool and converts to JSON Schema through the MCP SDK`, async () => {
+    const tools = await listTools(name);
+    assert.deepEqual([...tools.keys()].sort(), load(name).methods.map((x) => x.name).sort());
+    for (const [method, tool] of tools) {
+      assert.equal(tool.inputSchema.type, 'object', `${method} is not an object schema`);
+      assert.equal(typeof tool.inputSchema.properties, 'object', `${method} advertises no properties`);
     }
   });
 }
 
-test('scaffolding-e2e: 91 methods register under one server at once', async () => {
-  const m = load('scaffolding-e2e');
-  const server = new McpServer({ name: 'scale', version: '0.0.0' });
-  for (const method of m.methods) {
-    server.registerTool(`scaffolding_e2e_${method.name}`, { description: method.name, inputSchema: inputShapeForMethod(method, m) }, async () => ({
-      content: [{ type: 'text' as const, text: '' }],
-    }));
-  }
+test('scaffolding-e2e: 91 methods register under one server at once, each under its own name', async () => {
+  assert.equal((await listTools('scaffolding-e2e')).size, 91);
+});
 
-  const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-  const client = new Client({ name: 'scale', version: '0.0.0' });
-  await Promise.all([server.connect(serverSide), client.connect(clientSide)]);
-  try {
-    const { tools } = await client.listTools();
-    assert.equal(tools.length, 91);
-    assert.equal(new Set(tools.map((t) => t.name)).size, 91, 'two methods collided on one tool name');
-  } finally {
-    await client.close();
-    await server.close();
+test('kv-store: set(key, value) advertises exactly those two required properties beside the app_handle', async () => {
+  const set = (await listTools('kv-store')).get('set');
+  assert.ok(set, 'kv-store fixture has no set method');
+  const schema = set.inputSchema as { properties: Record<string, unknown>; required?: string[] };
+  assert.deepEqual(Object.keys(schema.properties).sort(), ['app_handle', 'key', 'value']);
+  assert.deepEqual([...(schema.required ?? [])].sort(), ['app_handle', 'key', 'value']);
+});
+
+test('abi_conformance: its method and parameter docs reach tools/list', async () => {
+  const documented = load('abi_conformance').methods.filter((x) => x.doc);
+  assert.ok(documented.length > 0, 'abi_conformance carries no docs: refresh it from core apps/abi_conformance/abi.expected.json');
+  const tools = await listTools('abi_conformance');
+  for (const method of documented) {
+    const tool = tools.get(method.name);
+    assert.ok(tool, `${method.name} is not listed`);
+    assert.ok(tool.description?.startsWith(`${method.doc}\n\n`), `${method.name}: its doc is missing from the description`);
+    const props = tool.inputSchema.properties as Record<string, { description?: string }>;
+    for (const p of method.params.filter((x) => x.doc)) {
+      assert.ok(props[p.name].description?.startsWith(p.doc!), `${method.name}(${p.name}): its doc is missing from the schema`);
+    }
   }
 });
 
-test('kv-store: set(key, value) advertises exactly those two required properties', async () => {
-  const m = load('kv-store');
-  const set = m.methods.find((x) => x.name === 'set');
-  assert.ok(set, 'kv-store fixture has no set method');
-
-  const server = new McpServer({ name: 'kv', version: '0.0.0' });
-  server.registerTool('kv_store_set', { description: 'set', inputSchema: inputShapeForMethod(set, m) }, async () => ({
-    content: [{ type: 'text' as const, text: '' }],
-  }));
-
-  const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-  const client = new Client({ name: 'kv', version: '0.0.0' });
-  await Promise.all([server.connect(serverSide), client.connect(clientSide)]);
-  try {
-    const { tools } = await client.listTools();
-    const schema = tools[0].inputSchema as { properties: Record<string, unknown>; required?: string[] };
-    assert.deepEqual(Object.keys(schema.properties).sort(), ['key', 'value']);
-    assert.deepEqual([...(schema.required ?? [])].sort(), ['key', 'value']);
-  } finally {
-    await client.close();
-    await server.close();
-  }
+test('abi_conformance: hints, a returns_doc and a variant doc from core reach the tools', async () => {
+  const tools = await listTools('abi_conformance');
+  assert.equal(tools.get('drop_counter')!.annotations?.destructiveHint, true);
+  assert.equal(tools.get('xcall_noop')!.annotations?.idempotentHint, true);
+  const status = tools.get('get_status')!.outputSchema as { description?: string; oneOf?: Array<{ const?: string; description?: string }> };
+  assert.equal(status.description, 'The `Active` status stamped with `timestamp`.');
+  assert.equal(status.oneOf?.find((v) => v.const === 'Pending')?.description, 'Waiting to start.');
 });
