@@ -40,13 +40,15 @@ connects to a node when the client opens the connection.
 Paste this into any AI harness (Claude Code, Cursor, Codex CLI, Claude Desktop,
 Zed, …) and let it register the server for you. It tells the harness how to
 detect whether you even need credentials, which is the part that is easy to get
-wrong by hand:
+wrong by hand. If you already have it registered under a different name, there's
+no need to re-register it - the name only sets the tool prefix and the label
+your client shows.
 
 ```text
 Set up the mero-mcp MCP server for me.
 
 It is on npm as @calimero-network/mero-mcp and runs over stdio. Register a
-server named "calimero" that runs `npx -y @calimero-network/mero-mcp`.
+server named "mero-mcp" that runs `npx -y @calimero-network/mero-mcp`.
 
 In Claude Code that is one command:
   claude mcp add -s local mero-mcp -- npx -y @calimero-network/mero-mcp
