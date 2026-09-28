@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { AbiManifest } from '@calimero-network/abi-codegen';
-import { inputShapeForMethod, methodReference, renderMethodSignature, schemaBuilder } from './schema.ts';
+import { inputShapeForMethod, methodReference, renderMethodSignature, schemaBuilder, type SchemaMode } from './schema.ts';
 import { z } from 'zod';
 
 function deepFreeze<T>(v: T): T {
@@ -363,4 +363,170 @@ test('methodReference indents every line of a multi-line parameter doc, not just
     intent: 'mutating',
   } as never;
   assert.equal(methodReference(set), '[mut] set_blocks(now: u64) -> u32\n  now: Unix millis.\n    Must be monotonic.');
+});
+
+const tagged = (keys: Record<string, unknown>, textPayload: unknown = { $ref: 'TextData' }) =>
+  docManifest({
+    Shape: { kind: 'variant', ...keys, variants: [{ name: 'Empty' }, { name: 'Text', payload: textPayload }] },
+    TextData: { kind: 'record', fields: [{ name: 'size', type: { kind: 'u32' } }] },
+  });
+
+const accepts = (m: AbiManifest, value: unknown) => schemaBuilder(m).type({ $ref: 'Shape' }).safeParse(value).success;
+
+function shapeDef(m: AbiManifest, mode: SchemaMode = 'input') {
+  const b = schemaBuilder(m, mode);
+  return (b.jsonSchema(z.object({ s: b.type({ $ref: 'Shape' }) })) as { $defs: { Shape: { anyOf?: unknown[]; oneOf?: unknown[] } } }).$defs.Shape;
+}
+
+test('internally tagged (tag): {tag: Name} for a unit variant, the payload fields beside the tag otherwise', () => {
+  const m = tagged({ tag: 'kind' });
+  assert.equal(accepts(m, { kind: 'Empty' }), true);
+  assert.deepEqual(schemaBuilder(m).type({ $ref: 'Shape' }).parse({ kind: 'Text', size: 3 }), { kind: 'Text', size: 3 });
+  assert.equal(accepts(m, { kind: 'Text', size: 'big' }), false);
+  assert.equal(accepts(m, 'Empty'), false);
+  assert.equal(accepts(m, { Text: { size: 3 } }), false);
+  assert.equal(shapeDef(m).oneOf?.length, 2);
+});
+
+test('an internally tagged payload advertises one object, so the output schema still admits what the node returns', () => {
+  assert.deepEqual(shapeDef(tagged({ tag: 'kind' }), 'output').oneOf?.[1], {
+    type: 'object',
+    properties: { size: { type: 'integer', minimum: 0, maximum: 9007199254740991 }, kind: { type: 'string', const: 'Text' } },
+    required: ['size', 'kind'],
+    additionalProperties: false,
+  });
+});
+
+test('an internally tagged payload that is a map requires the tag and keeps and checks every entry', () => {
+  const m = tagged({ tag: 'kind' }, { kind: 'map', key: { kind: 'string' }, value: { kind: 'u32' } });
+  assert.deepEqual(schemaBuilder(m).type({ $ref: 'Shape' }).parse({ kind: 'Text', a: 3 }), { kind: 'Text', a: 3 });
+  assert.equal(accepts(m, { kind: 'Text', a: 'three' }), false);
+  assert.equal(accepts(m, { a: 3 }), false);
+});
+
+test('adjacently tagged (tag + content): {tag: Name, content: payload}', () => {
+  const m = tagged({ tag: 't', content: 'c' });
+  assert.equal(accepts(m, { t: 'Empty' }), true);
+  assert.equal(accepts(m, { t: 'Text', c: { size: 3 } }), true);
+  assert.equal(accepts(m, { t: 'Text', size: 3 }), false);
+  assert.equal(shapeDef(m).oneOf?.length, 2);
+});
+
+test('untagged: null for a unit variant, the bare payload otherwise, advertised as anyOf because members may overlap', () => {
+  const m = tagged({ untagged: true });
+  assert.equal(accepts(m, null), true);
+  assert.equal(accepts(m, { size: 3 }), true);
+  assert.equal(accepts(m, 'Empty'), false);
+  assert.equal(shapeDef(m).oneOf, undefined);
+  assert.deepEqual(shapeDef(m).anyOf, [{ type: 'null' }, { $ref: '#/$defs/TextData' }]);
+});
+
+test('untagged members that overlap resolve to the first that matches, as serde does', () => {
+  const m = docManifest({
+    Step: {
+      kind: 'variant',
+      untagged: true,
+      variants: [
+        { name: 'Retain', payload: { kind: 'record', fields: [{ name: 'n', type: { kind: 'u32' } }] } },
+        { name: 'Both', payload: { kind: 'record', fields: [{ name: 'n', type: { kind: 'u32' } }, { name: 's', type: { kind: 'string' } }] } },
+      ],
+    },
+  });
+  assert.deepEqual(schemaBuilder(m).type({ $ref: 'Step' }).parse({ n: 1, s: 'x' }), { n: 1 });
+});
+
+const parseShape = (m: AbiManifest, value: unknown) => schemaBuilder(m).type({ $ref: 'Shape' }).parse(value);
+
+test('adjacently tagged and untagged output schemas admit exactly what the node writes', () => {
+  const closed = (properties: Record<string, unknown>) => ({ type: 'object', properties, required: Object.keys(properties), additionalProperties: false });
+  const literal = (name: string) => ({ type: 'string', const: name });
+  assert.deepEqual(shapeDef(tagged({ tag: 't', content: 'c' }), 'output').oneOf, [
+    closed({ t: literal('Empty') }),
+    closed({ t: literal('Text'), c: { $ref: '#/$defs/TextData' } }),
+  ]);
+  assert.deepEqual(shapeDef(tagged({ untagged: true }), 'output').anyOf, [{ type: 'null' }, { $ref: '#/$defs/TextData' }]);
+});
+
+test('an internally tagged payload field named like the tag cannot replace the tag check', () => {
+  const m = tagged({ tag: 'kind' }, { kind: 'record', fields: [{ name: 'kind', type: { kind: 'u32' } }, { name: 'size', type: { kind: 'u32' } }] });
+  assert.equal(accepts(m, { kind: 'Text', size: 3 }), true);
+  assert.equal(accepts(m, { kind: 5, size: 3 }), false);
+});
+
+test('an internally tagged newtype over a newtype struct (an alias) lists the fields behind the alias', () => {
+  const m = docManifest({
+    Shape: { kind: 'variant', tag: 'kind', variants: [{ name: 'Text', payload: { $ref: 'Wrapped' } }] },
+    Wrapped: { kind: 'alias', target: { $ref: 'TextData' } },
+    TextData: { kind: 'record', fields: [{ name: 'size', type: { kind: 'u32' } }] },
+  });
+  assert.deepEqual(parseShape(m, { kind: 'Text', size: 3 }), { kind: 'Text', size: 3 });
+  assert.equal(accepts(m, { kind: 'Text', size: 'big' }), false);
+});
+
+test('an internally tagged newtype over another tagged enum carries both tags and the inner payload', () => {
+  const m = docManifest({
+    Shape: { kind: 'variant', tag: 'kind', variants: [{ name: 'Text', payload: { $ref: 'Font' } }] },
+    Font: { kind: 'variant', tag: 'type', variants: [{ name: 'Mono' }, { name: 'Sized', payload: { $ref: 'TextData' } }] },
+    TextData: { kind: 'record', fields: [{ name: 'size', type: { kind: 'u32' } }] },
+  });
+  assert.deepEqual(parseShape(m, { kind: 'Text', type: 'Sized', size: 3 }), { kind: 'Text', type: 'Sized', size: 3 });
+  assert.deepEqual(parseShape(m, { kind: 'Text', type: 'Mono' }), { kind: 'Text', type: 'Mono' });
+  assert.equal(accepts(m, { kind: 'Text', size: 3 }), false);
+  assert.equal(accepts(m, { kind: 'Text', type: 'Sized', size: 'big' }), false);
+});
+
+test('an internally tagged newtype over an empty struct is the tag alone, closed on output', () => {
+  const m = tagged({ tag: 'kind' }, { kind: 'record', fields: [] });
+  assert.deepEqual(parseShape(m, { kind: 'Text' }), { kind: 'Text' });
+  assert.deepEqual(shapeDef(m, 'output').oneOf?.[1], {
+    type: 'object',
+    properties: { kind: { type: 'string', const: 'Text' } },
+    required: ['kind'],
+    additionalProperties: false,
+  });
+});
+
+test('untagged members take no hex, so a hex-looking string stays a string as serde decodes it', () => {
+  const m = docManifest({
+    Id: {
+      kind: 'variant',
+      untagged: true,
+      variants: [
+        { name: 'Raw', payload: { kind: 'bytes' } },
+        { name: 'Blob', payload: { $ref: 'Blob' } },
+        { name: 'Name', payload: { kind: 'string' } },
+        { name: 'Label', payload: { kind: 'record', fields: [{ name: 'data', type: { kind: 'string' } }] } },
+      ],
+    },
+    Blob: { kind: 'record', fields: [{ name: 'data', type: { kind: 'bytes' } }] },
+  });
+  const b = schemaBuilder(m);
+  const id = b.type({ $ref: 'Id' });
+  assert.equal(id.parse('abcd'), 'abcd');
+  assert.deepEqual(id.parse([171, 205]), [171, 205]);
+  assert.deepEqual(id.parse({ data: 'abcd' }), { data: 'abcd' });
+  // Outside the untagged enum the same named type still takes hex, and both forms convert together.
+  assert.deepEqual(b.type({ $ref: 'Blob' }).parse({ data: 'abcd' }), { data: [171, 205] });
+  const json = JSON.stringify(b.jsonSchema(z.object({ id, blob: b.type({ $ref: 'Blob' }) })));
+  assert.equal(json.split('a hex string').length - 1, 1);
+});
+
+test('an internally tagged payload serde cannot flatten, such as a number, requires the tag and leaves the rest to the node', () => {
+  const m = tagged({ tag: 'kind' }, { kind: 'u32' });
+  assert.deepEqual(parseShape(m, { kind: 'Text', x: 1 }), { kind: 'Text', x: 1 });
+  assert.equal(accepts(m, { x: 1 }), false);
+});
+
+test('an internally tagged enum nesting an enum with the same tag, itself included, leaves that payload to the node', () => {
+  const m = docManifest({ Shape: { kind: 'variant', tag: 'kind', variants: [{ name: 'Leaf' }, { name: 'Wrap', payload: { $ref: 'Shape' } }] } });
+  assert.equal(accepts(m, { kind: 'Leaf' }), true);
+  assert.equal(accepts(m, { kind: 'Wrap', extra: 1 }), true);
+});
+
+test('a refused tagged value names only the problem of the variant its tag chose', () => {
+  const issues = schemaBuilder(tagged({ tag: 'kind' })).type({ $ref: 'Shape' }).safeParse({ kind: 'Text', size: 'big' }).error?.issues;
+  assert.deepEqual(
+    issues?.map((i) => [i.code, i.path]),
+    [['invalid_type', ['size']]],
+  );
 });
