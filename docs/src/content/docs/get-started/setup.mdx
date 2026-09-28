@@ -49,7 +49,7 @@ It is on npm as @calimero-network/mero-mcp and runs over stdio. Register a
 server named "calimero" that runs `npx -y @calimero-network/mero-mcp`.
 
 In Claude Code that is one command:
-  claude mcp add -s local calimero -- npx -y @calimero-network/mero-mcp
+  claude mcp add -s local mero-mcp -- npx -y @calimero-network/mero-mcp
 
 Otherwise find where your own harness keeps its MCP server config - Claude
 Desktop uses claude_desktop_config.json, Cursor/Windsurf use .cursor/mcp.json,
@@ -87,7 +87,7 @@ The config is the same everywhere; only the file and its syntax change.
 One command, for a server scoped to the current project:
 
 ```bash
-claude mcp add -s local calimero -- npx -y @calimero-network/mero-mcp
+claude mcp add -s local mero-mcp -- npx -y @calimero-network/mero-mcp
 ```
 
 Or edit `.mcp.json` in the project (`~/.claude.json` for a user-wide server):
@@ -95,7 +95,7 @@ Or edit `.mcp.json` in the project (`~/.claude.json` for a user-wide server):
 ```json title=".mcp.json"
 {
   "mcpServers": {
-    "calimero": {
+    "mero-mcp": {
       "command": "npx",
       "args": ["-y", "@calimero-network/mero-mcp"]
     }
@@ -109,7 +109,7 @@ Or edit `.mcp.json` in the project (`~/.claude.json` for a user-wide server):
 ```json title="claude_desktop_config.json"
 {
   "mcpServers": {
-    "calimero": {
+    "mero-mcp": {
       "command": "npx",
       "args": ["-y", "@calimero-network/mero-mcp"]
     }
@@ -125,7 +125,7 @@ Restart Claude Desktop after editing — it reads this file at launch.
 ```json title=".cursor/mcp.json"
 {
   "mcpServers": {
-    "calimero": {
+    "mero-mcp": {
       "command": "npx",
       "args": ["-y", "@calimero-network/mero-mcp"]
     }
@@ -139,7 +139,7 @@ Restart Claude Desktop after editing — it reads this file at launch.
 Same fields, TOML syntax:
 
 ```toml title="~/.codex/config.toml"
-[mcp_servers.calimero]
+[mcp_servers.mero-mcp]
 command = "npx"
 args = ["-y", "@calimero-network/mero-mcp"]
 ```
@@ -154,7 +154,7 @@ args = ["-y", "@calimero-network/mero-mcp"]
 | Claude Code | `.mcp.json` in the project, or `~/.claude.json` for a user-wide server |
 | Claude Desktop | `claude_desktop_config.json` |
 | Cursor / Windsurf | `.cursor/mcp.json` |
-| Codex CLI | `~/.codex/config.toml`, as `[mcp_servers.calimero]` |
+| Codex CLI | `~/.codex/config.toml`, as `[mcp_servers.mero-mcp]` |
 
 ## Running from a clone
 
@@ -173,7 +173,7 @@ Then point the client at the built entrypoint, with no arguments:
 ```json
 {
   "mcpServers": {
-    "calimero": {
+    "mero-mcp": {
       "command": "node",
       "args": ["/abs/path/to/mero-mcp/dist/index.js"]
     }

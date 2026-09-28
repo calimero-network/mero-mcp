@@ -25,7 +25,7 @@ It is on npm as @calimero-network/mero-mcp and runs over stdio. Register a
 server named "calimero" that runs `npx -y @calimero-network/mero-mcp`.
 
 In Claude Code that is one command:
-  claude mcp add -s local calimero -- npx -y @calimero-network/mero-mcp
+  claude mcp add -s local mero-mcp -- npx -y @calimero-network/mero-mcp
 
 Otherwise find where your own harness keeps its MCP server config - Claude
 Desktop uses claude_desktop_config.json, Cursor/Windsurf use .cursor/mcp.json,
@@ -62,7 +62,7 @@ Add this to your MCP client's config:
 ```json
 {
   "mcpServers": {
-    "calimero": {
+    "mero-mcp": {
       "command": "npx",
       "args": ["-y", "@calimero-network/mero-mcp"]
     }
@@ -75,7 +75,7 @@ Add this to your MCP client's config:
 | Claude Code | `.mcp.json` in the project, or `~/.claude.json` for a user-wide server |
 | Claude Desktop | `claude_desktop_config.json` |
 | Cursor / Windsurf | `.cursor/mcp.json` |
-| Codex CLI | `~/.codex/config.toml`, same fields in TOML: `[mcp_servers.calimero]` / `command = "npx"` / `args = ["-y", "@calimero-network/mero-mcp"]` |
+| Codex CLI | `~/.codex/config.toml`, same fields in TOML: `[mcp_servers.mero-mcp]` / `command = "npx"` / `args = ["-y", "@calimero-network/mero-mcp"]` |
 
 ### Prerequisites
 
