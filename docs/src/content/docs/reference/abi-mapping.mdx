@@ -80,14 +80,27 @@ reading the schema knows both are accepted.
 
 ## Variants (enums)
 
-Rust enums arrive as `variant` definitions and map to serde's **externally tagged**
-representation:
+Rust enums arrive as `variant` definitions.
+With no tagging keys they map to serde's default **externally tagged** representation:
 
 - **Unit variants** ride as bare names — `"Pending"`.
 - **Payload variants** ride as a single-key object — `{"Approved": {"by": "…"}}`.
 
 A variant with no payloads anywhere becomes a plain string `enum`, unless a unit variant carries a doc, in which case it becomes a `oneOf` of `{ const, description }` entries instead (see [Docs and hints](#docs-and-hints)).
 A mix becomes a `oneOf` of the unit variants (as an `enum` or as documented consts) and one object schema per payload variant.
+
+An enum with another serde representation carries `tag`, `content` or `untagged` on its variant definition, and its schema follows that wire shape:
+
+| ABI keys | serde attribute | Unit variant | Payload variant | JSON Schema |
+| --- | --- | --- | --- | --- |
+| none | default | `"Name"` | `{"Name": payload}` | `oneOf` |
+| `tag` | `#[serde(tag = "kind")]` | `{"kind": "Name"}` | `{"kind": "Name", ...payload fields}` | `oneOf` |
+| `tag` + `content` | `#[serde(tag = "t", content = "c")]` | `{"t": "Name"}` | `{"t": "Name", "c": payload}` | `oneOf` |
+| `untagged` | `#[serde(untagged)]` | `null` | the bare payload | `anyOf` |
+
+An internally tagged payload is one object holding the tag and the payload's fields; a payload with no fields to list, such as a map, only requires the tag.
+Untagged members can overlap, so they are advertised as `anyOf`, and a value is matched against them in order, the first match winning, as serde does.
+A value in another representation, such as `{"Text": {...}}` where the ABI says `tag`, is refused before the node is called.
 
 ## CRDT collection wrappers
 

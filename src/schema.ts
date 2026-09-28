@@ -75,7 +75,7 @@ export function schemaBuilder(m: AbiManifest, mode: SchemaMode = 'input') {
     return type(def);
   }
 
-  /** Members that can never both match advertise as oneOf rather than zod's default anyOf. */
+  /** Mutually exclusive members advertise as oneOf; untagged members may overlap and serde takes the first match, so anyOf. */
   function union(members: z.ZodType[], isExclusive: boolean): z.ZodType {
     if (members.length === 1) return members[0];
     const schema = z.union(members as [z.ZodType, z.ZodType, ...z.ZodType[]]);
@@ -85,8 +85,12 @@ export function schemaBuilder(m: AbiManifest, mode: SchemaMode = 'input') {
 
   const documented = (schema: z.ZodType, v: AbiVariant) => (v.doc ? note(schema, { description: v.doc }) : schema);
 
-  /** serde externally-tagged: unit variants ride as bare names, payload variants as {Name: payload}; documented units become oneOf consts. */
+  /** Each serde tagging mode, by the ABI's wire rules; absent keys mean externally tagged. */
   function variant(def: AbiVariantDef): z.ZodType {
+    const { tag, content } = def;
+    if (def.untagged) return union(def.variants.map((v) => documented(v.payload ? type(v.payload) : z.null(), v)), false);
+    if (tag) return union(def.variants.map((v) => documented(withTag(tag, content, v), v)), true);
+    // Externally tagged: unit variants ride as bare names, payload variants as {Name: payload}; documented units become consts.
     const units = def.variants.filter((v) => !v.payload);
     const plainEnum = units.length > 0 && !units.some((v) => v.doc);
     const unitSchemas = plainEnum ? [z.enum(units.map((v) => v.name) as [string, ...string[]])] : units.map((v) => documented(z.literal(v.name), v));
@@ -94,7 +98,24 @@ export function schemaBuilder(m: AbiManifest, mode: SchemaMode = 'input') {
     return union([...unitSchemas, ...tagged], true);
   }
 
-  function record(fields: AbiField[]): z.ZodType {
+  /**
+   * Adjacent: {tag, content: payload}. Internal: the payload's fields beside the tag, as one object, since an
+   * allOf of two closed objects admits nothing in output mode; a payload with no fields to list (a map) stays open.
+   */
+  function withTag(tag: string, content: string | undefined, v: AbiVariant): z.ZodType {
+    const name = { [tag]: z.literal(v.name) };
+    if (!v.payload) return z.object(name);
+    if (content) return z.object({ ...name, [content]: type(v.payload) });
+    const fields = recordFields(v.payload);
+    return fields ? z.object({ ...name, ...record(fields).shape }) : z.looseObject(name);
+  }
+
+  function recordFields(t: AbiTypeRef): AbiField[] | undefined {
+    const def = '$ref' in t ? m.types?.[t.$ref] : t;
+    return def?.kind === 'record' && !def.inner_type ? def.fields : undefined;
+  }
+
+  function record(fields: AbiField[]) {
     const shape: Record<string, z.ZodType> = {};
     for (const f of fields) {
       const base = type(f.type);

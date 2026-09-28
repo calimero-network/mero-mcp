@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { AbiManifest } from '@calimero-network/abi-codegen';
-import { inputShapeForMethod, methodReference, renderMethodSignature, schemaBuilder } from './schema.ts';
+import { inputShapeForMethod, methodReference, renderMethodSignature, schemaBuilder, type SchemaMode } from './schema.ts';
 import { z } from 'zod';
 
 function deepFreeze<T>(v: T): T {
@@ -363,4 +363,73 @@ test('methodReference indents every line of a multi-line parameter doc, not just
     intent: 'mutating',
   } as never;
   assert.equal(methodReference(set), '[mut] set_blocks(now: u64) -> u32\n  now: Unix millis.\n    Must be monotonic.');
+});
+
+const tagged = (keys: Record<string, unknown>, textPayload: unknown = { $ref: 'TextData' }) =>
+  docManifest({
+    Shape: { kind: 'variant', ...keys, variants: [{ name: 'Empty' }, { name: 'Text', payload: textPayload }] },
+    TextData: { kind: 'record', fields: [{ name: 'size', type: { kind: 'u32' } }] },
+  });
+
+const accepts = (m: AbiManifest, value: unknown) => schemaBuilder(m).type({ $ref: 'Shape' }).safeParse(value).success;
+
+function shapeDef(m: AbiManifest, mode: SchemaMode = 'input') {
+  const b = schemaBuilder(m, mode);
+  return (b.jsonSchema(z.object({ s: b.type({ $ref: 'Shape' }) })) as { $defs: { Shape: { anyOf?: unknown[]; oneOf?: unknown[] } } }).$defs.Shape;
+}
+
+test('internally tagged (tag): {tag: Name} for a unit variant, the payload fields beside the tag otherwise', () => {
+  const m = tagged({ tag: 'kind' });
+  assert.equal(accepts(m, { kind: 'Empty' }), true);
+  assert.deepEqual(schemaBuilder(m).type({ $ref: 'Shape' }).parse({ kind: 'Text', size: 3 }), { kind: 'Text', size: 3 });
+  assert.equal(accepts(m, { kind: 'Text', size: 'big' }), false);
+  assert.equal(accepts(m, 'Empty'), false);
+  assert.equal(accepts(m, { Text: { size: 3 } }), false);
+  assert.equal(shapeDef(m).oneOf?.length, 2);
+});
+
+test('an internally tagged payload advertises one object, so the output schema still admits what the node returns', () => {
+  assert.deepEqual(shapeDef(tagged({ tag: 'kind' }), 'output').oneOf?.[1], {
+    type: 'object',
+    properties: { kind: { type: 'string', const: 'Text' }, size: { type: 'integer', minimum: 0, maximum: 9007199254740991 } },
+    required: ['kind', 'size'],
+    additionalProperties: false,
+  });
+});
+
+test('an internally tagged payload with no fields to list, such as a map, requires the tag and keeps every entry', () => {
+  const m = tagged({ tag: 'kind' }, { kind: 'map', key: { kind: 'string' }, value: { kind: 'u32' } });
+  assert.deepEqual(schemaBuilder(m).type({ $ref: 'Shape' }).parse({ kind: 'Text', a: 3 }), { kind: 'Text', a: 3 });
+  assert.equal(accepts(m, { a: 3 }), false);
+});
+
+test('adjacently tagged (tag + content): {tag: Name, content: payload}', () => {
+  const m = tagged({ tag: 't', content: 'c' });
+  assert.equal(accepts(m, { t: 'Empty' }), true);
+  assert.equal(accepts(m, { t: 'Text', c: { size: 3 } }), true);
+  assert.equal(accepts(m, { t: 'Text', size: 3 }), false);
+  assert.equal(shapeDef(m).oneOf?.length, 2);
+});
+
+test('untagged: null for a unit variant, the bare payload otherwise, advertised as anyOf because members may overlap', () => {
+  const m = tagged({ untagged: true });
+  assert.equal(accepts(m, null), true);
+  assert.equal(accepts(m, { size: 3 }), true);
+  assert.equal(accepts(m, 'Empty'), false);
+  assert.equal(shapeDef(m).oneOf, undefined);
+  assert.equal(shapeDef(m).anyOf?.length, 2);
+});
+
+test('untagged members that overlap resolve to the first that matches, as serde does', () => {
+  const m = docManifest({
+    Step: {
+      kind: 'variant',
+      untagged: true,
+      variants: [
+        { name: 'Retain', payload: { kind: 'record', fields: [{ name: 'n', type: { kind: 'u32' } }] } },
+        { name: 'Both', payload: { kind: 'record', fields: [{ name: 'n', type: { kind: 'u32' } }, { name: 's', type: { kind: 'string' } }] } },
+      ],
+    },
+  });
+  assert.deepEqual(schemaBuilder(m).type({ $ref: 'Step' }).parse({ n: 1, s: 'x' }), { n: 1 });
 });
