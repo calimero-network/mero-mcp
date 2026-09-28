@@ -41,7 +41,7 @@ export function schemaBuilder(m: AbiManifest, mode: SchemaMode = 'input') {
     if (!def) return z.unknown();
     const schema = note(
       z.lazy(() => fromDef(def)),
-      { id: name, ...(def.doc ? { description: def.doc } : {}) },
+      { id: name, ...('doc' in def && def.doc ? { description: def.doc } : {}) },
     );
     named.set(name, schema);
     return schema;
