@@ -242,7 +242,7 @@ Show an application's methods and guide without choosing a context. Read-only.
 | `app` | string | Id, package name, or trailing segment |
 | `service` | string, optional | For an app bundling several services |
 
-Returns, as JSON: `application`, `package`, `appVersion`, resolved `service`, `contextServices`, every method as a signature, and an `app_handle` with no context.
+Returns, as JSON: `application`, `package`, `appVersion`, resolved `service`, `contextServices`, every method as a signature (with its doc and documented parameters when the ABI carries them; see [ABI mapping](/reference/abi-mapping/#docs-and-hints)), and an `app_handle` with no context.
 Then the guide as an embedded `text/markdown` resource after an author label, or the line `This app ships no guide.`
 
 Omitting `service` on a multi-service app returns an error naming the available services.
@@ -290,8 +290,9 @@ A name never repeats a fixed tool's name or another app's: a clash adds `_` plus
 
 plus the method's declared parameters, typed from the ABI ([ABI mapping](/reference/abi-mapping/)).
 
-Each tool carries a `title` (`Set blocks (Mero Blocks)`), the method's signature as its `description`, an `outputSchema` when the method returns something, and explicit `readOnlyHint`, `destructiveHint`, `idempotentHint` and `openWorldHint: false` annotations.
-`readOnlyHint` follows the method's intent; the ABI cannot mark a method destructive or idempotent yet, so `destructiveHint` is always `false` and `idempotentHint` equals `readOnlyHint`.
+Each tool carries a `title` (`Set blocks (Mero Blocks)`), a `description` (the method's ABI `doc`, when it has one, above its signature), an `outputSchema` when the method returns something (described by the ABI's `returns_doc`, when present), and explicit `readOnlyHint`, `destructiveHint`, `idempotentHint` and `openWorldHint: false` annotations.
+`readOnlyHint` follows the method's intent; `destructiveHint` and `idempotentHint` follow the ABI's `destructive` and `idempotent` flags, and `idempotentHint` is also `true` for every read-only method.
+A tool's description is the method's doc followed by its signature, or the signature alone; see [ABI mapping](/reference/abi-mapping/#docs-and-hints).
 It also carries `icons` when the app's `metadata.icon` is a URL, and `_meta` with the `package`, `appVersion`, `signerId` and method `intent`.
 Results carry `structuredContent` next to the JSON text.
 A contract call that fails returns `isError: true` with the node's message.

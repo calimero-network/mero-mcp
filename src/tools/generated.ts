@@ -7,7 +7,7 @@ import type { Catalog } from '../catalog.ts';
 import { errorResult } from '../errors.ts';
 import { advertised, type Gate } from '../gate.ts';
 import type { NodeSession } from '../node.ts';
-import { parseArgs, renderMethodSignature, schemaBuilder } from '../schema.ts';
+import { methodDescription, parseArgs, schemaBuilder } from '../schema.ts';
 
 const MAX_SLUG = 20;
 const MAX_NAME = 49; // 64 minus Claude Code's 15-char `mcp__mero-mcp__` prefix
@@ -83,6 +83,13 @@ export function toolNamesByApp(apps: readonly ResolvedApp[], reserved: ReadonlyS
   );
 }
 
+/** returns_doc describes the result; a type hint such as bytes stays beside it, a named type's own doc does not. */
+function documentReturn(json: Record<string, unknown>, method: AbiMethod): Record<string, unknown> {
+  if (!method.returns_doc) return json;
+  const hint = method.returns && !('$ref' in method.returns) ? json.description : undefined;
+  return { ...json, description: hint ? `${method.returns_doc} (${hint})` : method.returns_doc };
+}
+
 function toolConfig(app: ResolvedApp, method: AbiMethod) {
   const input = schemaBuilder(app.manifest, 'input');
   const output = schemaBuilder(app.manifest, 'output');
@@ -91,13 +98,17 @@ function toolConfig(app: ResolvedApp, method: AbiMethod) {
   const returns = returned && (method.returns_nullable ? returned.nullable() : returned);
   return {
     title: toolTitle(app, method.name),
-    description: renderMethodSignature(method),
+    description: methodDescription(method),
     inputSchema: advertised(
       input.jsonSchema(z.object({ [HANDLE_PARAM]: input.describe(z.string(), APP_HANDLE_DOC), ...input.params(method) })),
     ),
-    ...(returns ? { outputSchema: advertised(output.jsonSchema(returns)) } : {}),
-    // destructiveHint stays false until the ABI can say otherwise; every hint is sent explicitly.
-    annotations: { readOnlyHint: readOnly, destructiveHint: false, idempotentHint: readOnly, openWorldHint: false },
+    ...(returns ? { outputSchema: advertised(documentReturn(output.jsonSchema(returns), method)) } : {}),
+    annotations: {
+      readOnlyHint: readOnly,
+      destructiveHint: method.destructive === true,
+      idempotentHint: method.idempotent === true || readOnly,
+      openWorldHint: false,
+    },
     ...(app.icon && URL.canParse(app.icon) ? { icons: [{ src: app.icon }] } : {}),
     _meta: {
       package: packageKey(app),

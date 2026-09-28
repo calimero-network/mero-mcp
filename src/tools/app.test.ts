@@ -433,6 +433,45 @@ for (const era of ['2025-11-25', '2026-07-28'] as const) {
       await s.close();
     }
   });
+
+  test(`${era}: a returns_doc on an object return keeps outputSchema.type: object and does not add an era wrap`, async () => {
+    const documented: FakeApp = {
+      ...plain(),
+      abi: manifest(
+        [
+          method('add', [{ name: 'body', type: { kind: 'string' } }], { returns: { $ref: 'Note' }, returns_doc: 'The saved note.' }),
+          method('count', [], { intent: 'read_only', returns: { kind: 'u32' }, returns_doc: 'How many notes exist.' }),
+        ],
+        { Note: { kind: 'record', fields: [{ name: 'id', type: { kind: 'u32' } }] } },
+      ),
+    };
+    const s = await setup([documented], era, { execute: (p) => (p.method === 'count' ? 3 : { id: 7 }) });
+    try {
+      const tools = (await s.client.listTools()).tools;
+      const add = tools.find((t) => t.name === 'notes_add')!;
+      const count = tools.find((t) => t.name === 'notes_count')!;
+      const { app_handle } = await s.json('select_app', { app: 'notes' });
+      const added = await s.call('notes_add', { app_handle, body: 'x' });
+      const counted = await s.call('notes_count', { app_handle });
+      // The documented named-record return stays type: object at the root, era-independent: never wrapped.
+      assert.equal(add.outputSchema?.type, 'object');
+      assert.equal((add.outputSchema as { description?: string }).description, 'The saved note.');
+      assert.deepEqual(added.structuredContent, { id: 7 });
+      if (era === '2025-11-25') {
+        assert.deepEqual(count.outputSchema, {
+          type: 'object',
+          properties: { result: { type: 'integer', minimum: 0, maximum: 9007199254740991, description: 'How many notes exist.' } },
+          required: ['result'],
+        });
+        assert.deepEqual(counted.structuredContent, { result: 3 });
+      } else {
+        assert.deepEqual(count.outputSchema, { type: 'integer', minimum: 0, maximum: 9007199254740991, description: 'How many notes exist.' });
+        assert.equal(counted.structuredContent, 3);
+      }
+    } finally {
+      await s.close();
+    }
+  });
 }
 
 test('a missing handle is refused with the guide even when the arguments are also wrong', async () => {
@@ -852,3 +891,53 @@ for (const entry of ['select_app', 'describe_app', 'call'] as const) {
     }
   });
 }
+
+test("a returns_doc on a bytes return keeps the bytes hint beside it, and on a named type replaces the type's own doc", async () => {
+  const documented: FakeApp = {
+    ...kv(),
+    abi: manifest(
+      [
+        method('digest', [], { intent: 'read_only', returns: { kind: 'bytes' }, returns_doc: 'The digest.' }),
+        method('status', [], { intent: 'read_only', returns: { $ref: 'Status' }, returns_doc: 'The current status.' }),
+      ],
+      { Status: { kind: 'record', doc: 'A status.', fields: [{ name: 'ok', type: { kind: 'bool' } }] } },
+    ),
+  };
+  const s = await setup([documented], '2026-07-28');
+  try {
+    const tools = (await s.client.listTools()).tools;
+    const described = (name: string) => (tools.find((t) => t.name === name)!.outputSchema as { description?: string }).description;
+    assert.equal(described('kv_store_digest'), 'The digest. (bytes: a byte array)');
+    assert.equal(described('kv_store_status'), 'The current status.');
+  } finally {
+    await s.close();
+  }
+});
+
+test('ABI docs and flags reach the tool: description, parameter doc, returns_doc, destructive and idempotent hints', async () => {
+  const documented: FakeApp = {
+    ...kv(),
+    abi: manifest([
+      method('clear', [], { doc: 'Delete every key.', destructive: true, idempotent: true }),
+      method('get', [{ name: 'key', type: { kind: 'string' }, doc: 'Up to 64 bytes.' }], {
+        intent: 'read_only',
+        returns: { kind: 'string' },
+        returns_doc: 'The stored value.',
+      }),
+    ]),
+  };
+  const s = await setup([documented], '2026-07-28');
+  try {
+    const tools = (await s.client.listTools()).tools;
+    const clear = tools.find((t) => t.name === 'kv_store_clear')!;
+    const get = tools.find((t) => t.name === 'kv_store_get')!;
+    assert.equal(clear.description, 'Delete every key.\n\n[mut] clear() -> unit');
+    assert.deepEqual(clear.annotations, { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false });
+    assert.equal((get.inputSchema.properties as Record<string, { description?: string }>).key.description, 'Up to 64 bytes.');
+    assert.deepEqual(get.outputSchema, { type: 'string', description: 'The stored value.' });
+    const described = await s.json('describe_app', { app: 'kv-store' });
+    assert.deepEqual(described.methods, ['Delete every key.\n\n[mut] clear() -> unit', '[view] get(key: string) -> string\n  key: Up to 64 bytes.']);
+  } finally {
+    await s.close();
+  }
+});

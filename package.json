@@ -32,7 +32,7 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@calimero-network/abi-codegen": "^2.0.1",
+    "@calimero-network/abi-codegen": "^2.3.0",
     "@calimero-network/mero-js": "^19.18.0",
     "@modelcontextprotocol/server": "^2.1.0",
     "zod": "^4.4.3"

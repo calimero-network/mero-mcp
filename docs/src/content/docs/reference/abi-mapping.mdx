@@ -9,7 +9,8 @@ import { Aside } from '@astrojs/starlight/components';
 
 An application's ABI manifest is turned into a zod schema per method, which the MCP
 SDK advertises as JSON Schema. That schema is what stops an agent guessing at argument
-shapes — a wrong type fails locally, before anything reaches the node.
+shapes - a wrong type fails locally, before anything reaches the node.
+The author's `///` doc comments, when the ABI carries them, become the tool, parameter, type and output descriptions.
 
 ## Tool naming
 
@@ -85,8 +86,8 @@ representation:
 - **Unit variants** ride as bare names — `"Pending"`.
 - **Payload variants** ride as a single-key object — `{"Approved": {"by": "…"}}`.
 
-A variant with no payloads anywhere becomes a plain string `enum`.
-A mix becomes a `oneOf` of the string enum and one object schema per payload variant.
+A variant with no payloads anywhere becomes a plain string `enum`, unless a unit variant carries a doc, in which case it becomes a `oneOf` of `{ const, description }` entries instead (see [Docs and hints](#docs-and-hints)).
+A mix becomes a `oneOf` of the unit variants (as an `enum` or as documented consts) and one object schema per payload variant.
 
 ## CRDT collection wrappers
 
@@ -118,7 +119,7 @@ Outgoing arguments are built by filtering the input down to the method's *declar
 
 ## Method signatures
 
-`describe_app` and `select_app` render each method as a signature, and it is also the tool's description:
+`describe_app` and `select_app` render each method as a signature, which is a documented method's tool description too, below its doc (see [Docs and hints](#docs-and-hints)):
 
 ```
 [view] get(key: string) -> string | null
@@ -138,3 +139,25 @@ wrappers unwrapped to their inner type.
 
 A method that returns something also gets an `outputSchema` derived from its return type, where `bytes` is a number array, since that is what the node returns.
 For 2025-11-25 clients the SDK wraps a return that is not an object as `{ result }`; 2026-07-28 clients get the return schema itself.
+
+## Docs and hints
+
+An app's `///` doc comments travel in its ABI as optional `doc` fields.
+A documented method's tool description is the doc, a blank line, then the signature:
+
+```
+Apply a batch of block edits.
+
+# Errors
+Fails past 512 edits.
+
+[mut] set_blocks(edits: Edit[], now: u64) -> u32
+```
+
+A documented parameter or record field carries its doc as the JSON Schema `description`; on a `bytes` value the doc comes first and the bytes hint follows in parentheses.
+A documented named type carries its doc on its `$defs` entry, and documented enum variants become `oneOf` entries of `{ const, description }`.
+A method's `# Returns` section becomes the `outputSchema` description.
+`#[app::destructive]` and `#[app::idempotent]` set `destructiveHint` and `idempotentHint`; a read-only method is always idempotent.
+`describe_app` lists each method's description with one indented `name: doc` line per documented parameter.
+
+With no docs in the ABI (an app built before docs existed, or a merod that drops them), descriptions are the bare signatures and parameters carry no description.

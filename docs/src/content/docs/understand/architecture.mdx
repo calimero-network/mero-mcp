@@ -147,7 +147,7 @@ For a generated tool:
 3. `rpc.execute({ contextId, method, argsJson })`, with the context from the handle.
 4. Fold the result into the JSON text plus, when the method returns something, `structuredContent`; or fold the throw into `isError: true`.
 
-Read-only ABI methods carry `readOnlyHint`; destructive core tools carry
+Read-only ABI methods carry `readOnlyHint`; core tools and ABI methods the author marked `destructive` carry
 `destructiveHint`, so clients that gate on those annotations can.
 
 ## Error translation

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { AbiField, AbiManifest, AbiMethod, AbiTypeDef, AbiTypeRef, AbiVariantDef } from '@calimero-network/abi-codegen';
+import type { AbiField, AbiManifest, AbiMethod, AbiTypeDef, AbiTypeRef, AbiVariant, AbiVariantDef } from '@calimero-network/abi-codegen';
 
 const SCALARS: Record<string, () => z.ZodType> = {
   bool: () => z.boolean(),
@@ -41,7 +41,7 @@ export function schemaBuilder(m: AbiManifest, mode: SchemaMode = 'input') {
     if (!def) return z.unknown();
     const schema = note(
       z.lazy(() => fromDef(def)),
-      { id: name },
+      { id: name, ...('doc' in def && def.doc ? { description: def.doc } : {}) },
     );
     named.set(name, schema);
     return schema;
@@ -83,11 +83,14 @@ export function schemaBuilder(m: AbiManifest, mode: SchemaMode = 'input') {
     return schema;
   }
 
-  /** serde externally-tagged: unit variants ride as bare names, payload variants as {Name: payload}. */
+  const documented = (schema: z.ZodType, v: AbiVariant) => (v.doc ? note(schema, { description: v.doc }) : schema);
+
+  /** serde externally-tagged: unit variants ride as bare names, payload variants as {Name: payload}; documented units become oneOf consts. */
   function variant(def: AbiVariantDef): z.ZodType {
-    const units = def.variants.filter((v) => !v.payload).map((v) => v.name);
-    const unitSchemas = units.length ? [z.enum(units as [string, ...string[]])] : [];
-    const tagged = def.variants.filter((v) => v.payload).map((v) => z.object({ [v.name]: type(v.payload!) }).strict());
+    const units = def.variants.filter((v) => !v.payload);
+    const plainEnum = units.length > 0 && !units.some((v) => v.doc);
+    const unitSchemas = plainEnum ? [z.enum(units.map((v) => v.name) as [string, ...string[]])] : units.map((v) => documented(z.literal(v.name), v));
+    const tagged = def.variants.filter((v) => v.payload).map((v) => documented(z.object({ [v.name]: type(v.payload!) }).strict(), v));
     return union([...unitSchemas, ...tagged], true);
   }
 
@@ -95,7 +98,7 @@ export function schemaBuilder(m: AbiManifest, mode: SchemaMode = 'input') {
     const shape: Record<string, z.ZodType> = {};
     for (const f of fields) {
       const base = type(f.type);
-      shape[f.name] = f.nullable ? base.nullable() : base;
+      shape[f.name] = withDoc(f.nullable ? base.nullable() : base, f.doc, base);
     }
     return z.object(shape);
   }
@@ -116,11 +119,19 @@ export function schemaBuilder(m: AbiManifest, mode: SchemaMode = 'input') {
     return note(z.union([hex, array]), { description: `bytes: a hex string or ${label}` });
   }
 
+  /** A doc replaces a description, so a type-level hint (bytes) is carried beside it. */
+  function withDoc(schema: z.ZodType, doc: string | undefined, base: z.ZodType): z.ZodType {
+    if (!doc) return schema;
+    const meta = registry.get(base);
+    const hint = meta?.id ? undefined : meta?.description;
+    return note(schema === base ? schema.clone() : schema, { description: hint ? `${doc} (${hint})` : doc });
+  }
+
   function params(method: AbiMethod): Record<string, z.ZodType> {
     const shape: Record<string, z.ZodType> = {};
     for (const p of method.params) {
       const base = type(p.type);
-      shape[p.name] = p.nullable ? base.nullable().optional() : base;
+      shape[p.name] = withDoc(p.nullable ? base.nullable().optional() : base, p.doc, base);
     }
     return shape;
   }
@@ -152,6 +163,20 @@ export function schemaBuilder(m: AbiManifest, mode: SchemaMode = 'input') {
 export const inputShapeForMethod = (method: AbiMethod, m: AbiManifest): Record<string, z.ZodType> => schemaBuilder(m).params(method);
 
 export const parseArgs = (method: AbiMethod, m: AbiManifest, args: unknown) => z.object(inputShapeForMethod(method, m)).parse(args);
+
+/** The tool description: the author's doc, when the ABI carries one, above the signature. */
+export function methodDescription(method: AbiMethod): string {
+  const signature = renderMethodSignature(method);
+  return method.doc ? `${method.doc}\n\n${signature}` : signature;
+}
+
+/** describe_app registers no schema to carry parameter docs, so they follow the description. */
+export function methodReference(method: AbiMethod): string {
+  const params = method.params
+    .filter((p) => p.doc)
+    .map((p) => `  ${p.name}: ${p.doc!.replace(/\n/g, '\n    ')}`);
+  return [methodDescription(method), ...params].join('\n');
+}
 
 export function renderMethodSignature(method: AbiMethod): string {
   const kind = method.intent === 'read_only' ? 'view' : 'mut';
