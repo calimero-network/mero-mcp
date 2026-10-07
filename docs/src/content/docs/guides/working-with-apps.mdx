@@ -55,7 +55,7 @@ Each guide is also a resource at `calimero://apps/<application id>/<version>/gui
 
 A call without a valid handle runs nothing.
 It returns the guide (when the app has one) and `Call select_app for <package> and retry with the returned app_handle.`
-A handle stops being valid when the app is upgraded, when its guide changes, when its context is gone, or when the server restarts; `select_app` issues a fresh one.
+A handle stops being valid when the app is upgraded, when its guide changes, when its context is gone, or when the server's handle key changes; `select_app` issues a fresh one.
 A handle from `describe_app` has no context, and app tools refuse it with a request to select one.
 Apps without a guide still need a handle.
 

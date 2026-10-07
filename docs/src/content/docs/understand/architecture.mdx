@@ -134,7 +134,8 @@ An `app_handle` is `base64url(payload) + "." + base64url(HMAC-SHA256(key, payloa
 | `c` | context id, or `null` for a `describe_app` handle |
 | `s` | service name, or `null` |
 
-The key is 32 random bytes generated at process start and never persisted, so a restart invalidates every handle.
+The key is 32 random bytes kept in `handle.key` in the state directory, owner-only beside the token files, so handles survive a server restart.
+Deleting the file rotates the key, and every handle issued before goes stale.
 A handle is checked against the app as installed at call time, not against the catalog the tool was built from, so an upgrade makes old handles stale at once.
 The checks run in order: the app as installed now, then the handle, then the arguments, then execution.
 A missing handle therefore gets the refusal with the guide even when the arguments are wrong too.

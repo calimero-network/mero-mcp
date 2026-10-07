@@ -25,7 +25,7 @@ import {
   sleep,
 } from './e2e-lib.mjs';
 
-const PLANNED = 8;
+const PLANNED = 9;
 
 /** Client keys are filed under the `key_id` of the tokens they mint. */
 const clientIdOf = (accessToken) => JSON.parse(Buffer.from(accessToken.split('.')[1], 'base64url')).key_id;
@@ -42,6 +42,7 @@ const CREDENTIAL_ENV = [
 ];
 
 const HANDOFF = 'agent.json';
+const HANDLE_KEY = 'handle.key';
 
 function serverEnv(stateDir) {
   const env = { ...process.env, CALIMERO_MCP_STATE_DIR: stateDir, CALIMERO_NODE_HOME: mkdtempSync(join(tmpdir(), 'mero-mcp-nodehome-')) };
@@ -127,7 +128,7 @@ async function main() {
     });
 
     await checks.check('the server persisted its own token file beside the handoff', () => {
-      const own = readdirSync(stateDir).filter((f) => f !== HANDOFF);
+      const own = readdirSync(stateDir).filter((f) => f !== HANDOFF && f !== HANDLE_KEY);
       assert(own.length > 0, `the server stored no tokens of its own in ${stateDir}`);
       for (const f of own) assert(/^tokens-[0-9a-f]{16}\.json$/.test(f), `unexpected file in the state dir: ${f}`);
       return own.join(', ');
@@ -141,6 +142,29 @@ async function main() {
       // The handoff is no newer than what the store holds, so this run reused its own persisted pair.
       assertEqual(handoffDigest(), handoffBefore, 'the second run rewrote the handoff file');
       return `${second.key} = ${seen}, on the tokens the first run persisted`;
+    });
+
+    // An agent harness restarts the server whenever it reconnects, and the agent keeps the handles it holds.
+    await checks.check('a handle from the previous server process still works after a restart', async () => {
+      const issuing = new McpClient(launcher, serverEnv(stateDir));
+      let app_handle;
+      try {
+        await issuing.initialize();
+        ({ app_handle } = await issuing.call('select_app', { app: 'kv-store' }));
+      } finally {
+        issuing.close();
+      }
+      const restarted = new McpClient(launcher, serverEnv(stateDir));
+      try {
+        await restarted.initialize();
+        const keys = ['restart-0', 'restart-1', 'restart-2'];
+        await Promise.all(keys.map((key) => restarted.call('kv_store_set', { app_handle, key, value: 'after-restart' })));
+        const seen = await Promise.all(keys.map((key) => admin.execute(contextId, 'get', { key })));
+        assertEqual(seen, keys.map(() => 'after-restart'), 'the restarted server did not write what the old handle asked for');
+        return `${keys.length} writes on a handle the previous process issued`;
+      } finally {
+        restarted.close();
+      }
     });
 
     // The bug this guards: the store being non-empty is not the same as the store being current.
