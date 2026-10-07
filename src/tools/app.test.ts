@@ -1260,6 +1260,7 @@ test('a call by handle or by context on a cached app reads only the context list
   }
   try {
     const { app_handle } = await s.json('select_app', { app: 'kv-store' });
+    assert.equal(counts.getContextsForApplication, 1);
     for (const key of Object.keys(counts)) counts[key] = 0;
     await s.call('call', { app_handle, method: 'set', args: { key: 'a' } });
     await s.call('call', { app: 'kv-store', context: ctx('kvctx'), method: 'set', args: { key: 'b' } });

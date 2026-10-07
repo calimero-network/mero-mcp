@@ -85,8 +85,8 @@ export function registerAppTools(
     return [{ type: 'text' as const, text: `This app's guide was shown earlier this session; read ${uri} if it is not in your context.` }];
   }
 
-  async function summarize(app: ResolvedApp, contextId: string | null) {
-    const contexts = await gate.contextsOf(app.id);
+  async function summarize(app: ResolvedApp, contextId: string | null, known?: Awaited<ReturnType<typeof gate.contextsOf>>) {
+    const contexts = known ?? (await gate.contextsOf(app.id));
     const contextServices = [...new Set(contexts.map((c) => c.serviceName).filter((s): s is string => !!s))];
     return {
       application: app.id,
@@ -181,11 +181,11 @@ export function registerAppTools(
     },
     async ({ app, service, context, verbose }) => {
       try {
-        const { resolved, contextId, ids, entry } = await selectContext(app, service, context);
+        const { resolved, contexts, contextId, ids, entry } = await selectContext(app, service, context);
         const tools = entry ? [...toolNamesByApp(catalog.apps(), reserved).get(entry)!.values()] : [];
         return withBlocks(
           {
-            ...(await summarize(resolved, contextId)),
+            ...(await summarize(resolved, contextId, contexts)),
             ...(verbose ? { methods: resolved.manifest.methods.map(methodReference) } : {}),
             tools,
             toolsNote: TOOLS_NOTE,
