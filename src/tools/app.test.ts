@@ -1249,7 +1249,7 @@ test('call_many refuses an empty or oversized batch before running anything', as
   }
 });
 
-test('a call by handle or by context on a cached app reads only the context list from the node', async () => {
+test('a call by handle reads only the context list, and by context adds one listing read for the name', async () => {
   const s = await setup([kv(), drive()]);
   const admin = s.session.mero.admin as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>;
   const counts: Record<string, number> = {};
@@ -1265,8 +1265,26 @@ test('a call by handle or by context on a cached app reads only the context list
     await s.call('call', { app_handle, method: 'set', args: { key: 'a' } });
     await s.call('call', { app: 'kv-store', context: ctx('kvctx'), method: 'set', args: { key: 'b' } });
     await s.call('call', { app: 'mero-drive', context: ctx('regctx'), method: 'register_folder', args: { name: 'f' } });
-    assert.deepEqual(counts, { listApplications: 0, getApplicationAbi: 0, getContextsForApplication: 3, lookupContextAlias: 0 }, JSON.stringify(counts));
+    assert.deepEqual(counts, { listApplications: 2, getApplicationAbi: 0, getContextsForApplication: 3, lookupContextAlias: 0 }, JSON.stringify(counts));
     assert.equal(s.executed.length, 3);
+  } finally {
+    await s.close();
+  }
+});
+
+test('call by a name the node holds ambiguous refuses like select_app, even when the catalog skipped one of the apps', async (t) => {
+  t.mock.method(console, 'error', () => {});
+  const a: FakeApp = { ...plain(), id: 'a-id', package: 'org.x.shared' };
+  const b: FakeApp = { ...plain(), id: 'b-id', package: 'org.y.shared', abi: undefined };
+  const s = await setup([a, b]);
+  try {
+    const viaSelect = await s.call('select_app', { app: 'shared' });
+    assert.equal(viaSelect.isError, true);
+    assert.match(viaSelect.content[0].text!, /ambiguous/);
+    const viaCall = await s.call('call', { app: 'shared', context: ctx('notesctx'), method: 'add', args: { body: 'x' } });
+    assert.equal(viaCall.isError, true);
+    assert.equal(viaCall.content[0].text, viaSelect.content[0].text);
+    assert.deepEqual(s.executed, []);
   } finally {
     await s.close();
   }

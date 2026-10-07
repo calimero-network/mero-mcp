@@ -122,7 +122,7 @@ export function registerAppTools(
 
   /** The app a context binds and that context: select_app's resolution, so `call` by context refuses what it refuses. */
   async function selectContext(app: string, service?: string, context?: string, cached = false) {
-    const { id } = catalog.identify(app) ?? (await loader.identify(app));
+    const { id } = await loader.identify(app);
     const contexts = await gate.contextsOf(id);
     const ids = contexts.map((c) => c.id);
     const contextId = await gate.chooseContext(app, ids, context);
@@ -210,7 +210,7 @@ export function registerAppTools(
       return 'refusal' in admitted ? admitted : { resolved, contextId: admitted.contextId };
     }
     // With a valid handle `app` only matters when it names another app; a name that resolves to nothing is ignored.
-    const named = typeof app === 'string' ? (catalog.identify(app) ?? (await loader.identify(app).catch(() => undefined))) : undefined;
+    const named = typeof app === 'string' ? (await loader.identify(app).catch(() => undefined)) : undefined;
     if (named && named.id !== payload.a) return { refusal: await refuseWithout(app) };
     // The catalog is at most one poll old; only an install or uninstall through this server refreshes it sooner.
     const hit = catalog.find(payload.a, payload.s ?? undefined);

@@ -1,4 +1,4 @@
-import { lastSegment, type AbiLoader, type ResolvedApp } from './abi.ts';
+import type { AbiLoader, ResolvedApp } from './abi.ts';
 import { guideHash } from './handle.ts';
 
 // Matches the tools/list ttlMs, so a client that caches a list for its full lifetime is never staler than a poll.
@@ -45,31 +45,15 @@ export function createCatalog(loader: AbiLoader) {
     return run;
   }
 
-  /** The cached units of the one app `nameOrId` names, by the loader's tiers; empty when it is unknown or ambiguous. */
-  function match(nameOrId: string): ResolvedApp[] {
-    const lower = nameOrId.toLowerCase();
-    const tiers = [
-      (a: ResolvedApp) => a.id === nameOrId,
-      (a: ResolvedApp) => a.package === nameOrId,
-      (a: ResolvedApp) => (a.package && lastSegment(a.package).toLowerCase() === lower) || a.name?.toLowerCase() === lower,
-    ];
-    const matches = tiers.map((tier) => apps.filter(tier)).find((m) => m.length) ?? [];
-    return new Set(matches.map((a) => a.id)).size === 1 ? matches : [];
-  }
-
-  /** The cached app and service `nameOrId` names, else undefined so the caller falls back to the loader and its errors. */
-  function find(nameOrId: string, service?: string): ResolvedApp | undefined {
-    const units = match(nameOrId).filter((a) => service === undefined || a.serviceName === service);
+  /** The cached app with this exact id, and service when given; else undefined so the caller falls back to the loader. */
+  function find(appId: string, service?: string): ResolvedApp | undefined {
+    const units = apps.filter((a) => a.id === appId && (service === undefined || a.serviceName === service));
     return units.length === 1 ? units[0] : undefined;
   }
-
-  /** The app `nameOrId` names, whichever of its services is cached. */
-  const identify = (nameOrId: string): ResolvedApp | undefined => match(nameOrId)[0];
 
   return {
     apps: () => apps,
     find,
-    identify,
     sync,
     subscribe(listener: () => void): () => void {
       listeners.add(listener);
