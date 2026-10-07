@@ -9,9 +9,6 @@ import type { NodeSession } from '../node.ts';
 import { methodReference, parseArgs } from '../schema.ts';
 import { toolNamesByApp } from './generated.ts';
 
-/** Core hex-encodes every 32-byte id (context, group, namespace), always 64 lowercase hex chars. */
-const CONTEXT_ID = /^[0-9a-f]{64}$/;
-
 const NO_GUIDE = 'This app ships no guide.';
 
 const NO_HANDLE = 'Call select_app for the application and retry with the returned app_handle.';
@@ -28,19 +25,21 @@ const SERVICE_UNKNOWN =
   "Take it from the app's bundle or its docs when create_context asks for one.";
 
 const CALL_INPUT = z.object({
-  app_handle: z.string().describe('The app_handle select_app returned; it names the application and the context.'),
+  app_handle: z
+    .string()
+    .optional()
+    .describe('The app_handle select_app returned; it names the application and the context. Omit it to pass app and context.'),
+  context: z.string().optional().describe('Context id or alias, with app, instead of an app_handle.'),
   method: z.string().describe('ABI method name.'),
   args: z.record(z.string(), z.unknown()).optional().describe('Method arguments, keyed by parameter name.'),
   app: z
     .string()
     .optional()
-    .describe('Application id, package name, or display name; a refusal shows its guide, and a handle for another app is refused.'),
+    .describe('Application id, package name, or display name; with context it replaces the handle, and a handle for another app is refused.'),
 });
 
 const noContexts = (label: string) =>
   `Application "${label}" has no contexts on this node. Create one in the Calimero desktop app, or use create_context.`;
-
-const contextsFor = (label: string, ids: string[]) => `Contexts for "${label}": ${ids.join(', ') || '(none)'}`;
 
 const severalContexts = (label: string, ids: string[]) =>
   `Application "${label}" has ${ids.length} contexts; pass context with one of: ${ids.join(', ')}`;
@@ -59,7 +58,6 @@ export function registerAppTools(
   gate: Gate,
   reserved: ReadonlySet<string>,
 ): void {
-  const aliases = new Map<string, string>();
   const guidesShown = new Set<string>();
 
   /** The guide in full, remembered as shown for this server session. */
@@ -92,38 +90,6 @@ export function registerAppTools(
     };
   }
 
-  /**
-   * Ids pass through untouched; anything else is an alias. Core answers a miss with a null value and
-   * rejects a string no alias could be, so both mean unresolvable - and only a hit is worth keeping.
-   */
-  async function resolveContextValue(value: string, label: string, candidates: string[]): Promise<string> {
-    if (CONTEXT_ID.test(value)) return value;
-    const cached = aliases.get(value);
-    if (cached) return cached;
-    let found: string | null | undefined;
-    try {
-      ({ value: found } = (await session.mero.admin.lookupContextAlias(value)) as { value?: string | null });
-    } catch {
-      found = null;
-    }
-    if (!found) {
-      // A candidate equal to the rejected value would tell the caller to retry the very thing just refused.
-      throw new Error(
-        `Context "${value}" not found: it is neither a context id nor an alias on this node. ${contextsFor(label, candidates.filter((c) => c !== value))}`,
-      );
-    }
-    aliases.set(value, found);
-    return found;
-  }
-
-  /** The chosen context, resolved from an id or alias and checked to belong to `label`, or the only context there is. */
-  async function chooseContext(label: string, ids: string[], context?: string): Promise<string | null> {
-    if (!context) return ids.length === 1 ? ids[0] : null;
-    const contextId = await resolveContextValue(context, label, ids);
-    if (!ids.includes(contextId)) throw new Error(`Context "${context}" does not belong to "${label}". ${contextsFor(label, ids)}`);
-    return contextId;
-  }
-
   /** The catalog entry `match` picks; a miss (node down at connect, or an install made elsewhere) syncs once first. */
   async function catalogued(match: (a: ResolvedApp) => boolean): Promise<ResolvedApp | undefined> {
     const hit = catalog.apps().find(match);
@@ -141,6 +107,18 @@ export function registerAppTools(
     if (typeof app !== 'string') return refusal(NO_HANDLE);
     const named = await loader.identify(app);
     return gate.refuse(named).refusal;
+  }
+
+  /** The app a context binds and that context: select_app's resolution, so `call` by context refuses what it refuses. */
+  async function selectContext(app: string, service?: string, context?: string) {
+    const { id } = await loader.identify(app);
+    const contexts = await gate.contextsOf(id);
+    const ids = contexts.map((c) => c.id);
+    const contextId = await gate.chooseContext(app, ids, context);
+    // A context belongs to one service, so the chosen context decides which service the handle binds.
+    const contextService = contexts.find((c) => c.id === contextId)?.serviceName;
+    const resolved = await loader.load(id, contextService ?? service);
+    return { resolved, contexts, contextId, ids, entry: await catalogued(sameUnit(resolved)) };
   }
 
   const describeBlocks = (app: ResolvedApp) => (app.guide ? showGuide(app) : [{ type: 'text' as const, text: NO_GUIDE }]);
@@ -190,14 +168,7 @@ export function registerAppTools(
     },
     async ({ app, service, context, verbose }) => {
       try {
-        const { id } = await loader.identify(app);
-        const contexts = await gate.contextsOf(id);
-        const ids = contexts.map((c) => c.id);
-        const contextId = await chooseContext(app, ids, context);
-        // A context belongs to one service, so the chosen context decides which service the handle binds.
-        const contextService = contexts.find((c) => c.id === contextId)?.serviceName;
-        const resolved = await loader.load(id, contextService ?? service);
-        const entry = await catalogued(sameUnit(resolved));
+        const { resolved, contextId, ids, entry } = await selectContext(app, service, context);
         const tools = entry ? [...toolNamesByApp(catalog.apps(), reserved).get(entry)!.values()] : [];
         return withBlocks(
           {
@@ -216,30 +187,41 @@ export function registerAppTools(
     },
   );
 
+  /** The app and context a call runs in: from the handle, or from `app` and `context` the way select_app picks them. */
+  async function callTarget({ app_handle, app, context }: { app_handle?: unknown; app?: unknown; context?: unknown }) {
+    const payload = gate.read(app_handle);
+    if (!payload) {
+      if (typeof app !== 'string' || typeof context !== 'string') return { refusal: await refuseWithout(app) };
+      const { resolved, contexts, contextId } = await selectContext(app, undefined, context);
+      const admitted = await gate.admitContextId(resolved, contextId!, contexts);
+      return 'refusal' in admitted ? admitted : { resolved, contextId: admitted.contextId };
+    }
+    // With a valid handle `app` only matters when it names another app; a name that resolves to nothing is ignored.
+    const named = typeof app === 'string' ? await loader.identify(app).catch(() => undefined) : undefined;
+    if (named && named.id !== payload.a) return { refusal: await refuseWithout(app) };
+    const resolved = await loader.load(payload.a, payload.s ?? undefined).catch((err: unknown) => {
+      if (err instanceof AppNotFoundError) return undefined;
+      throw err;
+    });
+    if (!resolved) return { refusal: refusal(NO_HANDLE) };
+    await catalogued(sameUnit(resolved));
+    const admitted = await gate.admit(resolved, app_handle, typeof context === 'string' ? context : undefined);
+    return 'refusal' in admitted ? admitted : { resolved, contextId: admitted.contextId };
+  }
+
   server.registerTool(
     'call',
     {
       description:
-        'Call an application method by name with the app_handle select_app returned, validated against its ABI. ' +
+        'Call an application method by name, validated against its ABI, with the app_handle select_app returned or with app and context. ' +
         'Use this when the generated per-method tools are not visible.',
       inputSchema: advertisedObject(CALL_INPUT),
     },
     async (raw: unknown) => {
       try {
-        const { app_handle, app } = raw as { app_handle?: unknown; app?: unknown };
-        const payload = gate.read(app_handle);
-        if (!payload) return await refuseWithout(app);
-        // With a valid handle `app` only matters when it names another app; a name that resolves to nothing is ignored.
-        const named = typeof app === 'string' ? await loader.identify(app).catch(() => undefined) : undefined;
-        if (named && named.id !== payload.a) return await refuseWithout(app);
-        const resolved = await loader.load(payload.a, payload.s ?? undefined).catch((err: unknown) => {
-          if (err instanceof AppNotFoundError) return undefined;
-          throw err;
-        });
-        if (!resolved) return refusal(NO_HANDLE);
-        await catalogued(sameUnit(resolved));
-        const admitted = await gate.admit(resolved, app_handle);
-        if ('refusal' in admitted) return admitted.refusal;
+        const target = await callTarget(raw as { app_handle?: unknown; app?: unknown; context?: unknown });
+        if ('refusal' in target) return target.refusal;
+        const { resolved, contextId } = target;
         const { method, args } = CALL_INPUT.parse(raw);
         if (method === INIT_METHOD) return refusal(INIT_REFUSED);
 
@@ -249,7 +231,7 @@ export function registerAppTools(
           throw new Error(`Method "${method}" not found on "${packageKey(resolved)}". Available: ${available}`);
         }
         const argsJson = parseArgs(abiMethod, resolved.manifest, args ?? {});
-        return textResult(await session.mero.rpc.execute({ contextId: admitted.contextId, method, argsJson }));
+        return textResult(await session.mero.rpc.execute({ contextId, method, argsJson }));
       } catch (err) {
         return errorResult(err);
       }

@@ -280,10 +280,11 @@ Call an application method by name.
 
 | Argument | Type | Notes |
 | --- | --- | --- |
-| `app_handle` | string | From `select_app` |
+| `app_handle` | string, optional | From `select_app`; or pass `app` and `context` instead |
+| `context` | string, optional | Context id or alias, resolved as `select_app` does, with `app` |
 | `method` | string | ABI method name |
 | `args` | object, optional | Arguments keyed by parameter name |
-| `app` | string, optional | Shows that app's guide on a refusal; a handle for another app is refused |
+| `app` | string, optional | With `context`, names the app; otherwise shows that app's guide on a refusal. A handle for another app is refused |
 
 An unknown `method` returns the list of methods that exist.
 `init` is refused, after the handle check, with a pointer to `create_context`'s `args`: it runs once, when the context is created.
@@ -296,7 +297,8 @@ A name never repeats a fixed tool's name or another app's: a clash adds `_` plus
 
 | Argument | Type | Notes |
 | --- | --- | --- |
-| `app_handle` | string | From `select_app`; names the context |
+| `app_handle` | string, optional | From `select_app`; names the context |
+| `context` | string, optional | Context id or alias, instead of `app_handle`; absent when the method has its own `context` parameter |
 
 plus the method's declared parameters, typed from the ABI ([ABI mapping](/reference/abi-mapping/)).
 

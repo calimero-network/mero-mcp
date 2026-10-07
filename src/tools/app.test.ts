@@ -100,8 +100,8 @@ test('the tool list is every method of every installed app, sorted by package th
     const names = (await s.client.listTools()).tools.map((t) => t.name).filter((n) => n.startsWith('kv_store_') || n.startsWith('notes_'));
     assert.deepEqual(names, ['kv_store_get', 'kv_store_set', 'notes_add']);
     const set = (await s.client.listTools()).tools.find((t) => t.name === 'kv_store_set')!;
-    assert.deepEqual(Object.keys(set.inputSchema.properties ?? {}), ['app_handle', 'key']);
-    assert.deepEqual(set.inputSchema.required, ['app_handle', 'key']);
+    assert.deepEqual(Object.keys(set.inputSchema.properties ?? {}), ['app_handle', 'context', 'key']);
+    assert.deepEqual(set.inputSchema.required, ['key']);
   } finally {
     await s.close();
   }
@@ -736,7 +736,7 @@ test('select_app with no context says how to get one, and marks its tool names a
   }
 });
 
-test('a context that is neither an id nor an alias is named with the candidates, and only a resolved alias is remembered', async () => {
+test('a context that is neither an id nor an alias is named with the candidates, and every alias is looked up live', async () => {
   const s = await setup([kv()], '2025-11-25', { aliases: { core: ctx('kvctx') } });
   const lookups: string[] = [];
   const admin = s.session.mero.admin as { lookupContextAlias: (name: string) => Promise<unknown> };
@@ -753,7 +753,7 @@ test('a context that is neither an id nor an alias is named with the candidates,
     await s.call('select_app', { app: 'kv-store', context: 'core' });
     await s.call('select_app', { app: 'kv-store', context: 'core' });
     await s.call('select_app', { app: 'kv-store', context: ctx('kvctx') });
-    assert.deepEqual(lookups, ['nope', 'nope', 'core']);
+    assert.deepEqual(lookups, ['nope', 'nope', 'core', 'core']);
   } finally {
     await s.close();
   }
@@ -1083,6 +1083,112 @@ test('select_app with verbose restores the methods and the guide', async () => {
     const res = await s.call('select_app', { app: 'kv-store', verbose: true });
     assert.equal(JSON.parse(res.content[0].text!).methods.length, 2);
     assert.equal(res.content[2].resource?.text, GUIDE);
+  } finally {
+    await s.close();
+  }
+});
+
+test('call and generated tools run in a context named by id or alias, without an app_handle', async () => {
+  const apps = [{ ...kv(), contexts: [ctx('kvctx'), ctx('kvtwo')] }];
+  const s = await setup(apps, '2025-11-25', { aliases: { work: ctx('kvtwo') } });
+  try {
+    await s.call('call', { app: 'kv-store', context: 'work', method: 'set', args: { key: 'a' } });
+    await s.call('call', { app: 'KV Store', context: ctx('kvctx'), method: 'set', args: { key: 'b' } });
+    await s.call('kv_store_set', { context: 'work', key: 'c' });
+    await s.call('kv_store_set', { context: ctx('kvctx'), key: 'd' });
+    assert.deepEqual(s.executed.map((e) => [e.contextId, e.argsJson]), [
+      [ctx('kvtwo'), { key: 'a' }],
+      [ctx('kvctx'), { key: 'b' }],
+      [ctx('kvtwo'), { key: 'c' }],
+      [ctx('kvctx'), { key: 'd' }],
+    ]);
+  } finally {
+    await s.close();
+  }
+});
+
+test('call by context refuses what select_app refuses: another app context, an unknown context, no context', async () => {
+  const s = await setup([kv(), plain()], '2025-11-25', { aliases: { theirs: ctx('notesctx') } });
+  try {
+    for (const context of [ctx('notesctx'), 'theirs']) {
+      for (const run of [
+        () => s.call('call', { app: 'kv-store', context, method: 'set', args: { key: 'k' } }),
+        () => s.call('kv_store_set', { context, key: 'k' }),
+      ]) {
+        const res = await run();
+        assert.equal(res.isError, true);
+        assert.match(res.content[0].text!, /does not belong to/);
+      }
+    }
+    const unknown = await s.call('call', { app: 'kv-store', context: 'nope', method: 'set', args: { key: 'k' } });
+    assert.match(unknown.content[0].text!, /neither a context id nor an alias/);
+    const bare = await s.call('call', { app: 'kv-store', method: 'set', args: { key: 'k' } });
+    assert.equal(bare.content.at(-1)!.text, RETRY);
+    assert.deepEqual(s.executed, []);
+  } finally {
+    await s.close();
+  }
+});
+
+test('call and generated tools by context pick the service the context belongs to, and refuse the other service tools', async () => {
+  const s = await setup([drive()]);
+  try {
+    await s.call('call', { app: 'mero-drive', context: ctx('regctx'), method: 'register_folder', args: { name: 'f' } });
+    await s.call('mero_drive_docs_create_doc', { context: ctx('docsctx'), title: 't' });
+    assert.deepEqual(s.executed.map((e) => [e.contextId, e.method]), [[ctx('regctx'), 'register_folder'], [ctx('docsctx'), 'create_doc']]);
+    const crossed = await s.call('mero_drive_registry_register_folder', { context: ctx('docsctx'), name: 'f' });
+    assert.equal(crossed.content.at(-1)!.text, 'Call select_app for com.calimero.mero-drive and retry with the returned app_handle.');
+    assert.equal(s.executed.length, 2);
+  } finally {
+    await s.close();
+  }
+});
+
+test('a method with its own context parameter keeps it and takes the handle only', async () => {
+  const withContext: FakeApp = { ...plain(), abi: manifest([method('add', [{ name: 'context', type: { kind: 'string' } }])]) };
+  const s = await setup([withContext]);
+  try {
+    const add = (await s.client.listTools()).tools.find((t) => t.name === 'notes_add')!;
+    assert.equal((add.inputSchema.properties as Record<string, { description?: string }>).context.description, undefined);
+    const { app_handle } = await s.json('select_app', { app: 'notes' });
+    await s.call('notes_add', { app_handle, context: 'room' });
+    assert.deepEqual(s.executed[0].argsJson, { context: 'room' });
+    const noHandle = await s.call('notes_add', { context: 'room' });
+    assert.equal(noHandle.isError, true);
+  } finally {
+    await s.close();
+  }
+});
+
+test('an alias that is repointed is followed on the next call, never served from memory', async () => {
+  const aliases = { work: ctx('kvctx') };
+  const s = await setup([{ ...kv(), contexts: [ctx('kvctx'), ctx('kvtwo')] }], '2025-11-25', { aliases });
+  try {
+    await s.call('call', { app: 'kv-store', context: 'work', method: 'set', args: { key: 'a' } });
+    aliases.work = ctx('kvtwo');
+    await s.call('kv_store_set', { context: 'work', key: 'b' });
+    assert.deepEqual(s.executed.map((e) => e.contextId), [ctx('kvctx'), ctx('kvtwo')]);
+  } finally {
+    await s.close();
+  }
+});
+
+test('an app_handle and a context that name different contexts are refused, and the same one is accepted', async () => {
+  const s = await setup([{ ...kv(), contexts: [ctx('kvctx'), ctx('kvtwo')] }], '2025-11-25', { aliases: { work: ctx('kvctx') } });
+  try {
+    const { app_handle } = await s.json('select_app', { app: 'kv-store', context: ctx('kvctx') });
+    const args = { app_handle, key: 'k' };
+    const callArgs = { app_handle, method: 'set', args: { key: 'k' } };
+    for (const res of [
+      await s.call('call', { ...callArgs, context: ctx('kvtwo') }),
+      await s.call('kv_store_set', { ...args, context: ctx('kvtwo') }),
+    ]) {
+      assert.equal(res.isError, true);
+      assert.match(res.content.at(-1)!.text!, /different contexts/);
+    }
+    assert.deepEqual(s.executed, []);
+    assert.equal((await s.call('call', { ...callArgs, context: 'work' })).isError, undefined);
+    assert.equal((await s.call('kv_store_set', { ...args, context: ctx('kvctx') })).isError, undefined);
   } finally {
     await s.close();
   }

@@ -27,7 +27,7 @@ import {
   toolText,
 } from './e2e-lib.mjs';
 
-const PLANNED = 24;
+const PLANNED = 25;
 
 const { values: opts } = parseArgs({
   options: { node: { type: 'string' }, app: { type: 'string' } },
@@ -244,9 +244,9 @@ async function runChecks({ checks, mcp, api, kv, second }) {
       const tools = await mcp.listTools();
       const set = tools.find((t) => t.name === kvToolName(kv.slug, 'set'));
       assert(set, `${kvToolName(kv.slug, 'set')} is not registered`);
-      assertEqual(Object.keys(set.inputSchema.properties).sort(), ['app_handle', 'key', 'value'], 'set advertises the wrong properties');
-      assertEqual([...(set.inputSchema.required ?? [])].sort(), ['app_handle', 'key', 'value'], 'set does not require exactly its handle, key and value');
-      return 'app_handle, key and value, all required';
+      assertEqual(Object.keys(set.inputSchema.properties).sort(), ['app_handle', 'context', 'key', 'value'], 'set advertises the wrong properties');
+      assertEqual([...(set.inputSchema.required ?? [])].sort(), ['key', 'value'], 'set does not require exactly its key and value');
+      return 'key and value required, app_handle or context to pick the context';
     });
 
     await checks.check("select_app resolves the node's own context id directly, without mistaking it for an alias", async () => {
@@ -365,6 +365,7 @@ async function runChecks({ checks, mcp, api, kv, second }) {
       'an application with no context names the desktop app and create_context',
       'two handles are held at once, each naming its own app',
       'each handle routes its calls to its own app and context',
+      'call by app and context writes without a handle, and a context of another app or a bogus one is refused',
     ]) {
       checks.skip(label, FOREIGN);
     }
@@ -407,6 +408,27 @@ async function runChecks({ checks, mcp, api, kv, second }) {
       await mcp.call(kvToolName(second.slug, 'authored_insert'), { app_handle: secondHandle, key: only, value: 'x' });
       assertEqual(await api.execute(kv.context, 'get', { key: only }), null, 'a write through one application landed in the other');
       return `${key} resolves to "in-kv" in ${kv.slug} and "in-second" in ${second.slug}, and ${only} exists only in ${second.slug}`;
+    });
+  }
+
+  if (api) {
+    await checks.check('call by app and context writes without a handle, and a context of another app or a bogus one is refused', async () => {
+      const stamp = Date.now().toString(36);
+      const key = `ctx-${stamp}`;
+      await mcp.call('call', { app: kv.name, context: kv.context, method: 'set', args: { key, value: 'via-context' } });
+      assertEqual(await api.execute(kv.context, 'get', { key }), 'via-context', 'call by app and context did not reach the node');
+      const viaTool = `ctx-tool-${stamp}`;
+      await mcp.call(kvToolName(kv.slug, 'set'), { context: kv.context, key: viaTool, value: 'via-tool' });
+      assertEqual(await api.execute(kv.context, 'get', { key: viaTool }), 'via-tool', 'a generated tool with a context did not reach the node');
+
+      const refused = `ctx-refused-${stamp}`;
+      for (const context of [second.context, 'no-such-context-alias']) {
+        const msg = await mcp.callRaw('call', { app: kv.name, context, method: 'set', args: { key: refused, value: 'must-not-land' } });
+        assert(msg.result?.isError, `call ran in ${context}: ${toolText(msg)}`);
+      }
+      assertEqual(await api.execute(kv.context, 'get', { key: refused }), null, 'a refused call still wrote');
+      assertEqual(await api.execute(second.context, 'authored_get', { key: refused }), null, 'a refused call wrote into the other app');
+      return `${key} and ${viaTool} written; foreign and bogus contexts refused, nothing written`;
     });
   }
 
