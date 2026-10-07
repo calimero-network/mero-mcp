@@ -45,8 +45,15 @@ export function createCatalog(loader: AbiLoader) {
     return run;
   }
 
+  /** The cached app with this exact id, and service when given; else undefined so the caller falls back to the loader. */
+  function find(appId: string, service?: string): ResolvedApp | undefined {
+    const units = apps.filter((a) => a.id === appId && (service === undefined || a.serviceName === service));
+    return units.length === 1 ? units[0] : undefined;
+  }
+
   return {
     apps: () => apps,
+    find,
     sync,
     subscribe(listener: () => void): () => void {
       listeners.add(listener);

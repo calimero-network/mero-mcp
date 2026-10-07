@@ -209,6 +209,8 @@ test('a handle goes stale when the app version, its guide, or its context change
     try {
       const { app_handle } = await s.json('select_app', { app: 'kv-store' });
       change(s.apps[0]);
+      Object.assign(s.session.mero.admin, { installApplication: async () => ({ applicationId: 'kv-id' }) });
+      await s.call('install_application', { coords: 'com.calimero.kv-store@1.0.0' });
       const viaCall = await s.call('call', { app_handle, method: 'set', args: { key: 'k' } });
       assert.equal(viaCall.isError, true);
       assert.equal(viaCall.content.at(-1)!.text, RETRY);
@@ -307,6 +309,8 @@ test('call with a handle for an uninstalled app, or without one for a multi-serv
   try {
     const { app_handle } = await s.json('select_app', { app: 'kv-store' });
     s.apps.splice(0, 1);
+    Object.assign(s.session.mero.admin, { installApplication: async () => ({ applicationId: 'kv-id' }) });
+    await s.call('install_application', { coords: 'com.calimero.kv-store@1.0.0' });
     const gone = await s.call('call', { app_handle, method: 'set', args: { key: 'k' } });
     assert.deepEqual(gone.content.map((b) => b.text), ['Call select_app for the application and retry with the returned app_handle.']);
 
@@ -1240,6 +1244,76 @@ test('call_many refuses an empty or oversized batch before running anything', as
     const advertised = (await s.client.listTools()).tools.find((t) => t.name === 'call_many')!;
     const schema = (advertised.inputSchema.properties as { calls: { minItems: number; maxItems: number } }).calls;
     assert.deepEqual([schema.minItems, schema.maxItems], [1, 32]);
+  } finally {
+    await s.close();
+  }
+});
+
+test('a call by handle reads only the context list, and by context adds one listing read for the name', async () => {
+  const s = await setup([kv(), drive()]);
+  const admin = s.session.mero.admin as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>;
+  const counts: Record<string, number> = {};
+  for (const name of ['listApplications', 'getApplicationAbi', 'getContextsForApplication', 'lookupContextAlias']) {
+    counts[name] = 0;
+    const original = admin[name];
+    admin[name] = (...a) => ((counts[name] = (counts[name] ?? 0) + 1), original(...a));
+  }
+  try {
+    const { app_handle } = await s.json('select_app', { app: 'kv-store' });
+    assert.equal(counts.getContextsForApplication, 1);
+    for (const key of Object.keys(counts)) counts[key] = 0;
+    await s.call('call', { app_handle, method: 'set', args: { key: 'a' } });
+    await s.call('call', { app: 'kv-store', context: ctx('kvctx'), method: 'set', args: { key: 'b' } });
+    await s.call('call', { app: 'mero-drive', context: ctx('regctx'), method: 'register_folder', args: { name: 'f' } });
+    assert.deepEqual(counts, { listApplications: 2, getApplicationAbi: 0, getContextsForApplication: 3, lookupContextAlias: 0 }, JSON.stringify(counts));
+    assert.equal(s.executed.length, 3);
+  } finally {
+    await s.close();
+  }
+});
+
+test('call by a name the node holds ambiguous refuses like select_app, even when the catalog skipped one of the apps', async (t) => {
+  t.mock.method(console, 'error', () => {});
+  const a: FakeApp = { ...plain(), id: 'a-id', package: 'org.x.shared' };
+  const b: FakeApp = { ...plain(), id: 'b-id', package: 'org.y.shared', abi: undefined };
+  const s = await setup([a, b]);
+  try {
+    const viaSelect = await s.call('select_app', { app: 'shared' });
+    assert.equal(viaSelect.isError, true);
+    assert.match(viaSelect.content[0].text!, /ambiguous/);
+    const viaCall = await s.call('call', { app: 'shared', context: ctx('notesctx'), method: 'add', args: { body: 'x' } });
+    assert.equal(viaCall.isError, true);
+    assert.equal(viaCall.content[0].text, viaSelect.content[0].text);
+    assert.deepEqual(s.executed, []);
+  } finally {
+    await s.close();
+  }
+});
+
+test('after an upgrade made elsewhere, call by handle still runs until the catalog refreshes and generated tools refuse at once', async () => {
+  const s = await setup([kv()]);
+  try {
+    const { app_handle } = await s.json('select_app', { app: 'kv-store' });
+    s.apps[0].version = '1.1.0';
+    const viaCall = await s.call('call', { app_handle, method: 'set', args: { key: 'k' } });
+    assert.equal(viaCall.isError, undefined);
+    const viaTool = await s.call('kv_store_set', { app_handle, key: 'k' });
+    assert.equal(viaTool.isError, true);
+    assert.equal(viaTool.content.at(-1)!.text, RETRY);
+    assert.equal(s.executed.length, 1);
+  } finally {
+    await s.close();
+  }
+});
+
+test('call by app and context reads the live listing, so an upgrade made elsewhere validates against the new ABI', async () => {
+  const s = await setup([kv()]);
+  try {
+    Object.assign(s.apps[0], { version: '1.1.0', abi: manifest([method('get', [{ name: 'key', type: { kind: 'string' } }])]) });
+    const res = await s.call('call', { app: 'kv-store', context: ctx('kvctx'), method: 'set', args: { key: 'k' } });
+    assert.equal(res.isError, true);
+    assert.match(res.content[0].text!, /Method "set" not found/);
+    assert.deepEqual(s.executed, []);
   } finally {
     await s.close();
   }
