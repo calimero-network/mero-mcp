@@ -22,6 +22,7 @@ import {
   fatal,
   installServerBin,
   resolveMerod,
+  sleep,
 } from './e2e-lib.mjs';
 
 const PLANNED = 8;
@@ -146,6 +147,9 @@ async function main() {
     // Clicking "Connect AI agent" again mints a replacement and revokes the old key, and the
     // agent's cached copy of that key keeps its unexpired `exp` - so it looks valid and 401s.
     await checks.check('a re-connect that revokes the old key does not lock the agent out', async () => {
+      // A token's `iat` has one-second resolution and only a strictly later one replaces the stored
+      // credential, so a same-second re-connect would tie; a person clicking again never does.
+      await sleep(1100);
       const replacement = await admin.clientKey(['admin']);
       assert(
         clientIdOf(replacement.access_token) !== clientIdOf(firstKey.access_token),
