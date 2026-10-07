@@ -6,9 +6,10 @@
 //                                                   attaches to a running node, read-only subset
 //
 // MEROD_BINARY selects the merod to boot (default: core's target/debug/merod).
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import {
   ADMIN_PASSWORD,
@@ -27,7 +28,7 @@ import {
   toolText,
 } from './e2e-lib.mjs';
 
-const PLANNED = 26;
+const PLANNED = 27;
 
 const { values: opts } = parseArgs({
   options: { node: { type: 'string' }, app: { type: 'string' } },
@@ -36,6 +37,8 @@ const { values: opts } = parseArgs({
 
 const attached = Boolean(opts.node);
 const FOREIGN = 'not run against a node this script did not provision';
+
+const REQUEST_LOG_PRELOAD = fileURLToPath(new URL('./e2e-request-log.mjs', import.meta.url));
 
 const kvToolName = (slug, method) => `${slug}_${method}`;
 
@@ -67,6 +70,7 @@ async function main() {
 
     // --- provisioning -----------------------------------------------------
     let serverEnv;
+    const requestLog = join(mkdtempSync(join(tmpdir(), 'mero-mcp-requests-')), 'requests.log');
     if (!attached) {
       const { access_token: token } = await NodeApi.login(node.url, ADMIN_USER, ADMIN_PASSWORD);
       api = new NodeApi(node.url, token);
@@ -91,6 +95,8 @@ async function main() {
         CALIMERO_AUTH_TOKEN: token,
         CALIMERO_MCP_STATE_DIR: mkdtempSync(join(tmpdir(), 'mero-mcp-state-')),
         CALIMERO_NODE_HOME: mkdtempSync(join(tmpdir(), 'mero-mcp-nodehome-')),
+        REQUEST_LOG: requestLog,
+        NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import ${REQUEST_LOG_PRELOAD}`.trim(),
       };
     } else {
       // Attach mode reproduces the reporter's setup, so their state dir and credentials pass
@@ -101,7 +107,7 @@ async function main() {
 
     const mcp = new McpClient(launcher, serverEnv);
     try {
-      await runChecks({ checks, mcp, api, kv, second });
+      await runChecks({ checks, mcp, api, kv, second, requestLog });
     } finally {
       mcp.close();
     }
@@ -113,7 +119,7 @@ async function main() {
   checks.finish();
 }
 
-async function runChecks({ checks, mcp, api, kv, second }) {
+async function runChecks({ checks, mcp, api, kv, second, requestLog }) {
   let before = [];
 
   await checks.check('initialize completes and the server advertises tools', async () => {
@@ -367,6 +373,7 @@ async function runChecks({ checks, mcp, api, kv, second }) {
       'each handle routes its calls to its own app and context',
       'call by app and context writes without a handle, and a context of another app or a bogus one is refused',
       'call_many returns each result in order, and one failing item does not fail the batch',
+      'repeated handle calls reach the node and cost one read besides the RPC, not a listing or an ABI fetch',
     ]) {
       checks.skip(label, FOREIGN);
     }
@@ -451,6 +458,25 @@ async function runChecks({ checks, mcp, api, kv, second }) {
       assertEqual(results[2].result, 'preset', 'the third item did not read its key');
       assertEqual(await api.execute(kv.context, 'get', { key: written }), 'via-many', 'the batched write is not on the node');
       return `ok, error, ok in request order; ${written} visible on the node`;
+    });
+  }
+
+  if (api) {
+    await checks.check('repeated handle calls reach the node and cost one read besides the RPC, not a listing or an ABI fetch', async () => {
+      const key = `hot-${Date.now().toString(36)}`;
+      await api.execute(kv.context, 'set', { key, value: 'hot' });
+      const requests = () => readFileSync(requestLog, 'utf8').split('\n').filter(Boolean);
+      const calls = 3;
+      const start = requests().length;
+      for (let i = 0; i < calls; i++) {
+        assertEqual(await mcp.call('call', { app_handle: selected.app_handle, method: 'get', args: { key } }), 'hot', 'a handle call did not read the value');
+      }
+      const made = requests().slice(start);
+      assertEqual(made.filter((p) => p === '/jsonrpc').length, calls, `expected one RPC per call: ${made}`);
+      const reads = made.filter((p) => p !== '/jsonrpc');
+      assertEqual(reads.length, calls, `expected one read per call besides the RPC: ${made}`);
+      assert(reads.every((p) => p.startsWith('/admin-api/contexts/for-application/')), `a call read something other than its context list: ${made}`);
+      return `${made.length} node requests for ${calls} calls`;
     });
   }
 
