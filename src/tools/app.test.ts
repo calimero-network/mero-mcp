@@ -100,8 +100,8 @@ test('the tool list is every method of every installed app, sorted by package th
     const names = (await s.client.listTools()).tools.map((t) => t.name).filter((n) => n.startsWith('kv_store_') || n.startsWith('notes_'));
     assert.deepEqual(names, ['kv_store_get', 'kv_store_set', 'notes_add']);
     const set = (await s.client.listTools()).tools.find((t) => t.name === 'kv_store_set')!;
-    assert.deepEqual(Object.keys(set.inputSchema.properties ?? {}), ['app_handle', 'key']);
-    assert.deepEqual(set.inputSchema.required, ['app_handle', 'key']);
+    assert.deepEqual(Object.keys(set.inputSchema.properties ?? {}), ['app_handle', 'context', 'key']);
+    assert.deepEqual(set.inputSchema.required, ['key']);
   } finally {
     await s.close();
   }
@@ -209,6 +209,8 @@ test('a handle goes stale when the app version, its guide, or its context change
     try {
       const { app_handle } = await s.json('select_app', { app: 'kv-store' });
       change(s.apps[0]);
+      Object.assign(s.session.mero.admin, { installApplication: async () => ({ applicationId: 'kv-id' }) });
+      await s.call('install_application', { coords: 'com.calimero.kv-store@1.0.0' });
       const viaCall = await s.call('call', { app_handle, method: 'set', args: { key: 'k' } });
       assert.equal(viaCall.isError, true);
       assert.equal(viaCall.content.at(-1)!.text, RETRY);
@@ -307,6 +309,8 @@ test('call with a handle for an uninstalled app, or without one for a multi-serv
   try {
     const { app_handle } = await s.json('select_app', { app: 'kv-store' });
     s.apps.splice(0, 1);
+    Object.assign(s.session.mero.admin, { installApplication: async () => ({ applicationId: 'kv-id' }) });
+    await s.call('install_application', { coords: 'com.calimero.kv-store@1.0.0' });
     const gone = await s.call('call', { app_handle, method: 'set', args: { key: 'k' } });
     assert.deepEqual(gone.content.map((b) => b.text), ['Call select_app for the application and retry with the returned app_handle.']);
 
@@ -425,7 +429,7 @@ test('select_app resolves an alias to the context it pins in the handle', async 
   }
 });
 
-test('generated tools carry a title, explicit annotations, an icon only for a URL, and _meta', async () => {
+test('generated tools carry a title, explicit annotations, no icon, and _meta', async () => {
   const s = await setup();
   try {
     const tools = (await s.client.listTools()).tools;
@@ -434,7 +438,7 @@ test('generated tools carry a title, explicit annotations, an icon only for a UR
     assert.equal(get.title, 'Get (KV Store)');
     assert.deepEqual(get.annotations, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false });
     assert.deepEqual(add.annotations, { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false });
-    assert.deepEqual(get.icons, [{ src: 'https://example.com/kv.png' }]);
+    assert.equal(get.icons, undefined);
     assert.equal(add.icons, undefined);
     assert.deepEqual(get._meta, { package: 'com.calimero.kv-store', appVersion: '1.0.0', signerId: 'SignerKey1', intent: 'read_only' });
     // select_app only reads the node and mints a handle, so clients need not confirm it.
@@ -451,6 +455,28 @@ test('a long method name is cut to 49 characters with a hash of the full name', 
     const name = (await s.client.listTools()).tools.map((t) => t.name).find((n) => n.startsWith('a_very_long'))!;
     assert.equal(name.length, 49);
     assert.match(name, /^a_very_long_applicat_reconcile_every_pendi_[0-9a-f]{6}$/);
+  } finally {
+    await s.close();
+  }
+});
+
+test('a method returning unit advertises no outputSchema and sends no structuredContent', async () => {
+  const app: FakeApp = {
+    ...kv(),
+    abi: manifest(
+      [method('clear', [], { returns: { kind: 'unit' } }), method('wipe', [], { returns: { $ref: 'Done' } }), method('get', [], { returns: { kind: 'string' } })],
+      { Done: { kind: 'alias', target: { kind: 'unit' } } },
+    ),
+  };
+  const s = await setup([app]);
+  try {
+    const tools = (await s.client.listTools()).tools;
+    assert.equal(tools.find((t) => t.name === 'kv_store_clear')!.outputSchema, undefined);
+    assert.equal(tools.find((t) => t.name === 'kv_store_wipe')!.outputSchema, undefined);
+    assert.ok(tools.find((t) => t.name === 'kv_store_get')!.outputSchema);
+    const { app_handle } = await s.json('select_app', { app: 'kv-store' });
+    assert.equal((await s.call('kv_store_clear', { app_handle })).structuredContent, undefined);
+    assert.equal((await s.call('kv_store_wipe', { app_handle })).structuredContent, undefined);
   } finally {
     await s.close();
   }
@@ -714,7 +740,7 @@ test('select_app with no context says how to get one, and marks its tool names a
   }
 });
 
-test('a context that is neither an id nor an alias is named with the candidates, and only a resolved alias is remembered', async () => {
+test('a context that is neither an id nor an alias is named with the candidates, and every alias is looked up live', async () => {
   const s = await setup([kv()], '2025-11-25', { aliases: { core: ctx('kvctx') } });
   const lookups: string[] = [];
   const admin = s.session.mero.admin as { lookupContextAlias: (name: string) => Promise<unknown> };
@@ -731,7 +757,7 @@ test('a context that is neither an id nor an alias is named with the candidates,
     await s.call('select_app', { app: 'kv-store', context: 'core' });
     await s.call('select_app', { app: 'kv-store', context: 'core' });
     await s.call('select_app', { app: 'kv-store', context: ctx('kvctx') });
-    assert.deepEqual(lookups, ['nope', 'nope', 'core']);
+    assert.deepEqual(lookups, ['nope', 'nope', 'core', 'core']);
   } finally {
     await s.close();
   }
@@ -997,6 +1023,297 @@ test('ABI docs and flags reach the tool: description, parameter doc, returns_doc
     assert.deepEqual(get.outputSchema, { type: 'string', description: 'The stored value.' });
     const described = await s.json('describe_app', { app: 'kv-store' });
     assert.deepEqual(described.methods, ['Delete every key.\n\n[mut] clear() -> unit', '[view] get(key: string) -> string\n  key: Up to 64 bytes.']);
+  } finally {
+    await s.close();
+  }
+});
+
+test('a generated tool serializes its result compactly in the text block', async () => {
+  const s = await setup([kv(), plain()], '2025-11-25', { execute: () => ({ id: 7, tags: ['a'] }) });
+  try {
+    const { app_handle } = await s.json('select_app', { app: 'notes' });
+    const added = await s.call('notes_add', { app_handle, body: 'x' });
+    assert.equal(added.content[0].text, '{"id":7,"tags":["a"]}');
+  } finally {
+    await s.close();
+  }
+});
+
+test('select_app leaves out the methods, shows the guide once per session and then points at its resource', async () => {
+  const s = await setup();
+  try {
+    const first = await s.call('select_app', { app: 'kv-store' });
+    const summary = JSON.parse(first.content[0].text!);
+    assert.equal(summary.methods, undefined);
+    assert.equal(summary.guide, 'calimero://apps/kv-id/1.0.0/guide');
+    assert.equal(first.content[2].resource?.text, GUIDE);
+    const again = await s.call('select_app', { app: 'kv-store' });
+    assert.equal(again.content.length, 2);
+    assert.equal(JSON.parse(again.content[0].text!).guide, 'calimero://apps/kv-id/1.0.0/guide');
+  } finally {
+    await s.close();
+  }
+});
+
+test('describe_app always carries the guide, and select_app after a show says so and points at the resource', async () => {
+  const s = await setup();
+  try {
+    for (let i = 0; i < 2; i++) assert.equal((await s.call('describe_app', { app: 'kv-store' })).content[2].resource?.text, GUIDE);
+    const res = await s.call('select_app', { app: 'kv-store' });
+    assert.equal(res.content.length, 2);
+    assert.match(res.content[1].text!, /shown earlier this session.*calimero:\/\/apps\/kv-id\/1\.0\.0\/guide/);
+    assert.equal(JSON.parse((await s.call('describe_app', { app: 'kv-store' })).content[0].text!).methods.length, 2);
+  } finally {
+    await s.close();
+  }
+});
+
+test('a new app version shows its guide again, and verbose counts as a show', async () => {
+  const s = await setup();
+  try {
+    await s.call('select_app', { app: 'kv-store', verbose: true });
+    assert.equal((await s.call('select_app', { app: 'kv-store' })).content.length, 2);
+    s.apps[0].version = '1.1.0';
+    assert.equal((await s.call('select_app', { app: 'kv-store' })).content[2].resource?.text, GUIDE);
+  } finally {
+    await s.close();
+  }
+});
+
+test('select_app with verbose restores the methods and the guide', async () => {
+  const s = await setup();
+  try {
+    await s.call('select_app', { app: 'kv-store' });
+    const res = await s.call('select_app', { app: 'kv-store', verbose: true });
+    assert.equal(JSON.parse(res.content[0].text!).methods.length, 2);
+    assert.equal(res.content[2].resource?.text, GUIDE);
+  } finally {
+    await s.close();
+  }
+});
+
+test('call and generated tools run in a context named by id or alias, without an app_handle', async () => {
+  const apps = [{ ...kv(), contexts: [ctx('kvctx'), ctx('kvtwo')] }];
+  const s = await setup(apps, '2025-11-25', { aliases: { work: ctx('kvtwo') } });
+  try {
+    await s.call('call', { app: 'kv-store', context: 'work', method: 'set', args: { key: 'a' } });
+    await s.call('call', { app: 'KV Store', context: ctx('kvctx'), method: 'set', args: { key: 'b' } });
+    await s.call('kv_store_set', { context: 'work', key: 'c' });
+    await s.call('kv_store_set', { context: ctx('kvctx'), key: 'd' });
+    assert.deepEqual(s.executed.map((e) => [e.contextId, e.argsJson]), [
+      [ctx('kvtwo'), { key: 'a' }],
+      [ctx('kvctx'), { key: 'b' }],
+      [ctx('kvtwo'), { key: 'c' }],
+      [ctx('kvctx'), { key: 'd' }],
+    ]);
+  } finally {
+    await s.close();
+  }
+});
+
+test('call by context refuses what select_app refuses: another app context, an unknown context, no context', async () => {
+  const s = await setup([kv(), plain()], '2025-11-25', { aliases: { theirs: ctx('notesctx') } });
+  try {
+    for (const context of [ctx('notesctx'), 'theirs']) {
+      for (const run of [
+        () => s.call('call', { app: 'kv-store', context, method: 'set', args: { key: 'k' } }),
+        () => s.call('kv_store_set', { context, key: 'k' }),
+      ]) {
+        const res = await run();
+        assert.equal(res.isError, true);
+        assert.match(res.content[0].text!, /does not belong to/);
+      }
+    }
+    const unknown = await s.call('call', { app: 'kv-store', context: 'nope', method: 'set', args: { key: 'k' } });
+    assert.match(unknown.content[0].text!, /neither a context id nor an alias/);
+    const bare = await s.call('call', { app: 'kv-store', method: 'set', args: { key: 'k' } });
+    assert.equal(bare.content.at(-1)!.text, RETRY);
+    assert.deepEqual(s.executed, []);
+  } finally {
+    await s.close();
+  }
+});
+
+test('call and generated tools by context pick the service the context belongs to, and refuse the other service tools', async () => {
+  const s = await setup([drive()]);
+  try {
+    await s.call('call', { app: 'mero-drive', context: ctx('regctx'), method: 'register_folder', args: { name: 'f' } });
+    await s.call('mero_drive_docs_create_doc', { context: ctx('docsctx'), title: 't' });
+    assert.deepEqual(s.executed.map((e) => [e.contextId, e.method]), [[ctx('regctx'), 'register_folder'], [ctx('docsctx'), 'create_doc']]);
+    const crossed = await s.call('mero_drive_registry_register_folder', { context: ctx('docsctx'), name: 'f' });
+    assert.equal(crossed.content.at(-1)!.text, 'Call select_app for com.calimero.mero-drive and retry with the returned app_handle.');
+    assert.equal(s.executed.length, 2);
+  } finally {
+    await s.close();
+  }
+});
+
+test('a method with its own context parameter keeps it and takes the handle only', async () => {
+  const withContext: FakeApp = { ...plain(), abi: manifest([method('add', [{ name: 'context', type: { kind: 'string' } }])]) };
+  const s = await setup([withContext]);
+  try {
+    const add = (await s.client.listTools()).tools.find((t) => t.name === 'notes_add')!;
+    assert.equal((add.inputSchema.properties as Record<string, { description?: string }>).context.description, undefined);
+    const { app_handle } = await s.json('select_app', { app: 'notes' });
+    await s.call('notes_add', { app_handle, context: 'room' });
+    assert.deepEqual(s.executed[0].argsJson, { context: 'room' });
+    const noHandle = await s.call('notes_add', { context: 'room' });
+    assert.equal(noHandle.isError, true);
+  } finally {
+    await s.close();
+  }
+});
+
+test('an alias that is repointed is followed on the next call, never served from memory', async () => {
+  const aliases = { work: ctx('kvctx') };
+  const s = await setup([{ ...kv(), contexts: [ctx('kvctx'), ctx('kvtwo')] }], '2025-11-25', { aliases });
+  try {
+    await s.call('call', { app: 'kv-store', context: 'work', method: 'set', args: { key: 'a' } });
+    aliases.work = ctx('kvtwo');
+    await s.call('kv_store_set', { context: 'work', key: 'b' });
+    assert.deepEqual(s.executed.map((e) => e.contextId), [ctx('kvctx'), ctx('kvtwo')]);
+  } finally {
+    await s.close();
+  }
+});
+
+test('an app_handle and a context that name different contexts are refused, and the same one is accepted', async () => {
+  const s = await setup([{ ...kv(), contexts: [ctx('kvctx'), ctx('kvtwo')] }], '2025-11-25', { aliases: { work: ctx('kvctx') } });
+  try {
+    const { app_handle } = await s.json('select_app', { app: 'kv-store', context: ctx('kvctx') });
+    const args = { app_handle, key: 'k' };
+    const callArgs = { app_handle, method: 'set', args: { key: 'k' } };
+    for (const res of [
+      await s.call('call', { ...callArgs, context: ctx('kvtwo') }),
+      await s.call('kv_store_set', { ...args, context: ctx('kvtwo') }),
+    ]) {
+      assert.equal(res.isError, true);
+      assert.match(res.content.at(-1)!.text!, /different contexts/);
+    }
+    assert.deepEqual(s.executed, []);
+    assert.equal((await s.call('call', { ...callArgs, context: 'work' })).isError, undefined);
+    assert.equal((await s.call('kv_store_set', { ...args, context: ctx('kvctx') })).isError, undefined);
+  } finally {
+    await s.close();
+  }
+});
+
+test('call_many runs each call like call, in order, and one failure does not fail the batch', async () => {
+  const apps = [{ ...kv(), contexts: [ctx('kvctx'), ctx('kvtwo')] }, plain()];
+  const s = await setup(apps, '2025-11-25', { execute: (p) => ({ ran: p.method, in: p.contextId }) });
+  try {
+    const { app_handle } = await s.json('select_app', { app: 'notes' });
+    const res = await s.call('call_many', {
+      calls: [
+        { app: 'kv-store', context: ctx('kvtwo'), method: 'set', args: { key: 'a' } },
+        { app: 'kv-store', context: ctx('kvctx'), method: 'nope' },
+        { app_handle, method: 'add', args: { body: 'x' } },
+        { app: 'kv-store', method: 'set', args: { key: 'k' } },
+        { app: 'kv-store', context: ctx('notesctx'), method: 'set', args: { key: 'k' } },
+        { app: 'kv-store', context: ctx('kvctx'), method: 'set', args: {} },
+        { app: 'kv-store', context: ctx('kvctx'), method: 'init' },
+      ],
+    });
+    assert.equal(res.isError, undefined);
+    const out = JSON.parse(res.content[0].text!);
+    assert.equal(out.length, 7);
+    assert.deepEqual(out[0], { ok: true, result: { ran: 'set', in: ctx('kvtwo') } });
+    assert.match(out[1].error, /Method "nope" not found/);
+    assert.deepEqual(out[2], { ok: true, result: { ran: 'add', in: ctx('notesctx') } });
+    assert.equal(out[3].error, RETRY);
+    assert.match(out[4].error, /does not belong to/);
+    assert.equal(out[5].ok, false);
+    assert.match(out[6].error, /init runs once/);
+    assert.deepEqual(out.map((o: { ok: boolean }) => o.ok), [true, false, true, false, false, false, false]);
+    assert.equal(s.executed.length, 2);
+  } finally {
+    await s.close();
+  }
+});
+
+test('call_many refuses an empty or oversized batch before running anything', async () => {
+  const s = await setup([kv()]);
+  try {
+    const one = { app: 'kv-store', context: ctx('kvctx'), method: 'set', args: { key: 'k' } };
+    for (const calls of [[], Array.from({ length: 33 }, () => one), undefined]) {
+      const res = await s.call('call_many', { calls });
+      assert.equal(res.isError, true);
+      assert.match(res.content[0].text!, /calls/);
+    }
+    assert.deepEqual(s.executed, []);
+    const advertised = (await s.client.listTools()).tools.find((t) => t.name === 'call_many')!;
+    const schema = (advertised.inputSchema.properties as { calls: { minItems: number; maxItems: number } }).calls;
+    assert.deepEqual([schema.minItems, schema.maxItems], [1, 32]);
+  } finally {
+    await s.close();
+  }
+});
+
+test('a call by handle reads only the context list, and by context adds one listing read for the name', async () => {
+  const s = await setup([kv(), drive()]);
+  const admin = s.session.mero.admin as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>;
+  const counts: Record<string, number> = {};
+  for (const name of ['listApplications', 'getApplicationAbi', 'getContextsForApplication', 'lookupContextAlias']) {
+    counts[name] = 0;
+    const original = admin[name];
+    admin[name] = (...a) => ((counts[name] = (counts[name] ?? 0) + 1), original(...a));
+  }
+  try {
+    const { app_handle } = await s.json('select_app', { app: 'kv-store' });
+    assert.equal(counts.getContextsForApplication, 1);
+    for (const key of Object.keys(counts)) counts[key] = 0;
+    await s.call('call', { app_handle, method: 'set', args: { key: 'a' } });
+    await s.call('call', { app: 'kv-store', context: ctx('kvctx'), method: 'set', args: { key: 'b' } });
+    await s.call('call', { app: 'mero-drive', context: ctx('regctx'), method: 'register_folder', args: { name: 'f' } });
+    assert.deepEqual(counts, { listApplications: 2, getApplicationAbi: 0, getContextsForApplication: 3, lookupContextAlias: 0 }, JSON.stringify(counts));
+    assert.equal(s.executed.length, 3);
+  } finally {
+    await s.close();
+  }
+});
+
+test('call by a name the node holds ambiguous refuses like select_app, even when the catalog skipped one of the apps', async (t) => {
+  t.mock.method(console, 'error', () => {});
+  const a: FakeApp = { ...plain(), id: 'a-id', package: 'org.x.shared' };
+  const b: FakeApp = { ...plain(), id: 'b-id', package: 'org.y.shared', abi: undefined };
+  const s = await setup([a, b]);
+  try {
+    const viaSelect = await s.call('select_app', { app: 'shared' });
+    assert.equal(viaSelect.isError, true);
+    assert.match(viaSelect.content[0].text!, /ambiguous/);
+    const viaCall = await s.call('call', { app: 'shared', context: ctx('notesctx'), method: 'add', args: { body: 'x' } });
+    assert.equal(viaCall.isError, true);
+    assert.equal(viaCall.content[0].text, viaSelect.content[0].text);
+    assert.deepEqual(s.executed, []);
+  } finally {
+    await s.close();
+  }
+});
+
+test('after an upgrade made elsewhere, call by handle still runs until the catalog refreshes and generated tools refuse at once', async () => {
+  const s = await setup([kv()]);
+  try {
+    const { app_handle } = await s.json('select_app', { app: 'kv-store' });
+    s.apps[0].version = '1.1.0';
+    const viaCall = await s.call('call', { app_handle, method: 'set', args: { key: 'k' } });
+    assert.equal(viaCall.isError, undefined);
+    const viaTool = await s.call('kv_store_set', { app_handle, key: 'k' });
+    assert.equal(viaTool.isError, true);
+    assert.equal(viaTool.content.at(-1)!.text, RETRY);
+    assert.equal(s.executed.length, 1);
+  } finally {
+    await s.close();
+  }
+});
+
+test('call by app and context reads the live listing, so an upgrade made elsewhere validates against the new ABI', async () => {
+  const s = await setup([kv()]);
+  try {
+    Object.assign(s.apps[0], { version: '1.1.0', abi: manifest([method('get', [{ name: 'key', type: { kind: 'string' } }])]) });
+    const res = await s.call('call', { app: 'kv-store', context: ctx('kvctx'), method: 'set', args: { key: 'k' } });
+    assert.equal(res.isError, true);
+    assert.match(res.content[0].text!, /Method "set" not found/);
+    assert.deepEqual(s.executed, []);
   } finally {
     await s.close();
   }

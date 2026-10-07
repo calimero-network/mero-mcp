@@ -75,7 +75,7 @@ An app whose ABI cannot be read is left out of the tool list, and stderr says wh
 
 <Aside type="note">
 This message means the route was missing (a bodyless 404). A 4xx *with* a message —
-"rebuild the app", "pass service_name" — is the node telling you something specific,
+"rebuild the app", "pass service" — is the node telling you something specific,
 and the server passes that through verbatim rather than blaming the version.
 </Aside>
 
@@ -113,7 +113,7 @@ Either the handle is missing or was not issued by this server, or it has gone st
 1. **The app was upgraded.** A handle names the app version it was issued for.
 2. **The app's guide changed.** A handle carries a hash of the guide it was issued with.
 3. **The context is gone.** The handle names a context that no longer exists for that app.
-4. **The server restarted.** Handles are signed with a key that lives only as long as the process.
+4. **The handle key changed.** Handles are signed with the key in `handle.key` in the state directory, so they survive a restart, but not that file being deleted or replaced.
 
 In every case, call `select_app` again and use the handle it returns.
 A handle from `describe_app` names no context, so app tools refuse it with a request to call `select_app` with a context.

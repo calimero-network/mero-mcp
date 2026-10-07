@@ -23,7 +23,7 @@ const CFG = loadConfig({ HOME: '/x' } as NodeJS.ProcessEnv);
 const EXPECTED_METHOD_COUNTS: Record<string, number> = {
   'kv-store': 11,
   abi_conformance: 41,
-  'scaffolding-e2e': 91,
+  'scaffolding-e2e': 101,
 };
 
 /**
@@ -118,16 +118,16 @@ for (const [name, count] of Object.entries(EXPECTED_METHOD_COUNTS)) {
   });
 }
 
-test('scaffolding-e2e: 90 methods register under one server at once, each under its own name', async () => {
-  assert.equal((await listTools('scaffolding-e2e')).size, 90);
+test('scaffolding-e2e: 100 methods register under one server at once, each under its own name', async () => {
+  assert.equal((await listTools('scaffolding-e2e')).size, 100);
 });
 
-test('kv-store: set(key, value) advertises exactly those two required properties beside the app_handle', async () => {
+test('kv-store: set(key, value) advertises exactly those two required properties beside the optional app_handle and context', async () => {
   const set = (await listTools('kv-store')).get('set');
   assert.ok(set, 'kv-store fixture has no set method');
   const schema = set.inputSchema as { properties: Record<string, unknown>; required?: string[] };
-  assert.deepEqual(Object.keys(schema.properties).sort(), ['app_handle', 'key', 'value']);
-  assert.deepEqual([...(schema.required ?? [])].sort(), ['app_handle', 'key', 'value']);
+  assert.deepEqual(Object.keys(schema.properties).sort(), ['app_handle', 'context', 'key', 'value']);
+  assert.deepEqual([...(schema.required ?? [])].sort(), ['key', 'value']);
 });
 
 test('abi_conformance: its method and parameter docs reach tools/list', async () => {

@@ -53,8 +53,8 @@ Call list_applications, then list_contexts.
 ```
 
 `list_applications` returns what is installed, each with an `id`, a `package`
-(reverse-DNS dotted, like `com.calimero.kv-store`) and decoded `metadata`.
-Each entry also carries its `appVersion` and `procedures`, the titles of the procedures in the app's guide.
+(reverse-DNS dotted, like `com.calimero.kv-store`), a `name`, `version` and short `description`.
+Each entry also carries `hasGuide` and `procedures`, the titles of the procedures in the app's guide.
 
 `list_contexts` returns the contexts. **If it comes back empty, stop here and
 create one** — no amount of selecting will make app calls work without a context:

@@ -43,13 +43,15 @@ probe. `active: true` marks the one this session is using.
 
 ### `list_applications`
 
-Applications installed on this node. No arguments. Read-only.
+Applications installed on this node, one compact row each. Read-only.
 
-Application `metadata` rides the wire as raw bytes; it is decoded for display into
-the JSON object it usually encodes, or the plain string, or omitted — never dumped as
-a byte array.
+| Argument | Type | Notes |
+| --- | --- | --- |
+| `verbose` | boolean, optional | Return the full records instead: decoded `metadata` (icon included), blob hashes, signer and `appVersion` |
 
-Each entry also carries `appVersion` and `procedures`: the `###` titles under `## Procedures` in the app's guide, or `[]` when it ships none.
+Each row is `{ id, package, name, version, description, hasGuide, procedures }`.
+`description` is cut at 200 characters.
+`procedures` holds the `###` titles under `## Procedures` in the app's guide, or `[]` when it ships none.
 The guide itself is left out; `describe_app` returns it.
 
 ### `list_namespaces`
@@ -63,8 +65,7 @@ Contexts on this node. Read-only.
 | Argument | Type | Notes |
 | --- | --- | --- |
 | `application` | string, optional | Filter to one application: id, package name, trailing segment, or display name |
-
-`dagHeads` are rendered as hex.
+| `verbose` | boolean, optional | Also return `contextStateHash` and `dagHeads` (rendered as hex) |
 
 ### `create_context`
 
@@ -210,10 +211,10 @@ Create a group (a subgroup) inside a namespace, or nested under another group. R
 | --- | --- | --- |
 | `namespace` | string | |
 | `name` | string, optional | |
-| `visibility` | `open` or `restricted`, optional | Defaults to `restricted` |
+| `visibility` | `open` or `restricted`, optional | Without `parent` defaults to `open`; with `parent` defaults to `restricted` |
 | `parent` | string, optional | Group id to nest under |
 
-With `parent`, the group is created for the parent's application and the visibility is applied as a second step; if that step fails, the error names the created group so `set_group_visibility` can finish the job.
+With `parent`, the group is created for the parent's application, restricted, and an explicit visibility is applied as a second step because core's nested create takes none; if that step fails, the error names the created group so `set_group_visibility` can finish the job.
 
 ### `set_group_visibility`
 
@@ -249,6 +250,7 @@ Show an application's methods and guide without choosing a context. Read-only.
 
 Returns, as JSON: `application`, `package`, `appVersion`, resolved `service`, `contextServices`, every method as a signature (with its doc and documented parameters when the ABI carries them; see [ABI mapping](/reference/abi-mapping/#docs-and-hints)), and an `app_handle` with no context.
 Then the guide as an embedded `text/markdown` resource after an author label, or the line `This app ships no guide.`
+`describe_app` always carries the guide; `select_app` carries it only the first time a session shows that app version, then a note naming the resource uri.
 
 Omitting `service` on a multi-service app returns an error naming the available services.
 When no context exists to read a service name from, a `serviceNote` says so: nothing on the application record or in the ABI lists an app's services.
@@ -262,8 +264,10 @@ Choose an application and the context to act in. Read-only.
 | `app` | string | Id, package name, trailing segment, or display name |
 | `context` | string, optional | Context id or alias; defaults to the app's only context |
 | `service` | string, optional | Only when no context is chosen; a chosen context decides the service |
+| `verbose` | boolean, optional | Also return `methods` and the guide, as `describe_app` does |
 
-Returns everything `describe_app` does, plus the app's tool names (`tools`), the chosen `context`, and an `app_handle` bound to that context and its service.
+Returns what `describe_app` does without the methods: `application`, `package`, `appVersion`, `service`, `contextServices`, `guide` (the resource uri), the app's tool names (`tools`), the chosen `context`, and an `app_handle` bound to that context and its service.
+The guide itself follows only the first time a session meets that app version, after which a text note points at the `guide` uri.
 `tools` lists exactly the tools of the app and service the handle binds.
 When a package name matches apps from several signers, `select_app` and `describe_app` refuse and list each application id with its signer; pass the application id.
 For a bundle with one named service, a context created without a service name binds that service.
@@ -276,13 +280,21 @@ Call an application method by name.
 
 | Argument | Type | Notes |
 | --- | --- | --- |
-| `app_handle` | string | From `select_app` |
+| `app_handle` | string, optional | From `select_app`; or pass `app` and `context` instead |
+| `context` | string, optional | Context id or alias, resolved as `select_app` does, with `app` |
 | `method` | string | ABI method name |
 | `args` | object, optional | Arguments keyed by parameter name |
-| `app` | string, optional | Shows that app's guide on a refusal; a handle for another app is refused |
+| `app` | string, optional | With `context`, names the app; otherwise shows that app's guide on a refusal. A handle for another app is refused |
 
 An unknown `method` returns the list of methods that exist.
 `init` is refused, after the handle check, with a pointer to `create_context`'s `args`: it runs once, when the context is created.
+
+### `call_many`
+
+Run up to 32 calls at once. Each item takes what `call` takes (`method`, `args`, and an `app_handle` or `app` with `context`) and is validated against its ABI the same way.
+
+Returns an array in request order: `{ ok: true, result }` or `{ ok: false, error }` per item, so one failing call does not fail the batch.
+Calls run concurrently, so the order in which mutating methods execute is not guaranteed.
 
 ## Generated method tools
 
@@ -292,15 +304,16 @@ A name never repeats a fixed tool's name or another app's: a clash adds `_` plus
 
 | Argument | Type | Notes |
 | --- | --- | --- |
-| `app_handle` | string | From `select_app`; names the context |
+| `app_handle` | string, optional | From `select_app`; names the context |
+| `context` | string, optional | Context id or alias, instead of `app_handle`; absent when the method has its own `context` parameter |
 
 plus the method's declared parameters, typed from the ABI ([ABI mapping](/reference/abi-mapping/)).
 
 Each tool carries a `title` (`Set blocks (Mero Blocks)`), a `description` (the method's ABI `doc`, when it has one, above its signature), an `outputSchema` when the method returns something (described by the ABI's `returns_doc`, when present), and explicit `readOnlyHint`, `destructiveHint`, `idempotentHint` and `openWorldHint: false` annotations.
 `readOnlyHint` follows the method's intent; `destructiveHint` and `idempotentHint` follow the ABI's `destructive` and `idempotent` flags, and `idempotentHint` is also `true` for every read-only method.
 A tool's description is the method's doc followed by its signature, or the signature alone; see [ABI mapping](/reference/abi-mapping/#docs-and-hints).
-It also carries `icons` when the app's `metadata.icon` is a URL, and `_meta` with the `package`, `appVersion`, `signerId` and method `intent`.
-Results carry `structuredContent` next to the JSON text.
+It also carries `_meta` with the `package`, `appVersion`, `signerId` and method `intent`.
+Results carry `structuredContent` next to the JSON text, except for methods that return unit, which return the text only.
 A contract call that fails returns `isError: true` with the node's message.
 
 ## Resources

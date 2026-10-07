@@ -6,9 +6,10 @@
 //                                                   attaches to a running node, read-only subset
 //
 // MEROD_BINARY selects the merod to boot (default: core's target/debug/merod).
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import {
   ADMIN_PASSWORD,
@@ -27,7 +28,7 @@ import {
   toolText,
 } from './e2e-lib.mjs';
 
-const PLANNED = 23;
+const PLANNED = 27;
 
 const { values: opts } = parseArgs({
   options: { node: { type: 'string' }, app: { type: 'string' } },
@@ -36,6 +37,8 @@ const { values: opts } = parseArgs({
 
 const attached = Boolean(opts.node);
 const FOREIGN = 'not run against a node this script did not provision';
+
+const REQUEST_LOG_PRELOAD = fileURLToPath(new URL('./e2e-request-log.mjs', import.meta.url));
 
 const kvToolName = (slug, method) => `${slug}_${method}`;
 
@@ -67,6 +70,7 @@ async function main() {
 
     // --- provisioning -----------------------------------------------------
     let serverEnv;
+    const requestLog = join(mkdtempSync(join(tmpdir(), 'mero-mcp-requests-')), 'requests.log');
     if (!attached) {
       const { access_token: token } = await NodeApi.login(node.url, ADMIN_USER, ADMIN_PASSWORD);
       api = new NodeApi(node.url, token);
@@ -91,6 +95,8 @@ async function main() {
         CALIMERO_AUTH_TOKEN: token,
         CALIMERO_MCP_STATE_DIR: mkdtempSync(join(tmpdir(), 'mero-mcp-state-')),
         CALIMERO_NODE_HOME: mkdtempSync(join(tmpdir(), 'mero-mcp-nodehome-')),
+        REQUEST_LOG: requestLog,
+        NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import ${REQUEST_LOG_PRELOAD}`.trim(),
       };
     } else {
       // Attach mode reproduces the reporter's setup, so their state dir and credentials pass
@@ -101,7 +107,7 @@ async function main() {
 
     const mcp = new McpClient(launcher, serverEnv);
     try {
-      await runChecks({ checks, mcp, api, kv, second });
+      await runChecks({ checks, mcp, api, kv, second, requestLog });
     } finally {
       mcp.close();
     }
@@ -113,7 +119,7 @@ async function main() {
   checks.finish();
 }
 
-async function runChecks({ checks, mcp, api, kv, second }) {
+async function runChecks({ checks, mcp, api, kv, second, requestLog }) {
   let before = [];
 
   await checks.check('initialize completes and the server advertises tools', async () => {
@@ -183,6 +189,7 @@ async function runChecks({ checks, mcp, api, kv, second }) {
       'create_context without args creates a callable context when the init the node serves takes none',
       "list_applications lists the guide's procedures and leaves the guide out",
       "describe_app returns the node's guide as an author-labelled embedded resource",
+      'a repeat select_app drops the guide and the methods but names the guide resource, and describe_app still has the guide',
       'generated tools and parameters carry the method docs the node serves',
     ]) {
       checks.skip(label, FOREIGN);
@@ -192,7 +199,7 @@ async function runChecks({ checks, mcp, api, kv, second }) {
       const { apps } = await mcp.call('list_applications');
       const listed = apps.find((a) => a.id === kv.id);
       assert(listed, `${kv.id} is missing from list_applications`);
-      assert(!('guide' in (listed.metadata ?? {})), 'the full guide leaked into the listing');
+      assert(listed.hasGuide === true && !('guide' in listed), `the listing row should carry hasGuide and no guide: ${Object.keys(listed)}`);
       assert(Array.isArray(listed.procedures) && listed.procedures.length > 0, `no procedures listed: ${JSON.stringify(listed.procedures)}`);
       return JSON.stringify(listed.procedures);
     });
@@ -207,6 +214,22 @@ async function runChecks({ checks, mcp, api, kv, second }) {
       assertEqual(embedded.resource.text, guide, 'describe_app did not return the guide the node stores');
       assertEqual(embedded.resource.uri, `calimero://apps/${record.id}/${record.version}/guide`, 'the guide resource URI is wrong');
       return `${guide.length} characters of guide`;
+    });
+
+    await checks.check('a repeat select_app drops the guide and the methods but names the guide resource, and describe_app still has the guide', async () => {
+      const record = await api.application(kv.id);
+      const uri = `calimero://apps/${record.id}/${record.version}/guide`;
+      const msg = await mcp.callRaw('select_app', { app: kv.name });
+      const [summary, note, ...rest] = msg.result.content;
+      const body = JSON.parse(summary.text);
+      assertEqual(body.guide, uri, 'the repeat select_app does not name the guide resource');
+      assert(!('methods' in body), 'the repeat select_app still lists the methods');
+      assert(note.text.includes('shown earlier this session') && note.text.includes(uri), `the repeat note is wrong: ${note.text}`);
+      assertEqual(rest, [], 'the repeat select_app carried more than the summary and the note');
+      assert(msg.result.content.every((b) => b.type !== 'resource'), 'the repeat select_app embedded the guide again');
+      const again = await mcp.callRaw('describe_app', { app: kv.name });
+      assert(again.result.content.some((b) => b.type === 'resource' && b.resource.uri === uri), 'describe_app dropped the guide');
+      return `${uri} named, no embedded guide`;
     });
 
     await checks.check('generated tools and parameters carry the method docs the node serves', async () => {
@@ -227,9 +250,9 @@ async function runChecks({ checks, mcp, api, kv, second }) {
       const tools = await mcp.listTools();
       const set = tools.find((t) => t.name === kvToolName(kv.slug, 'set'));
       assert(set, `${kvToolName(kv.slug, 'set')} is not registered`);
-      assertEqual(Object.keys(set.inputSchema.properties).sort(), ['app_handle', 'key', 'value'], 'set advertises the wrong properties');
-      assertEqual([...(set.inputSchema.required ?? [])].sort(), ['app_handle', 'key', 'value'], 'set does not require exactly its handle, key and value');
-      return 'app_handle, key and value, all required';
+      assertEqual(Object.keys(set.inputSchema.properties).sort(), ['app_handle', 'context', 'key', 'value'], 'set advertises the wrong properties');
+      assertEqual([...(set.inputSchema.required ?? [])].sort(), ['key', 'value'], 'set does not require exactly its key and value');
+      return 'key and value required, app_handle or context to pick the context';
     });
 
     await checks.check("select_app resolves the node's own context id directly, without mistaking it for an alias", async () => {
@@ -348,6 +371,9 @@ async function runChecks({ checks, mcp, api, kv, second }) {
       'an application with no context names the desktop app and create_context',
       'two handles are held at once, each naming its own app',
       'each handle routes its calls to its own app and context',
+      'call by app and context writes without a handle, and a context of another app or a bogus one is refused',
+      'call_many returns each result in order, and one failing item does not fail the batch',
+      'repeated handle calls reach the node and cost one read besides the RPC, not a listing or an ABI fetch',
     ]) {
       checks.skip(label, FOREIGN);
     }
@@ -390,6 +416,67 @@ async function runChecks({ checks, mcp, api, kv, second }) {
       await mcp.call(kvToolName(second.slug, 'authored_insert'), { app_handle: secondHandle, key: only, value: 'x' });
       assertEqual(await api.execute(kv.context, 'get', { key: only }), null, 'a write through one application landed in the other');
       return `${key} resolves to "in-kv" in ${kv.slug} and "in-second" in ${second.slug}, and ${only} exists only in ${second.slug}`;
+    });
+  }
+
+  if (api) {
+    await checks.check('call by app and context writes without a handle, and a context of another app or a bogus one is refused', async () => {
+      const stamp = Date.now().toString(36);
+      const key = `ctx-${stamp}`;
+      await mcp.call('call', { app: kv.name, context: kv.context, method: 'set', args: { key, value: 'via-context' } });
+      assertEqual(await api.execute(kv.context, 'get', { key }), 'via-context', 'call by app and context did not reach the node');
+      const viaTool = `ctx-tool-${stamp}`;
+      await mcp.call(kvToolName(kv.slug, 'set'), { context: kv.context, key: viaTool, value: 'via-tool' });
+      assertEqual(await api.execute(kv.context, 'get', { key: viaTool }), 'via-tool', 'a generated tool with a context did not reach the node');
+
+      const refused = `ctx-refused-${stamp}`;
+      for (const context of [second.context, 'no-such-context-alias']) {
+        const msg = await mcp.callRaw('call', { app: kv.name, context, method: 'set', args: { key: refused, value: 'must-not-land' } });
+        assert(msg.result?.isError, `call ran in ${context}: ${toolText(msg)}`);
+      }
+      assertEqual(await api.execute(kv.context, 'get', { key: refused }), null, 'a refused call still wrote');
+      assertEqual(await api.execute(second.context, 'authored_get', { key: refused }), null, 'a refused call wrote into the other app');
+      return `${key} and ${viaTool} written; foreign and bogus contexts refused, nothing written`;
+    });
+  }
+
+  if (api) {
+    await checks.check('call_many returns each result in order, and one failing item does not fail the batch', async () => {
+      const stamp = Date.now().toString(36);
+      const [written, preset] = [`many-${stamp}`, `many-preset-${stamp}`];
+      await api.execute(kv.context, 'set', { key: preset, value: 'preset' });
+      const base = { app: kv.name, context: kv.context };
+      const results = await mcp.call('call_many', {
+        calls: [
+          { ...base, method: 'set', args: { key: written, value: 'via-many' } },
+          { ...base, method: 'no_such_method' },
+          { ...base, method: 'get', args: { key: preset } },
+        ],
+      });
+      assertEqual(results.map((r) => r.ok), [true, false, true], `unexpected batch outcome: ${JSON.stringify(results)}`);
+      assert(/no_such_method/.test(results[1].error), `the failed item does not name its method: ${results[1].error}`);
+      assertEqual(results[2].result, 'preset', 'the third item did not read its key');
+      assertEqual(await api.execute(kv.context, 'get', { key: written }), 'via-many', 'the batched write is not on the node');
+      return `ok, error, ok in request order; ${written} visible on the node`;
+    });
+  }
+
+  if (api) {
+    await checks.check('repeated handle calls reach the node and cost one read besides the RPC, not a listing or an ABI fetch', async () => {
+      const key = `hot-${Date.now().toString(36)}`;
+      await api.execute(kv.context, 'set', { key, value: 'hot' });
+      const requests = () => readFileSync(requestLog, 'utf8').split('\n').filter(Boolean);
+      const calls = 3;
+      const start = requests().length;
+      for (let i = 0; i < calls; i++) {
+        assertEqual(await mcp.call('call', { app_handle: selected.app_handle, method: 'get', args: { key } }), 'hot', 'a handle call did not read the value');
+      }
+      const made = requests().slice(start);
+      assertEqual(made.filter((p) => p === '/jsonrpc').length, calls, `expected one RPC per call: ${made}`);
+      const reads = made.filter((p) => p !== '/jsonrpc');
+      assertEqual(reads.length, calls, `expected one read per call besides the RPC: ${made}`);
+      assert(reads.every((p) => p.startsWith('/admin-api/contexts/for-application/')), `a call read something other than its context list: ${made}`);
+      return `${made.length} node requests for ${calls} calls`;
     });
   }
 

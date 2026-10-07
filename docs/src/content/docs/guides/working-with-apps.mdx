@@ -38,12 +38,14 @@ than going back to `list_applications`.
 ## App guides and app handles
 
 An app can ship a guide: Markdown its author writes, carried in the signed bundle and stored by the node.
-`list_applications` leaves the guide out of each entry and adds `procedures`, the `###` titles under the guide's `## Procedures` heading, plus `appVersion`.
+`list_applications` returns one compact row per app: `id`, `package`, `name`, `version`, a short `description`, `hasGuide` and `procedures`, the `###` titles under the guide's `## Procedures` heading.
+Icons, blob hashes and the guide itself are left out; pass `verbose: true` for the full records.
 
 - `describe_app` returns the app's methods, the guide (or `This app ships no guide.`) and an `app_handle` with no context.
   It is the way to plan across several apps.
   Call it before setting up namespaces, groups or contexts for an app you have not used before, since its guide says how that app expects them to be laid out.
-- `select_app` returns the guide and an `app_handle` bound to one context: the one you pass as `context`, or the app's only context.
+- `select_app` returns an `app_handle` bound to one context: the one you pass as `context`, or the app's only context.
+  It repeats neither the methods nor a guide this session has already shown; pass `verbose` to get both.
 - Every generated tool and `call` take that `app_handle`.
   It names the context the call runs in, so there is no separate context argument.
 
@@ -53,7 +55,7 @@ Each guide is also a resource at `calimero://apps/<application id>/<version>/gui
 
 A call without a valid handle runs nothing.
 It returns the guide (when the app has one) and `Call select_app for <package> and retry with the returned app_handle.`
-A handle stops being valid when the app is upgraded, when its guide changes, when its context is gone, or when the server restarts; `select_app` issues a fresh one.
+A handle stops being valid when the app is upgraded, when its guide changes, when its context is gone, or when the server's handle key changes; `select_app` issues a fresh one.
 A handle from `describe_app` has no context, and app tools refuse it with a request to select one.
 Apps without a guide still need a handle.
 
