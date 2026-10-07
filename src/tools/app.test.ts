@@ -1289,3 +1289,32 @@ test('call by a name the node holds ambiguous refuses like select_app, even when
     await s.close();
   }
 });
+
+test('after an upgrade made elsewhere, call by handle still runs until the catalog refreshes and generated tools refuse at once', async () => {
+  const s = await setup([kv()]);
+  try {
+    const { app_handle } = await s.json('select_app', { app: 'kv-store' });
+    s.apps[0].version = '1.1.0';
+    const viaCall = await s.call('call', { app_handle, method: 'set', args: { key: 'k' } });
+    assert.equal(viaCall.isError, undefined);
+    const viaTool = await s.call('kv_store_set', { app_handle, key: 'k' });
+    assert.equal(viaTool.isError, true);
+    assert.equal(viaTool.content.at(-1)!.text, RETRY);
+    assert.equal(s.executed.length, 1);
+  } finally {
+    await s.close();
+  }
+});
+
+test('call by app and context reads the live listing, so an upgrade made elsewhere validates against the new ABI', async () => {
+  const s = await setup([kv()]);
+  try {
+    Object.assign(s.apps[0], { version: '1.1.0', abi: manifest([method('get', [{ name: 'key', type: { kind: 'string' } }])]) });
+    const res = await s.call('call', { app: 'kv-store', context: ctx('kvctx'), method: 'set', args: { key: 'k' } });
+    assert.equal(res.isError, true);
+    assert.match(res.content[0].text!, /Method "set" not found/);
+    assert.deepEqual(s.executed, []);
+  } finally {
+    await s.close();
+  }
+});

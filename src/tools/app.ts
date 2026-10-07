@@ -122,7 +122,8 @@ export function registerAppTools(
 
   /** The app a context binds and that context: select_app's resolution, so `call` by context refuses what it refuses. */
   async function selectContext(app: string, service?: string, context?: string, cached = false) {
-    const { id } = await loader.identify(app);
+    const identity = await loader.identify(app);
+    const { id } = identity;
     const contexts = await gate.contextsOf(id);
     const ids = contexts.map((c) => c.id);
     const contextId = await gate.chooseContext(app, ids, context);
