@@ -736,7 +736,7 @@ test('select_app with no context says how to get one, and marks its tool names a
   }
 });
 
-test('a context that is neither an id nor an alias is named with the candidates, and only a resolved alias is remembered', async () => {
+test('a context that is neither an id nor an alias is named with the candidates, and every alias is looked up live', async () => {
   const s = await setup([kv()], '2025-11-25', { aliases: { core: ctx('kvctx') } });
   const lookups: string[] = [];
   const admin = s.session.mero.admin as { lookupContextAlias: (name: string) => Promise<unknown> };
@@ -753,7 +753,7 @@ test('a context that is neither an id nor an alias is named with the candidates,
     await s.call('select_app', { app: 'kv-store', context: 'core' });
     await s.call('select_app', { app: 'kv-store', context: 'core' });
     await s.call('select_app', { app: 'kv-store', context: ctx('kvctx') });
-    assert.deepEqual(lookups, ['nope', 'nope', 'core']);
+    assert.deepEqual(lookups, ['nope', 'nope', 'core', 'core']);
   } finally {
     await s.close();
   }
@@ -1155,6 +1155,40 @@ test('a method with its own context parameter keeps it and takes the handle only
     assert.deepEqual(s.executed[0].argsJson, { context: 'room' });
     const noHandle = await s.call('notes_add', { context: 'room' });
     assert.equal(noHandle.isError, true);
+  } finally {
+    await s.close();
+  }
+});
+
+test('an alias that is repointed is followed on the next call, never served from memory', async () => {
+  const aliases = { work: ctx('kvctx') };
+  const s = await setup([{ ...kv(), contexts: [ctx('kvctx'), ctx('kvtwo')] }], '2025-11-25', { aliases });
+  try {
+    await s.call('call', { app: 'kv-store', context: 'work', method: 'set', args: { key: 'a' } });
+    aliases.work = ctx('kvtwo');
+    await s.call('kv_store_set', { context: 'work', key: 'b' });
+    assert.deepEqual(s.executed.map((e) => e.contextId), [ctx('kvctx'), ctx('kvtwo')]);
+  } finally {
+    await s.close();
+  }
+});
+
+test('an app_handle and a context that name different contexts are refused, and the same one is accepted', async () => {
+  const s = await setup([{ ...kv(), contexts: [ctx('kvctx'), ctx('kvtwo')] }], '2025-11-25', { aliases: { work: ctx('kvctx') } });
+  try {
+    const { app_handle } = await s.json('select_app', { app: 'kv-store', context: ctx('kvctx') });
+    const args = { app_handle, key: 'k' };
+    const callArgs = { app_handle, method: 'set', args: { key: 'k' } };
+    for (const res of [
+      await s.call('call', { ...callArgs, context: ctx('kvtwo') }),
+      await s.call('kv_store_set', { ...args, context: ctx('kvtwo') }),
+    ]) {
+      assert.equal(res.isError, true);
+      assert.match(res.content.at(-1)!.text!, /different contexts/);
+    }
+    assert.deepEqual(s.executed, []);
+    assert.equal((await s.call('call', { ...callArgs, context: 'work' })).isError, undefined);
+    assert.equal((await s.call('kv_store_set', { ...args, context: ctx('kvctx') })).isError, undefined);
   } finally {
     await s.close();
   }

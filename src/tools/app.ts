@@ -118,7 +118,7 @@ export function registerAppTools(
     // A context belongs to one service, so the chosen context decides which service the handle binds.
     const contextService = contexts.find((c) => c.id === contextId)?.serviceName;
     const resolved = await loader.load(id, contextService ?? service);
-    return { resolved, contextId, ids, entry: await catalogued(sameUnit(resolved)) };
+    return { resolved, contexts, contextId, ids, entry: await catalogued(sameUnit(resolved)) };
   }
 
   const describeBlocks = (app: ResolvedApp) => (app.guide ? showGuide(app) : [{ type: 'text' as const, text: NO_GUIDE }]);
@@ -192,8 +192,9 @@ export function registerAppTools(
     const payload = gate.read(app_handle);
     if (!payload) {
       if (typeof app !== 'string' || typeof context !== 'string') return { refusal: await refuseWithout(app) };
-      const { resolved, contextId } = await selectContext(app, undefined, context);
-      return { resolved, contextId: contextId! };
+      const { resolved, contexts, contextId } = await selectContext(app, undefined, context);
+      const admitted = await gate.admitContextId(resolved, contextId!, contexts);
+      return 'refusal' in admitted ? admitted : { resolved, contextId: admitted.contextId };
     }
     // With a valid handle `app` only matters when it names another app; a name that resolves to nothing is ignored.
     const named = typeof app === 'string' ? await loader.identify(app).catch(() => undefined) : undefined;
@@ -204,7 +205,7 @@ export function registerAppTools(
     });
     if (!resolved) return { refusal: refusal(NO_HANDLE) };
     await catalogued(sameUnit(resolved));
-    const admitted = await gate.admit(resolved, app_handle);
+    const admitted = await gate.admit(resolved, app_handle, typeof context === 'string' ? context : undefined);
     return 'refusal' in admitted ? admitted : { resolved, contextId: admitted.contextId };
   }
 

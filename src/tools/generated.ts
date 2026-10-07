@@ -188,7 +188,7 @@ export function registerGeneratedTools(
     }
     const context = args[CONTEXT_PARAM];
     const byContext = !args[HANDLE_PARAM] && typeof context === 'string' && !hasParam(method, CONTEXT_PARAM);
-    const admitted = byContext ? await gate.admitContext(current, context) : await gate.admit(current, args[HANDLE_PARAM]);
+    const admitted = byContext ? await gate.admitContext(current, context) : await gate.admit(current, args[HANDLE_PARAM], typeof context === 'string' && !hasParam(method, CONTEXT_PARAM) ? context : undefined);
     if ('refusal' in admitted) return admitted.refusal;
     const argsJson = parseArgs(method, app.manifest, args);
     const result = await session.mero.rpc.execute({ contextId: admitted.contextId, method: method.name, argsJson });

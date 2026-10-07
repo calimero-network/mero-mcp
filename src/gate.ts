@@ -33,6 +33,8 @@ const CONTEXT_ID = /^[0-9a-f]{64}$/;
 
 const contextsFor = (label: string, ids: string[]) => `Contexts for "${label}": ${ids.join(', ') || '(none)'}`;
 
+const DISAGREE = 'app_handle and context name different contexts; pass only one of them.';
+
 const retry = (app: AppIdentity) => `Call select_app for ${packageKey(app)} and retry with the returned app_handle.`;
 
 const noContext = (app: ResolvedApp) =>
@@ -49,20 +51,16 @@ export const handlePayload = (app: ResolvedApp, contextId: string | null) => ({
 });
 
 export function createGate(session: NodeSession) {
-  const aliases = new Map<string, string>();
-
   async function contextsOf(applicationId: string): Promise<AppContext[]> {
     return ((await session.mero.admin.getContextsForApplication(applicationId)) as { contexts: AppContext[] }).contexts;
   }
 
   /**
-   * Ids pass through untouched; anything else is an alias. Core answers a miss with a null value and
-   * rejects a string no alias could be, so both mean unresolvable - and only a hit is worth keeping.
+   * Ids pass through untouched; anything else is an alias, looked up live since it can be repointed.
+   * Core answers a miss with a null value and rejects a string no alias could be, so both mean unresolvable.
    */
   async function resolveContextValue(value: string, label: string, candidates: string[]): Promise<string> {
     if (CONTEXT_ID.test(value)) return value;
-    const cached = aliases.get(value);
-    if (cached) return cached;
     let found: string | null | undefined;
     try {
       ({ value: found } = (await session.mero.admin.lookupContextAlias(value)) as { value?: string | null });
@@ -75,7 +73,6 @@ export function createGate(session: NodeSession) {
         `Context "${value}" not found: it is neither a context id nor an alias on this node. ${contextsFor(label, candidates.filter((c) => c !== value))}`,
       );
     }
-    aliases.set(value, found);
     return found;
   }
 
@@ -87,8 +84,8 @@ export function createGate(session: NodeSession) {
     return contextId;
   }
 
-  async function admitContextId(app: ResolvedApp, contextId: string): Promise<Admission> {
-    const target = (await contextsOf(app.id)).find((c) => c.id === contextId);
+  async function admitContextId(app: ResolvedApp, contextId: string, known?: AppContext[]): Promise<Admission> {
+    const target = (known ?? (await contextsOf(app.id))).find((c) => c.id === contextId);
     const service = target && (target.serviceName ?? app.soleService);
     if (!target || (app.serviceName && service !== app.serviceName)) return refuse(app);
     return { contextId: target.id };
@@ -101,23 +98,29 @@ export function createGate(session: NodeSession) {
   return {
     contextsOf,
     chooseContext,
+    admitContextId,
     issue: (app: ResolvedApp, contextId: string | null) => handles.issue(handlePayload(app, contextId)),
     read: handles.read,
     refuse,
 
     /** The context a call may run in, or the refusal: a handle must match the installed app, its guide and a live context. */
-    async admit(app: ResolvedApp, handle: unknown): Promise<Admission> {
+    async admit(app: ResolvedApp, handle: unknown, context?: string): Promise<Admission> {
       const payload = handles.read(handle);
       const expected = handlePayload(app, null);
       if (!payload || (['a', 'p', 'v', 'g', 's'] as const).some((key) => payload[key] !== expected[key])) return refuse(app);
       if (payload.c === null) return refuse(app, noContext(app), false);
-      return admitContextId(app, payload.c);
+      if (context === undefined) return admitContextId(app, payload.c);
+      const contexts = await contextsOf(app.id);
+      const chosen = await chooseContext(packageKey(app), contexts.map((c) => c.id), context);
+      if (chosen !== payload.c) return refuse(app, DISAGREE, false);
+      return admitContextId(app, payload.c, contexts);
     },
 
     /** The same admission for a context named by id or alias instead of a handle. */
     async admitContext(app: ResolvedApp, context: string): Promise<Admission> {
-      const contextId = await chooseContext(packageKey(app), (await contextsOf(app.id)).map((c) => c.id), context);
-      return admitContextId(app, contextId!);
+      const contexts = await contextsOf(app.id);
+      const contextId = await chooseContext(packageKey(app), contexts.map((c) => c.id), context);
+      return admitContextId(app, contextId!, contexts);
     },
   };
 }
