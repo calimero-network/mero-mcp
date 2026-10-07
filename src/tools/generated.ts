@@ -23,7 +23,9 @@ const HASHED_KEEP = 42;
 const ID_TAIL = 6; // id alphanumerics that tell two same-named apps apart
 const NAME_HASH_HEX = 6; // sha256 hex that ends a shortened name
 const HANDLE_PARAM = 'app_handle';
-const APP_HANDLE_DOC = 'The app_handle select_app returned for this application; it names the context the call runs in.';
+const APP_HANDLE_DOC = 'The app_handle select_app returned for this application; it names the context the call runs in. Omit it to pass context.';
+const CONTEXT_PARAM = 'context';
+const CONTEXT_DOC = 'Context id or alias to run in, instead of an app_handle.';
 
 const sanitize = (s: string) => s.toLowerCase().replace(/[^a-z0-9_]+/g, '_');
 
@@ -64,7 +66,9 @@ function toolTitle(app: ResolvedApp, method: string): string {
 }
 
 // A method's own app_handle parameter would collide with the injected one, so only call reaches it, with args kept apart.
-const collides = (method: AbiMethod) => method.params.some((p) => p.name === HANDLE_PARAM);
+const hasParam = (method: AbiMethod, name: string) => method.params.some((p) => p.name === name);
+
+const collides = (method: AbiMethod) => hasParam(method, HANDLE_PARAM);
 
 // create_context runs init, so a tool for it would only invite a second run on a live context.
 const toolMethods = (app: ResolvedApp) =>
@@ -122,7 +126,14 @@ function toolConfig(app: ResolvedApp, method: AbiMethod) {
     title: toolTitle(app, method.name),
     description: methodDescription(method),
     inputSchema: advertised(
-      input.jsonSchema(z.object({ [HANDLE_PARAM]: input.describe(z.string(), APP_HANDLE_DOC), ...input.params(method) })),
+      input.jsonSchema(
+        z.object({
+          [HANDLE_PARAM]: input.describe(z.string(), APP_HANDLE_DOC).optional(),
+          // A method's own context parameter keeps its meaning; such a tool takes the handle only.
+          ...(hasParam(method, CONTEXT_PARAM) ? {} : { [CONTEXT_PARAM]: input.describe(z.string(), CONTEXT_DOC).optional() }),
+          ...input.params(method),
+        }),
+      ),
     ),
     ...(returns ? { outputSchema: advertised(documentReturn(output.jsonSchema(returns), method)) } : {}),
     annotations: {
@@ -175,7 +186,9 @@ export function registerGeneratedTools(
       // The upgrade is unconfirmed or dropped this method; never run the old tool against the new install.
       else return gate.refuse(current).refusal;
     }
-    const admitted = await gate.admit(current, args[HANDLE_PARAM]);
+    const context = args[CONTEXT_PARAM];
+    const byContext = !args[HANDLE_PARAM] && typeof context === 'string' && !hasParam(method, CONTEXT_PARAM);
+    const admitted = byContext ? await gate.admitContext(current, context) : await gate.admit(current, args[HANDLE_PARAM]);
     if ('refusal' in admitted) return admitted.refusal;
     const argsJson = parseArgs(method, app.manifest, args);
     const result = await session.mero.rpc.execute({ contextId: admitted.contextId, method: method.name, argsJson });
