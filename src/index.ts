@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { loadConfig } from './config.ts';
+import { handleKeeper, loadHandleKey } from './handle.ts';
 import { createServerFactory } from './server.ts';
 import { createLazySession } from './session.ts';
 
 function main() {
   const cfg = loadConfig();
-  serveStdio(createServerFactory(createLazySession(cfg), cfg), { onerror: (err) => console.error('[mero-mcp]', err) });
+  const keeper = handleKeeper(loadHandleKey(cfg.stateDir));
+  serveStdio(createServerFactory(createLazySession(cfg), cfg, keeper), { onerror: (err) => console.error('[mero-mcp]', err) });
   console.error('[mero-mcp] ready on stdio; the node connects when a client opens the connection');
 }
 
