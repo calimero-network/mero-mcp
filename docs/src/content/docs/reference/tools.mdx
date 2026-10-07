@@ -300,7 +300,7 @@ plus the method's declared parameters, typed from the ABI ([ABI mapping](/refere
 Each tool carries a `title` (`Set blocks (Mero Blocks)`), a `description` (the method's ABI `doc`, when it has one, above its signature), an `outputSchema` when the method returns something (described by the ABI's `returns_doc`, when present), and explicit `readOnlyHint`, `destructiveHint`, `idempotentHint` and `openWorldHint: false` annotations.
 `readOnlyHint` follows the method's intent; `destructiveHint` and `idempotentHint` follow the ABI's `destructive` and `idempotent` flags, and `idempotentHint` is also `true` for every read-only method.
 A tool's description is the method's doc followed by its signature, or the signature alone; see [ABI mapping](/reference/abi-mapping/#docs-and-hints).
-It also carries `icons` when the app's `metadata.icon` is a URL, and `_meta` with the `package`, `appVersion`, `signerId` and method `intent`.
+It also carries `_meta` with the `package`, `appVersion`, `signerId` and method `intent`.
 Results carry `structuredContent` next to the JSON text.
 A contract call that fails returns `isError: true` with the node's message.
 
