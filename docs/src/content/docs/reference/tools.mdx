@@ -289,6 +289,13 @@ Call an application method by name.
 An unknown `method` returns the list of methods that exist.
 `init` is refused, after the handle check, with a pointer to `create_context`'s `args`: it runs once, when the context is created.
 
+### `call_many`
+
+Run up to 32 calls at once. Each item takes what `call` takes (`method`, `args`, and an `app_handle` or `app` with `context`) and is validated against its ABI the same way.
+
+Returns an array in request order: `{ ok: true, result }` or `{ ok: false, error }` per item, so one failing call does not fail the batch.
+Calls run concurrently, so the order in which mutating methods execute is not guaranteed.
+
 ## Generated method tools
 
 One per method of every installed application except `init`, which `create_context` runs, sorted by package, then application id, then service, then method, for every client alike.

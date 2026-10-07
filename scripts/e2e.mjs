@@ -27,7 +27,7 @@ import {
   toolText,
 } from './e2e-lib.mjs';
 
-const PLANNED = 25;
+const PLANNED = 26;
 
 const { values: opts } = parseArgs({
   options: { node: { type: 'string' }, app: { type: 'string' } },
@@ -366,6 +366,7 @@ async function runChecks({ checks, mcp, api, kv, second }) {
       'two handles are held at once, each naming its own app',
       'each handle routes its calls to its own app and context',
       'call by app and context writes without a handle, and a context of another app or a bogus one is refused',
+      'call_many returns each result in order, and one failing item does not fail the batch',
     ]) {
       checks.skip(label, FOREIGN);
     }
@@ -429,6 +430,27 @@ async function runChecks({ checks, mcp, api, kv, second }) {
       assertEqual(await api.execute(kv.context, 'get', { key: refused }), null, 'a refused call still wrote');
       assertEqual(await api.execute(second.context, 'authored_get', { key: refused }), null, 'a refused call wrote into the other app');
       return `${key} and ${viaTool} written; foreign and bogus contexts refused, nothing written`;
+    });
+  }
+
+  if (api) {
+    await checks.check('call_many returns each result in order, and one failing item does not fail the batch', async () => {
+      const stamp = Date.now().toString(36);
+      const [written, preset] = [`many-${stamp}`, `many-preset-${stamp}`];
+      await api.execute(kv.context, 'set', { key: preset, value: 'preset' });
+      const base = { app: kv.name, context: kv.context };
+      const results = await mcp.call('call_many', {
+        calls: [
+          { ...base, method: 'set', args: { key: written, value: 'via-many' } },
+          { ...base, method: 'no_such_method' },
+          { ...base, method: 'get', args: { key: preset } },
+        ],
+      });
+      assertEqual(results.map((r) => r.ok), [true, false, true], `unexpected batch outcome: ${JSON.stringify(results)}`);
+      assert(/no_such_method/.test(results[1].error), `the failed item does not name its method: ${results[1].error}`);
+      assertEqual(results[2].result, 'preset', 'the third item did not read its key');
+      assertEqual(await api.execute(kv.context, 'get', { key: written }), 'via-many', 'the batched write is not on the node');
+      return `ok, error, ok in request order; ${written} visible on the node`;
     });
   }
 

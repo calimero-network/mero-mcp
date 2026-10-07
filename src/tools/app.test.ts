@@ -1193,3 +1193,54 @@ test('an app_handle and a context that name different contexts are refused, and 
     await s.close();
   }
 });
+
+test('call_many runs each call like call, in order, and one failure does not fail the batch', async () => {
+  const apps = [{ ...kv(), contexts: [ctx('kvctx'), ctx('kvtwo')] }, plain()];
+  const s = await setup(apps, '2025-11-25', { execute: (p) => ({ ran: p.method, in: p.contextId }) });
+  try {
+    const { app_handle } = await s.json('select_app', { app: 'notes' });
+    const res = await s.call('call_many', {
+      calls: [
+        { app: 'kv-store', context: ctx('kvtwo'), method: 'set', args: { key: 'a' } },
+        { app: 'kv-store', context: ctx('kvctx'), method: 'nope' },
+        { app_handle, method: 'add', args: { body: 'x' } },
+        { app: 'kv-store', method: 'set', args: { key: 'k' } },
+        { app: 'kv-store', context: ctx('notesctx'), method: 'set', args: { key: 'k' } },
+        { app: 'kv-store', context: ctx('kvctx'), method: 'set', args: {} },
+        { app: 'kv-store', context: ctx('kvctx'), method: 'init' },
+      ],
+    });
+    assert.equal(res.isError, undefined);
+    const out = JSON.parse(res.content[0].text!);
+    assert.equal(out.length, 7);
+    assert.deepEqual(out[0], { ok: true, result: { ran: 'set', in: ctx('kvtwo') } });
+    assert.match(out[1].error, /Method "nope" not found/);
+    assert.deepEqual(out[2], { ok: true, result: { ran: 'add', in: ctx('notesctx') } });
+    assert.equal(out[3].error, RETRY);
+    assert.match(out[4].error, /does not belong to/);
+    assert.equal(out[5].ok, false);
+    assert.match(out[6].error, /init runs once/);
+    assert.deepEqual(out.map((o: { ok: boolean }) => o.ok), [true, false, true, false, false, false, false]);
+    assert.equal(s.executed.length, 2);
+  } finally {
+    await s.close();
+  }
+});
+
+test('call_many refuses an empty or oversized batch before running anything', async () => {
+  const s = await setup([kv()]);
+  try {
+    const one = { app: 'kv-store', context: ctx('kvctx'), method: 'set', args: { key: 'k' } };
+    for (const calls of [[], Array.from({ length: 33 }, () => one), undefined]) {
+      const res = await s.call('call_many', { calls });
+      assert.equal(res.isError, true);
+      assert.match(res.content[0].text!, /calls/);
+    }
+    assert.deepEqual(s.executed, []);
+    const advertised = (await s.client.listTools()).tools.find((t) => t.name === 'call_many')!;
+    const schema = (advertised.inputSchema.properties as { calls: { minItems: number; maxItems: number } }).calls;
+    assert.deepEqual([schema.minItems, schema.maxItems], [1, 32]);
+  } finally {
+    await s.close();
+  }
+});
