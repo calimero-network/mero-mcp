@@ -456,6 +456,28 @@ test('a long method name is cut to 49 characters with a hash of the full name', 
   }
 });
 
+test('a method returning unit advertises no outputSchema and sends no structuredContent', async () => {
+  const app: FakeApp = {
+    ...kv(),
+    abi: manifest(
+      [method('clear', [], { returns: { kind: 'unit' } }), method('wipe', [], { returns: { $ref: 'Done' } }), method('get', [], { returns: { kind: 'string' } })],
+      { Done: { kind: 'alias', target: { kind: 'unit' } } },
+    ),
+  };
+  const s = await setup([app]);
+  try {
+    const tools = (await s.client.listTools()).tools;
+    assert.equal(tools.find((t) => t.name === 'kv_store_clear')!.outputSchema, undefined);
+    assert.equal(tools.find((t) => t.name === 'kv_store_wipe')!.outputSchema, undefined);
+    assert.ok(tools.find((t) => t.name === 'kv_store_get')!.outputSchema);
+    const { app_handle } = await s.json('select_app', { app: 'kv-store' });
+    assert.equal((await s.call('kv_store_clear', { app_handle })).structuredContent, undefined);
+    assert.equal((await s.call('kv_store_wipe', { app_handle })).structuredContent, undefined);
+  } finally {
+    await s.close();
+  }
+});
+
 for (const era of ['2025-11-25', '2026-07-28'] as const) {
   test(`${era}: outputSchema and structuredContent follow the era, wrapped in {result} only for 2025-11-25 non-object returns`, async () => {
     const s = await setup([kv(), plain()], era, { execute: (p) => (p.method === 'get' ? 'v' : { id: 7 }) });
