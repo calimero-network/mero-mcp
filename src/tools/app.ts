@@ -38,6 +38,14 @@ const CALL_INPUT = z.object({
     .describe('Application id, package name, or display name; with context it replaces the handle, and a handle for another app is refused.'),
 });
 
+const MAX_CALLS = 32;
+
+const CALL_MANY_INPUT = z.object({
+  calls: z
+    .array(CALL_INPUT)
+    .describe('Calls to run; each takes what `call` takes: method, args, and an app_handle or app with context.'),
+});
+
 const noContexts = (label: string) =>
   `Application "${label}" has no contexts on this node. Create one in the Calimero desktop app, or use create_context.`;
 
@@ -209,6 +217,23 @@ export function registerAppTools(
     return 'refusal' in admitted ? admitted : { resolved, contextId: admitted.contextId };
   }
 
+  /** Runs one call; a refusal comes back as a value, any other failure throws. */
+  async function runCall(raw: unknown) {
+    const target = await callTarget(raw as { app_handle?: unknown; app?: unknown; context?: unknown });
+    if ('refusal' in target) return target;
+    const { resolved, contextId } = target;
+    const { method, args } = CALL_INPUT.parse(raw);
+    if (method === INIT_METHOD) return { refusal: refusal(INIT_REFUSED) };
+
+    const abiMethod = resolved.manifest.methods.find((m) => m.name === method);
+    if (!abiMethod) {
+      const available = resolved.manifest.methods.map((m) => m.name).join(', ') || '(none)';
+      throw new Error(`Method "${method}" not found on "${packageKey(resolved)}". Available: ${available}`);
+    }
+    const argsJson = parseArgs(abiMethod, resolved.manifest, args ?? {});
+    return { result: await session.mero.rpc.execute({ contextId, method, argsJson }) };
+  }
+
   server.registerTool(
     'call',
     {
@@ -219,22 +244,42 @@ export function registerAppTools(
     },
     async (raw: unknown) => {
       try {
-        const target = await callTarget(raw as { app_handle?: unknown; app?: unknown; context?: unknown });
-        if ('refusal' in target) return target.refusal;
-        const { resolved, contextId } = target;
-        const { method, args } = CALL_INPUT.parse(raw);
-        if (method === INIT_METHOD) return refusal(INIT_REFUSED);
-
-        const abiMethod = resolved.manifest.methods.find((m) => m.name === method);
-        if (!abiMethod) {
-          const available = resolved.manifest.methods.map((m) => m.name).join(', ') || '(none)';
-          throw new Error(`Method "${method}" not found on "${packageKey(resolved)}". Available: ${available}`);
-        }
-        const argsJson = parseArgs(abiMethod, resolved.manifest, args ?? {});
-        return textResult(await session.mero.rpc.execute({ contextId, method, argsJson }));
+        const done = await runCall(raw);
+        return 'refusal' in done ? done.refusal : textResult(done.result);
       } catch (err) {
         return errorResult(err);
       }
+    },
+  );
+
+  // A refusal's last block is its message; any guide before it is left out of a batch.
+  const blockText = (blocks: Array<{ type: string; text?: string }>) => blocks.at(-1)?.text ?? '';
+
+  server.registerTool(
+    'call_many',
+    {
+      description:
+        `Run up to ${MAX_CALLS} \`call\`s at once, each validated against its ABI like \`call\`; a failing item does not fail the batch. ` +
+        'Results come back in request order as {ok, result} or {ok: false, error}. ' +
+        'Calls run concurrently, so the order mutating methods execute in is not guaranteed.',
+      inputSchema: advertisedObject(CALL_MANY_INPUT),
+    },
+    async (raw: unknown) => {
+      const { calls } = (raw ?? {}) as { calls?: unknown };
+      if (!Array.isArray(calls) || calls.length === 0 || calls.length > MAX_CALLS) {
+        return refusal(`Pass calls: an array of 1 to ${MAX_CALLS} calls.`);
+      }
+      const results = await Promise.all(
+        calls.map(async (item: unknown) => {
+          try {
+            const done = await runCall(item);
+            return 'refusal' in done ? { ok: false, error: blockText(done.refusal.content) } : { ok: true, result: done.result };
+          } catch (err) {
+            return { ok: false, error: blockText(errorResult(err).content) };
+          }
+        }),
+      );
+      return textResult(results);
     },
   );
 }
