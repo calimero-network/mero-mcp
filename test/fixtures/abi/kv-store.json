@@ -8,13 +8,15 @@
           "name": "key",
           "type": {
             "kind": "string"
-          }
+          },
+          "doc": "The key that was added."
         },
         {
           "name": "value",
           "type": {
             "kind": "string"
-          }
+          },
+          "doc": "The value stored under it."
         }
       ]
     },
@@ -25,7 +27,8 @@
           "name": "key",
           "type": {
             "kind": "string"
-          }
+          },
+          "doc": "The key that was removed."
         }
       ]
     },
@@ -36,18 +39,21 @@
           "name": "key",
           "type": {
             "kind": "string"
-          }
+          },
+          "doc": "The key whose value changed."
         },
         {
           "name": "value",
           "type": {
             "kind": "string"
-          }
+          },
+          "doc": "The value it now holds."
         }
       ]
     },
     "KvStore": {
       "kind": "record",
+      "doc": "A string-to-string map shared by every member of the context.",
       "fields": [
         {
           "name": "items",
@@ -65,7 +71,8 @@
               }
             },
             "crdt_type": "unordered_map"
-          }
+          },
+          "doc": "Every stored value by key; concurrent writes to one key keep the latest."
         }
       ]
     }
@@ -73,7 +80,7 @@
   "methods": [
     {
       "name": "clear",
-      "doc": "Removes every key.\n\nEmits `Cleared` only when the store was not already empty.\n\n# Examples\n\n```json\n{}\n```",
+      "doc": "Removes every key.\n\nEmits `Cleared` only when the store was not already empty.",
       "params": [],
       "returns": {
         "kind": "unit"
@@ -84,7 +91,7 @@
     },
     {
       "name": "entries",
-      "doc": "Returns every key with its value, as a JSON object ordered by key.\n\n# Examples\n\n```json\n{}\n```",
+      "doc": "Returns every key with its value, as a JSON object ordered by key.",
       "params": [],
       "returns": {
         "kind": "map",
@@ -157,7 +164,7 @@
       "returns": {
         "kind": "string"
       },
-      "returns_doc": "The value stored under `key`. An absent key yields no value: the call fails\nwith `NotFound`.",
+      "returns_doc": "The value stored under `key`.",
       "intent": "read_only"
     },
     {
@@ -175,12 +182,12 @@
       "returns": {
         "kind": "string"
       },
-      "returns_doc": "The value stored under `key`. An absent key yields no value: the call aborts.",
+      "returns_doc": "The value stored under `key`.",
       "intent": "read_only"
     },
     {
       "name": "init",
-      "doc": "Creates the empty store. The node runs it once, when the context is created.\n\n# Errors\n\nFails with `Cannot initialize over already existing state.` when the\ncontext already has a store.\n\n# Examples\n\n```json\n{}\n```",
+      "doc": "Creates the empty store. The node runs it once, when the context is created.\n\n# Errors\n\nFails with `Cannot initialize over already existing state.` when the\ncontext already has a store.",
       "params": [],
       "returns": {
         "kind": "unit"
@@ -188,7 +195,7 @@
     },
     {
       "name": "len",
-      "doc": "Returns the number of keys in the store.\n\n# Examples\n\n```json\n{}\n```",
+      "doc": "Returns the number of keys in the store.",
       "params": [],
       "returns": {
         "kind": "u32"
@@ -238,12 +245,11 @@
       "returns": {
         "kind": "unit"
       },
-      "intent": "mutating",
-      "destructive": true
+      "intent": "mutating"
     },
     {
       "name": "update_if_exists",
-      "doc": "Replaces the value under `key` only if the key already exists, and returns\nwhether it did.\n\nReturns `false` and writes nothing when `key` is absent. Emits `Updated`\nwhen the value is replaced.\n\n# Examples\n\n```json\n{\"key\": \"greeting\", \"value\": \"hi\"}\n```",
+      "doc": "Replaces the value under `key` only if the key already exists, and returns\nwhether it did.\n\nEmits `Updated` when the value is replaced.\n\n# Examples\n\n```json\n{\"key\": \"greeting\", \"value\": \"hi\"}\n```",
       "params": [
         {
           "name": "key",
@@ -264,31 +270,34 @@
         "kind": "bool"
       },
       "returns_doc": "`true` when `key` existed and now holds `value`; `false` when `key` was\nabsent, in which case nothing was written.",
-      "intent": "mutating",
-      "destructive": true
+      "intent": "mutating"
     }
   ],
   "events": [
     {
-      "name": "Cleared"
+      "name": "Cleared",
+      "doc": "Every key was removed from a non-empty store."
     },
     {
       "name": "Inserted",
       "payload": {
         "$ref": "Event_Inserted"
-      }
+      },
+      "doc": "A new key was stored."
     },
     {
       "name": "Removed",
       "payload": {
         "$ref": "Event_Removed"
-      }
+      },
+      "doc": "A key and its value were removed."
     },
     {
       "name": "Updated",
       "payload": {
         "$ref": "Event_Updated"
-      }
+      },
+      "doc": "An existing key's value was replaced."
     }
   ],
   "state_root": "KvStore",

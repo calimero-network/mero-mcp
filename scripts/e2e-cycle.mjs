@@ -22,13 +22,12 @@ import {
   fatal,
   installServerBin,
   resolveMerod,
-  sleep,
 } from './e2e-lib.mjs';
 
 const PLANNED = 8;
 
 /** Client keys are filed under the `sub` of the tokens they mint. */
-const clientIdOf = (accessToken) => JSON.parse(Buffer.from(accessToken.split('.')[1], 'base64url')).sub;
+const clientIdOf = (accessToken) => JSON.parse(Buffer.from(accessToken.split('.')[1], 'base64url')).key_id;
 
 // Everything the server could authenticate or locate a node with. It must succeed on the handoff alone.
 const CREDENTIAL_ENV = [
@@ -147,10 +146,6 @@ async function main() {
     // Clicking "Connect AI agent" again mints a replacement and revokes the old key, and the
     // agent's cached copy of that key keeps its unexpired `exp` - so it looks valid and 401s.
     await checks.check('a re-connect that revokes the old key does not lock the agent out', async () => {
-      // Core derives a client id from the second the key was minted, so a same-second
-      // re-connect overwrites that key instead of adding one. Cross the boundary to get
-      // a second key the first can actually be revoked independently of.
-      await sleep(1100);
       const replacement = await admin.clientKey(['admin']);
       assert(
         clientIdOf(replacement.access_token) !== clientIdOf(firstKey.access_token),
