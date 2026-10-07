@@ -640,7 +640,7 @@ test('create_context with args for a multi-service app and no service is an erro
   const { create, created } = initAdmin();
   const res = await create({ application: 'AppDrive', namespace: 'Ns111', args: { title: 'Plans' } });
   assert.equal(res.isError, true);
-  assert.match(textOf(res), /multiple services; pass service_name \(available: docs, registry\)/);
+  assert.match(textOf(res), /multiple services; pass service \(available: docs, registry\)/);
   assert.deepEqual(created, []);
 });
 

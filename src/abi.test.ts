@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import * as meroJs from '@calimero-network/mero-js';
 import type { NodeSession } from './node.ts';
@@ -39,9 +39,10 @@ function fake(
     apps?: ReturnType<typeof app>[];
     abi?: (id: string, serviceName?: string) => unknown;
     list?: () => unknown;
+    detail?: (id: string) => unknown;
   } = {},
 ) {
-  const calls = { list: 0, abi: 0, abiArgs: [] as Array<[string, string | undefined]> };
+  const calls = { list: 0, detail: 0, abi: 0, abiArgs: [] as Array<[string, string | undefined]> };
   let apps = opts.apps ?? [app()];
   const session = {
     url: 'http://localhost:2528',
@@ -52,6 +53,10 @@ function fake(
         listApplications: async () => {
           calls.list++;
           return opts.list ? opts.list() : { apps };
+        },
+        getApplication: async (id: string) => {
+          calls.detail++;
+          return opts.detail ? opts.detail(id) : { application: apps.find((a) => a.id === id) };
         },
         getApplicationAbi: async (id: string, serviceName?: string) => {
           calls.abi++;
@@ -244,13 +249,36 @@ test('a 400 for an absent ABI propagates unchanged', async () => {
   });
 });
 
-test('a 400 for an ambiguous service propagates unchanged', async () => {
-  const body = 'application has multiple services; pass service_name (available: api, worker)';
-  const { loader } = fake({ abi: () => { throw httpError(400, body); } });
+const twoServices = () => ({ application: { ...baseApp(), services: { worker: {}, api: {} } } });
+
+test('a listing without services and a detail with two yields one unit per service, with the detail fetched once per blob', async () => {
+  const { loader, calls } = fake({ detail: twoServices });
+  const logged = mock.method(console, 'error', () => {});
+  const first = await loader.loadAll();
+  const second = await loader.loadAll();
+  assert.deepEqual(first.map((a) => a.serviceName), ['api', 'worker']);
+  assert.deepEqual(second.map((a) => a.serviceName), ['api', 'worker']);
+  assert.equal(logged.mock.calls.length, 0);
+  assert.equal(calls.detail, 1);
+  assert.deepEqual(calls.abiArgs, [[APP_ID, 'api'], [APP_ID, 'worker']]);
+});
+
+test('load without a service on a multi-service app names the argument service and fetches no ABI', async () => {
+  const { loader, calls } = fake({ detail: twoServices });
   await assert.rejects(loader.load('kv-store'), (err: Error) => {
-    assert.equal(err.message, body);
+    assert.equal(err.message, 'application has multiple services; pass service (available: api, worker)');
     return true;
   });
+  assert.equal(calls.abi, 0);
+});
+
+test('a failed detail fetch leaves the app unqualified and is retried on the next listing', async () => {
+  let fail = true;
+  const { loader, calls } = fake({ detail: () => { if (fail) throw new Error('down'); return { application: baseApp() }; } });
+  await loader.loadAll();
+  fail = false;
+  await loader.loadAll();
+  assert.equal(calls.detail, 2);
 });
 
 test('a network failure is rethrown as-is, not as a merod upgrade prompt', async () => {
