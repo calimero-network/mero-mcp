@@ -43,13 +43,15 @@ probe. `active: true` marks the one this session is using.
 
 ### `list_applications`
 
-Applications installed on this node. No arguments. Read-only.
+Applications installed on this node, one compact row each. Read-only.
 
-Application `metadata` rides the wire as raw bytes; it is decoded for display into
-the JSON object it usually encodes, or the plain string, or omitted — never dumped as
-a byte array.
+| Argument | Type | Notes |
+| --- | --- | --- |
+| `verbose` | boolean, optional | Return the full records instead: decoded `metadata` (icon included), blob hashes, signer and `appVersion` |
 
-Each entry also carries `appVersion` and `procedures`: the `###` titles under `## Procedures` in the app's guide, or `[]` when it ships none.
+Each row is `{ id, package, name, version, description, hasGuide, procedures }`.
+`description` is cut at 200 characters.
+`procedures` holds the `###` titles under `## Procedures` in the app's guide, or `[]` when it ships none.
 The guide itself is left out; `describe_app` returns it.
 
 ### `list_namespaces`
@@ -63,8 +65,7 @@ Contexts on this node. Read-only.
 | Argument | Type | Notes |
 | --- | --- | --- |
 | `application` | string, optional | Filter to one application: id, package name, trailing segment, or display name |
-
-`dagHeads` are rendered as hex.
+| `verbose` | boolean, optional | Also return `contextStateHash` and `dagHeads` (rendered as hex) |
 
 ### `create_context`
 
