@@ -38,7 +38,8 @@ than going back to `list_applications`.
 ## App guides and app handles
 
 An app can ship a guide: Markdown its author writes, carried in the signed bundle and stored by the node.
-`list_applications` leaves the guide out of each entry and adds `procedures`, the `###` titles under the guide's `## Procedures` heading, plus `appVersion`.
+`list_applications` returns one compact row per app: `id`, `package`, `name`, `version`, a short `description`, `hasGuide` and `procedures`, the `###` titles under the guide's `## Procedures` heading.
+Icons, blob hashes and the guide itself are left out; pass `verbose: true` for the full records.
 
 - `describe_app` returns the app's methods, the guide (or `This app ships no guide.`) and an `app_handle` with no context.
   It is the way to plan across several apps.

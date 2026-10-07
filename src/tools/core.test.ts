@@ -176,7 +176,7 @@ test('list_applications decodes metadata for display: JSON object, plain string,
   };
   const { server, tools } = fakeServer();
   register(server, fakeSession(admin), loadConfig(env()), CATALOG);
-  const { apps } = jsonOf(await tools.get('list_applications')!({})) as unknown as { apps: Array<Record<string, unknown>> };
+  const { apps } = jsonOf(await tools.get('list_applications')!({ verbose: true })) as unknown as { apps: Array<Record<string, unknown>> };
 
   assert.deepEqual(apps[0].metadata, { name: 'kv-store' });
   assert.equal(apps[1].metadata, 'plain text');
@@ -197,7 +197,7 @@ test('list_applications adds appVersion, leaves the guide out and lists its proc
   };
   const { server, tools } = fakeServer();
   register(server, fakeSession(admin), loadConfig(env()), CATALOG);
-  const { apps } = jsonOf(await tools.get('list_applications')!({})) as unknown as { apps: Array<Record<string, unknown>> };
+  const { apps } = jsonOf(await tools.get('list_applications')!({ verbose: true })) as unknown as { apps: Array<Record<string, unknown>> };
 
   assert.deepEqual(apps[0].metadata, { name: 'kv-store' });
   assert.deepEqual(apps[0].procedures, ['Save a value', 'Read it back']);
@@ -206,6 +206,39 @@ test('list_applications adds appVersion, leaves the guide out and lists its proc
   assert.deepEqual(apps[1].procedures, []);
   assert.equal(apps[2].metadata, 'plain text');
   assert.deepEqual(apps[2].procedures, []);
+});
+
+test('list_applications returns compact rows by default: no icon, blob or signer, a truncated description, hasGuide', async () => {
+  const guide = ['## Procedures', '### Save a value'].join('\n');
+  const icon = 'data:image/png;base64,' + 'A'.repeat(5000);
+  const admin = {
+    listApplications: async () => ({
+      apps: [
+        {
+          id: 'AppId1',
+          package: 'pkg-guided',
+          version: '0.1.0',
+          blob: { bytecode: 'b' },
+          signer_id: 'sig',
+          metadata: utf8Bytes(JSON.stringify({ name: 'kv-store', description: 'd'.repeat(500), icon, guide })),
+        },
+        { id: 'AppId2', package: 'pkg-plain', version: '0.2.0', metadata: [] },
+      ],
+    }),
+  };
+  const { server, tools } = fakeServer();
+  register(server, fakeSession(admin), loadConfig(env()), CATALOG);
+  const result = await tools.get('list_applications')!({});
+  const { apps } = jsonOf(result) as unknown as { apps: Array<Record<string, unknown>> };
+
+  assert.deepEqual(Object.keys(apps[0]).sort(), ['description', 'hasGuide', 'id', 'name', 'package', 'procedures', 'version']);
+  assert.equal(apps[0].name, 'kv-store');
+  assert.equal((apps[0].description as string).length, 200);
+  assert.equal(apps[0].hasGuide, true);
+  assert.deepEqual(apps[0].procedures, ['Save a value']);
+  assert.equal(apps[1].hasGuide, false);
+  assert.equal(apps[1].package, 'pkg-plain');
+  assert.ok(result.content[0].text.length < 1000);
 });
 
 test('list_contexts renders dagHeads as hex, keeping every head a multi-head context carries', async () => {
