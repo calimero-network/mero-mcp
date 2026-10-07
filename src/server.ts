@@ -5,6 +5,7 @@ import { createCatalog } from './catalog.ts';
 import type { Config } from './config.ts';
 import { createGate } from './gate.ts';
 import { GUIDE_URI_TEMPLATE, guideUri } from './guide.ts';
+import type { HandleKeeper } from './handle.ts';
 import type { NodeSession } from './node.ts';
 import { traceTools } from './trace.ts';
 import { registerAppTools } from './tools/app.ts';
@@ -40,10 +41,10 @@ function packageVersion(): string {
  * One factory per process: serveStdio calls it for the connection (and for a discarded server/discover probe),
  * and every server it builds reads the same catalog and handle key, so no list varies by connection.
  */
-export function createServerFactory(session: NodeSession, cfg: Config) {
+export function createServerFactory(session: NodeSession, cfg: Config, keeper?: HandleKeeper) {
   const loader = createAbiLoader(session);
   const catalog = createCatalog(loader);
-  const gate = createGate(session);
+  const gate = createGate(session, keeper);
 
   return async (): Promise<McpServer> => {
     // A node that is down must not stop the server: app tools appear on the first refresh that reaches it.
