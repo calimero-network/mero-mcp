@@ -244,9 +244,9 @@ async function runChecks({ checks, mcp, api, kv, second }) {
       const tools = await mcp.listTools();
       const set = tools.find((t) => t.name === kvToolName(kv.slug, 'set'));
       assert(set, `${kvToolName(kv.slug, 'set')} is not registered`);
-      assertEqual(Object.keys(set.inputSchema.properties).sort(), ['app_handle', 'key', 'value'], 'set advertises the wrong properties');
-      assertEqual([...(set.inputSchema.required ?? [])].sort(), ['app_handle', 'key', 'value'], 'set does not require exactly its handle, key and value');
-      return 'app_handle, key and value, all required';
+      assertEqual(Object.keys(set.inputSchema.properties).sort(), ['app_handle', 'context', 'key', 'value'], 'set advertises the wrong properties');
+      assertEqual([...(set.inputSchema.required ?? [])].sort(), ['key', 'value'], 'set does not require exactly its key and value');
+      return 'key and value required, app_handle or context to pick the context';
     });
 
     await checks.check("select_app resolves the node's own context id directly, without mistaking it for an alias", async () => {
