@@ -1250,7 +1250,7 @@ test('call_many refuses an empty or oversized batch before running anything', as
 });
 
 test('a call by handle or by context on a cached app reads only the context list from the node', async () => {
-  const s = await setup([kv()]);
+  const s = await setup([kv(), drive()]);
   const admin = s.session.mero.admin as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>;
   const counts: Record<string, number> = {};
   for (const name of ['listApplications', 'getApplicationAbi', 'getContextsForApplication', 'lookupContextAlias']) {
@@ -1263,8 +1263,9 @@ test('a call by handle or by context on a cached app reads only the context list
     for (const key of Object.keys(counts)) counts[key] = 0;
     await s.call('call', { app_handle, method: 'set', args: { key: 'a' } });
     await s.call('call', { app: 'kv-store', context: ctx('kvctx'), method: 'set', args: { key: 'b' } });
-    assert.deepEqual(counts, { listApplications: 0, getApplicationAbi: 0, getContextsForApplication: 2, lookupContextAlias: 0 }, JSON.stringify(counts));
-    assert.equal(s.executed.length, 2);
+    await s.call('call', { app: 'mero-drive', context: ctx('regctx'), method: 'register_folder', args: { name: 'f' } });
+    assert.deepEqual(counts, { listApplications: 0, getApplicationAbi: 0, getContextsForApplication: 3, lookupContextAlias: 0 }, JSON.stringify(counts));
+    assert.equal(s.executed.length, 3);
   } finally {
     await s.close();
   }

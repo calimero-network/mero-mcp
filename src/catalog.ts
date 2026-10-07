@@ -45,11 +45,8 @@ export function createCatalog(loader: AbiLoader) {
     return run;
   }
 
-  /**
-   * The one cached app `nameOrId` names, by the loader's tiers; undefined when it is unknown, ambiguous or
-   * needs a service it was not given, so the caller falls back to the loader and its errors.
-   */
-  function find(nameOrId: string, service?: string): ResolvedApp | undefined {
+  /** The cached units of the one app `nameOrId` names, by the loader's tiers; empty when it is unknown or ambiguous. */
+  function match(nameOrId: string): ResolvedApp[] {
     const lower = nameOrId.toLowerCase();
     const tiers = [
       (a: ResolvedApp) => a.id === nameOrId,
@@ -57,13 +54,22 @@ export function createCatalog(loader: AbiLoader) {
       (a: ResolvedApp) => (a.package && lastSegment(a.package).toLowerCase() === lower) || a.name?.toLowerCase() === lower,
     ];
     const matches = tiers.map((tier) => apps.filter(tier)).find((m) => m.length) ?? [];
-    const units = service === undefined ? matches : matches.filter((a) => a.serviceName === service);
-    return new Set(matches.map((a) => a.id)).size === 1 && units.length === 1 ? units[0] : undefined;
+    return new Set(matches.map((a) => a.id)).size === 1 ? matches : [];
   }
+
+  /** The cached app and service `nameOrId` names, else undefined so the caller falls back to the loader and its errors. */
+  function find(nameOrId: string, service?: string): ResolvedApp | undefined {
+    const units = match(nameOrId).filter((a) => service === undefined || a.serviceName === service);
+    return units.length === 1 ? units[0] : undefined;
+  }
+
+  /** The app `nameOrId` names, whichever of its services is cached. */
+  const identify = (nameOrId: string): ResolvedApp | undefined => match(nameOrId)[0];
 
   return {
     apps: () => apps,
     find,
+    identify,
     sync,
     subscribe(listener: () => void): () => void {
       listeners.add(listener);
