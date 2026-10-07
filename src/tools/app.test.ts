@@ -425,7 +425,7 @@ test('select_app resolves an alias to the context it pins in the handle', async 
   }
 });
 
-test('generated tools carry a title, explicit annotations, an icon only for a URL, and _meta', async () => {
+test('generated tools carry a title, explicit annotations, no icon, and _meta', async () => {
   const s = await setup();
   try {
     const tools = (await s.client.listTools()).tools;
@@ -434,7 +434,7 @@ test('generated tools carry a title, explicit annotations, an icon only for a UR
     assert.equal(get.title, 'Get (KV Store)');
     assert.deepEqual(get.annotations, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false });
     assert.deepEqual(add.annotations, { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false });
-    assert.deepEqual(get.icons, [{ src: 'https://example.com/kv.png' }]);
+    assert.equal(get.icons, undefined);
     assert.equal(add.icons, undefined);
     assert.deepEqual(get._meta, { package: 'com.calimero.kv-store', appVersion: '1.0.0', signerId: 'SignerKey1', intent: 'read_only' });
     // select_app only reads the node and mints a handle, so clients need not confirm it.

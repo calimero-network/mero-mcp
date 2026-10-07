@@ -118,7 +118,6 @@ function toolConfig(app: ResolvedApp, method: AbiMethod) {
       idempotentHint: method.idempotent === true || readOnly,
       openWorldHint: false,
     },
-    ...(app.icon && URL.canParse(app.icon) ? { icons: [{ src: app.icon }] } : {}),
     _meta: {
       package: packageKey(app),
       appVersion: app.version ?? null,
