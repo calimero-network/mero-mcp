@@ -180,7 +180,7 @@ export function registerGeneratedTools(
     const argsJson = parseArgs(method, app.manifest, args);
     const result = await session.mero.rpc.execute({ contextId: admitted.contextId, method: method.name, argsJson });
     return {
-      content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) ?? 'null' }],
+      content: [{ type: 'text' as const, text: JSON.stringify(result) ?? 'null' }],
       ...(returnsValue(app.manifest, method) ? { structuredContent: result as Record<string, unknown> } : {}),
     };
   }

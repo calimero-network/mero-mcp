@@ -1023,3 +1023,14 @@ test('ABI docs and flags reach the tool: description, parameter doc, returns_doc
     await s.close();
   }
 });
+
+test('a generated tool serializes its result compactly in the text block', async () => {
+  const s = await setup([kv(), plain()], '2025-11-25', { execute: () => ({ id: 7, tags: ['a'] }) });
+  try {
+    const { app_handle } = await s.json('select_app', { app: 'notes' });
+    const added = await s.call('notes_add', { app_handle, body: 'x' });
+    assert.equal(added.content[0].text, '{"id":7,"tags":["a"]}');
+  } finally {
+    await s.close();
+  }
+});
