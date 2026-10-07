@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { fromJsonSchema } from '@modelcontextprotocol/server';
 import { packageKey, type AppIdentity, type ResolvedApp } from './abi.ts';
 import { guideBlocks } from './guide.ts';
-import { guideHash, handles } from './handle.ts';
+import { guideHash, handles, type HandleKeeper } from './handle.ts';
 import type { NodeSession } from './node.ts';
 
 interface AppContext {
@@ -50,7 +50,7 @@ export const handlePayload = (app: ResolvedApp, contextId: string | null) => ({
   s: app.serviceName ?? null,
 });
 
-export function createGate(session: NodeSession) {
+export function createGate(session: NodeSession, keeper: HandleKeeper = handles) {
   async function contextsOf(applicationId: string): Promise<AppContext[]> {
     return ((await session.mero.admin.getContextsForApplication(applicationId)) as { contexts: AppContext[] }).contexts;
   }
@@ -99,13 +99,13 @@ export function createGate(session: NodeSession) {
     contextsOf,
     chooseContext,
     admitContextId,
-    issue: (app: ResolvedApp, contextId: string | null) => handles.issue(handlePayload(app, contextId)),
-    read: handles.read,
+    issue: (app: ResolvedApp, contextId: string | null) => keeper.issue(handlePayload(app, contextId)),
+    read: keeper.read,
     refuse,
 
     /** The context a call may run in, or the refusal: a handle must match the installed app, its guide and a live context. */
     async admit(app: ResolvedApp, handle: unknown, context?: string): Promise<Admission> {
-      const payload = handles.read(handle);
+      const payload = keeper.read(handle);
       const expected = handlePayload(app, null);
       if (!payload || (['a', 'p', 'v', 'g', 's'] as const).some((key) => payload[key] !== expected[key])) return refuse(app);
       if (payload.c === null) return refuse(app, noContext(app), false);
