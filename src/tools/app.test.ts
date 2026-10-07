@@ -1044,21 +1044,33 @@ test('select_app leaves out the methods, shows the guide once per session and th
     assert.equal(summary.guide, 'calimero://apps/kv-id/1.0.0/guide');
     assert.equal(first.content[2].resource?.text, GUIDE);
     const again = await s.call('select_app', { app: 'kv-store' });
-    assert.equal(again.content.length, 1);
+    assert.equal(again.content.length, 2);
     assert.equal(JSON.parse(again.content[0].text!).guide, 'calimero://apps/kv-id/1.0.0/guide');
   } finally {
     await s.close();
   }
 });
 
-test('describe_app counts as the first guide exposure, for select_app and for itself', async () => {
+test('describe_app always carries the guide, and select_app after a show says so and points at the resource', async () => {
   const s = await setup();
   try {
-    const described = await s.call('describe_app', { app: 'kv-store' });
-    assert.equal(described.content[2].resource?.text, GUIDE);
-    assert.equal(JSON.parse(described.content[0].text!).methods.length, 2);
-    assert.equal((await s.call('select_app', { app: 'kv-store' })).content.length, 1);
-    assert.equal((await s.call('describe_app', { app: 'kv-store' })).content.length, 1);
+    for (let i = 0; i < 2; i++) assert.equal((await s.call('describe_app', { app: 'kv-store' })).content[2].resource?.text, GUIDE);
+    const res = await s.call('select_app', { app: 'kv-store' });
+    assert.equal(res.content.length, 2);
+    assert.match(res.content[1].text!, /shown earlier this session.*calimero:\/\/apps\/kv-id\/1\.0\.0\/guide/);
+    assert.equal(JSON.parse((await s.call('describe_app', { app: 'kv-store' })).content[0].text!).methods.length, 2);
+  } finally {
+    await s.close();
+  }
+});
+
+test('a new app version shows its guide again, and verbose counts as a show', async () => {
+  const s = await setup();
+  try {
+    await s.call('select_app', { app: 'kv-store', verbose: true });
+    assert.equal((await s.call('select_app', { app: 'kv-store' })).content.length, 2);
+    s.apps[0].version = '1.1.0';
+    assert.equal((await s.call('select_app', { app: 'kv-store' })).content[2].resource?.text, GUIDE);
   } finally {
     await s.close();
   }

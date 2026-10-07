@@ -62,14 +62,18 @@ export function registerAppTools(
   const aliases = new Map<string, string>();
   const guidesShown = new Set<string>();
 
-  /** The guide the first time this session shows that app version's, nothing after: `guide` in the summary points at its resource. */
+  /** The guide in full, remembered as shown for this server session. */
+  function showGuide(app: ResolvedApp) {
+    const uri = guideUri(app);
+    if (uri) guidesShown.add(uri);
+    return guideBlocks(app);
+  }
+
+  /** The full guide the first time this session shows it; a pointer to its resource after, for a client that kept it out of context. */
   function guideOnce(app: ResolvedApp) {
     const uri = guideUri(app);
-    if (uri) {
-      if (guidesShown.has(uri)) return [];
-      guidesShown.add(uri);
-    }
-    return guideBlocks(app);
+    if (!uri || !guidesShown.has(uri)) return showGuide(app);
+    return [{ type: 'text' as const, text: `This app's guide was shown earlier this session; read ${uri} if it is not in your context.` }];
   }
 
   async function summarize(app: ResolvedApp, contextId: string | null) {
@@ -139,14 +143,14 @@ export function registerAppTools(
     return gate.refuse(named).refusal;
   }
 
-  const describeBlocks = (app: ResolvedApp) => (app.guide ? guideOnce(app) : [{ type: 'text' as const, text: NO_GUIDE }]);
+  const describeBlocks = (app: ResolvedApp) => (app.guide ? showGuide(app) : [{ type: 'text' as const, text: NO_GUIDE }]);
 
   server.registerTool(
     'describe_app',
     {
       description:
         "Show an application's guide and ABI: the author's guide, then every method with its parameters and return type, " +
-        'plus an app_handle for planning. Does not pick a context. ' +
+        'plus an app_handle for planning. Always includes the guide. Does not pick a context. ' +
         'For a multi-service app, omitting `service` returns an error naming the available services.',
       inputSchema: {
         app: z.string().describe('Application id, package name, or display name.'),
@@ -171,7 +175,7 @@ export function registerAppTools(
     {
       description:
         "Pick an application and the context to act in. Returns the app_handle every app tool and `call` require; " +
-        "the handle names the context, so pass it unchanged. Shows the app's guide the first time only, then its resource uri; " +
+        "the handle names the context, so pass it unchanged. Shows the app's guide the first time only, then a note with its resource uri; " +
         'methods are in describe_app, or pass verbose to include them here.',
       inputSchema: {
         app: z.string().describe('Application id, package name, or display name.'),
@@ -204,7 +208,7 @@ export function registerAppTools(
             context: contextId,
             ...(contextId ? {} : { note: ids.length ? severalContexts(app, ids) : noContexts(app) }),
           },
-          verbose && resolved.guide ? guideBlocks(resolved) : guideOnce(resolved),
+          verbose ? showGuide(resolved) : resolved.guide ? guideOnce(resolved) : [],
         );
       } catch (err) {
         return errorResult(err);
