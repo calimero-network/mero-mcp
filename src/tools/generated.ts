@@ -99,11 +99,17 @@ function documentReturn(json: Record<string, unknown>, method: AbiMethod): Recor
   return { ...json, description: hint ? `${method.returns_doc} (${hint})` : method.returns_doc };
 }
 
+/** A unit return carries no value, so it gets neither an outputSchema nor structuredContent. */
+function returnsValue(method: AbiMethod) {
+  return method.returns && !('kind' in method.returns && method.returns.kind === 'unit') ? method.returns : undefined;
+}
+
 function toolConfig(app: ResolvedApp, method: AbiMethod) {
   const input = schemaBuilder(app.manifest, 'input');
   const output = schemaBuilder(app.manifest, 'output');
   const readOnly = method.intent === 'read_only';
-  const returned = method.returns && output.type(method.returns);
+  const value = returnsValue(method);
+  const returned = value && output.type(value);
   const returns = returned && (method.returns_nullable ? returned.nullable() : returned);
   return {
     title: toolTitle(app, method.name),
@@ -168,7 +174,7 @@ export function registerGeneratedTools(
     const result = await session.mero.rpc.execute({ contextId: admitted.contextId, method: method.name, argsJson });
     return {
       content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) ?? 'null' }],
-      ...(method.returns ? { structuredContent: result as Record<string, unknown> } : {}),
+      ...(returnsValue(method) ? { structuredContent: result as Record<string, unknown> } : {}),
     };
   }
 
