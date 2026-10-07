@@ -1,4 +1,4 @@
-import type { AbiLoader, ResolvedApp } from './abi.ts';
+import { lastSegment, type AbiLoader, type ResolvedApp } from './abi.ts';
 import { guideHash } from './handle.ts';
 
 // Matches the tools/list ttlMs, so a client that caches a list for its full lifetime is never staler than a poll.
@@ -45,8 +45,25 @@ export function createCatalog(loader: AbiLoader) {
     return run;
   }
 
+  /**
+   * The one cached app `nameOrId` names, by the loader's tiers; undefined when it is unknown, ambiguous or
+   * needs a service it was not given, so the caller falls back to the loader and its errors.
+   */
+  function find(nameOrId: string, service?: string): ResolvedApp | undefined {
+    const lower = nameOrId.toLowerCase();
+    const tiers = [
+      (a: ResolvedApp) => a.id === nameOrId,
+      (a: ResolvedApp) => a.package === nameOrId,
+      (a: ResolvedApp) => (a.package && lastSegment(a.package).toLowerCase() === lower) || a.name?.toLowerCase() === lower,
+    ];
+    const matches = tiers.map((tier) => apps.filter(tier)).find((m) => m.length) ?? [];
+    const units = service === undefined ? matches : matches.filter((a) => a.serviceName === service);
+    return new Set(matches.map((a) => a.id)).size === 1 && units.length === 1 ? units[0] : undefined;
+  }
+
   return {
     apps: () => apps,
+    find,
     sync,
     subscribe(listener: () => void): () => void {
       listeners.add(listener);

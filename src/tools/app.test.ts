@@ -209,6 +209,8 @@ test('a handle goes stale when the app version, its guide, or its context change
     try {
       const { app_handle } = await s.json('select_app', { app: 'kv-store' });
       change(s.apps[0]);
+      Object.assign(s.session.mero.admin, { installApplication: async () => ({ applicationId: 'kv-id' }) });
+      await s.call('install_application', { coords: 'com.calimero.kv-store@1.0.0' });
       const viaCall = await s.call('call', { app_handle, method: 'set', args: { key: 'k' } });
       assert.equal(viaCall.isError, true);
       assert.equal(viaCall.content.at(-1)!.text, RETRY);
@@ -307,6 +309,8 @@ test('call with a handle for an uninstalled app, or without one for a multi-serv
   try {
     const { app_handle } = await s.json('select_app', { app: 'kv-store' });
     s.apps.splice(0, 1);
+    Object.assign(s.session.mero.admin, { installApplication: async () => ({ applicationId: 'kv-id' }) });
+    await s.call('install_application', { coords: 'com.calimero.kv-store@1.0.0' });
     const gone = await s.call('call', { app_handle, method: 'set', args: { key: 'k' } });
     assert.deepEqual(gone.content.map((b) => b.text), ['Call select_app for the application and retry with the returned app_handle.']);
 
@@ -1240,6 +1244,27 @@ test('call_many refuses an empty or oversized batch before running anything', as
     const advertised = (await s.client.listTools()).tools.find((t) => t.name === 'call_many')!;
     const schema = (advertised.inputSchema.properties as { calls: { minItems: number; maxItems: number } }).calls;
     assert.deepEqual([schema.minItems, schema.maxItems], [1, 32]);
+  } finally {
+    await s.close();
+  }
+});
+
+test('a call by handle or by context on a cached app reads only the context list from the node', async () => {
+  const s = await setup([kv()]);
+  const admin = s.session.mero.admin as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>;
+  const counts: Record<string, number> = {};
+  for (const name of ['listApplications', 'getApplicationAbi', 'getContextsForApplication', 'lookupContextAlias']) {
+    counts[name] = 0;
+    const original = admin[name];
+    admin[name] = (...a) => ((counts[name] = (counts[name] ?? 0) + 1), original(...a));
+  }
+  try {
+    const { app_handle } = await s.json('select_app', { app: 'kv-store' });
+    for (const key of Object.keys(counts)) counts[key] = 0;
+    await s.call('call', { app_handle, method: 'set', args: { key: 'a' } });
+    await s.call('call', { app: 'kv-store', context: ctx('kvctx'), method: 'set', args: { key: 'b' } });
+    assert.deepEqual(counts, { listApplications: 0, getApplicationAbi: 0, getContextsForApplication: 2, lookupContextAlias: 0 }, JSON.stringify(counts));
+    assert.equal(s.executed.length, 2);
   } finally {
     await s.close();
   }

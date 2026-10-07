@@ -4,6 +4,7 @@ import { AppNotFoundError, INIT_METHOD, packageKey, type AbiLoader, type Resolve
 import type { Catalog } from '../catalog.ts';
 import { errorResult, textResult } from '../errors.ts';
 import { advertisedObject, type Gate } from '../gate.ts';
+import { guideHash } from '../handle.ts';
 import { guideBlocks, guideUri } from '../guide.ts';
 import type { NodeSession } from '../node.ts';
 import { methodReference, parseArgs } from '../schema.ts';
@@ -120,15 +121,17 @@ export function registerAppTools(
   }
 
   /** The app a context binds and that context: select_app's resolution, so `call` by context refuses what it refuses. */
-  async function selectContext(app: string, service?: string, context?: string) {
-    const { id } = await loader.identify(app);
+  async function selectContext(app: string, service?: string, context?: string, cached = false) {
+    const { id } = catalog.find(app) ?? (await loader.identify(app));
     const contexts = await gate.contextsOf(id);
     const ids = contexts.map((c) => c.id);
     const contextId = await gate.chooseContext(app, ids, context);
     // A context belongs to one service, so the chosen context decides which service the handle binds.
     const contextService = contexts.find((c) => c.id === contextId)?.serviceName;
-    const resolved = await loader.load(id, contextService ?? service);
-    return { resolved, contexts, contextId, ids, entry: await catalogued(sameUnit(resolved)) };
+    const hit = cached ? catalog.find(id, contextService ?? service) : undefined;
+    const fresh = hit && hit.version === identity.version && guideHash(hit.guide) === guideHash(identity.guide) ? hit : undefined;
+    const resolved = fresh ?? (await loader.load(id, contextService ?? service));
+    return { resolved, contexts, contextId, ids, entry: fresh ?? (await catalogued(sameUnit(resolved))) };
   }
 
   const describeBlocks = (app: ResolvedApp) => (app.guide ? showGuide(app) : [{ type: 'text' as const, text: NO_GUIDE }]);
@@ -202,19 +205,21 @@ export function registerAppTools(
     const payload = gate.read(app_handle);
     if (!payload) {
       if (typeof app !== 'string' || typeof context !== 'string') return { refusal: await refuseWithout(app) };
-      const { resolved, contexts, contextId } = await selectContext(app, undefined, context);
+      const { resolved, contexts, contextId } = await selectContext(app, undefined, context, true);
       const admitted = await gate.admitContextId(resolved, contextId!, contexts);
       return 'refusal' in admitted ? admitted : { resolved, contextId: admitted.contextId };
     }
     // With a valid handle `app` only matters when it names another app; a name that resolves to nothing is ignored.
-    const named = typeof app === 'string' ? await loader.identify(app).catch(() => undefined) : undefined;
+    const named = typeof app === 'string' ? (catalog.find(app) ?? (await loader.identify(app).catch(() => undefined))) : undefined;
     if (named && named.id !== payload.a) return { refusal: await refuseWithout(app) };
-    const resolved = await loader.load(payload.a, payload.s ?? undefined).catch((err: unknown) => {
+    // The catalog is at most one poll old; only an install or uninstall through this server refreshes it sooner.
+    const hit = catalog.find(payload.a, payload.s ?? undefined);
+    const resolved = hit ?? await loader.load(payload.a, payload.s ?? undefined).catch((err: unknown) => {
       if (err instanceof AppNotFoundError) return undefined;
       throw err;
     });
     if (!resolved) return { refusal: refusal(NO_HANDLE) };
-    await catalogued(sameUnit(resolved));
+    if (!hit) await catalogued(sameUnit(resolved));
     const admitted = await gate.admit(resolved, app_handle, typeof context === 'string' ? context : undefined);
     return 'refusal' in admitted ? admitted : { resolved, contextId: admitted.contextId };
   }
