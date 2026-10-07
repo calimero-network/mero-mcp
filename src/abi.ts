@@ -50,8 +50,15 @@ interface InstalledApp {
   services?: Record<string, unknown>;
 }
 
+/** A bundle with several services has no ABI without one; the argument that picks it is `service` here. */
+class MultiServiceError extends Error {
+  constructor(readonly services: string[]) {
+    super(`application has multiple services; pass service (available: ${services.join(', ')})`);
+  }
+}
+
 /**
- * Core's own 4xx messages already name the fix (rebuild the app, pass service_name);
+ * Core's own 4xx messages already name the fix (rebuild the app);
  * only a bodyless 404 means the route itself is missing.
  */
 function abiError(err: unknown): unknown {
@@ -63,10 +70,34 @@ function abiError(err: unknown): unknown {
 
 export function createAbiLoader(session: NodeSession) {
   const cache = new Map<string, AbiManifest>();
+  // Core's listing omits services, so each blob's come from the application's detail, fetched once.
+  const servicesByBlob = new Map<string, Promise<InstalledApp['services']>>();
+
+  const servicesOf = (app: InstalledApp) => {
+    const key = app.blob.bytecode;
+    let known = servicesByBlob.get(key);
+    if (!known) {
+      known = Promise.resolve()
+        .then(() => session.mero.admin.getApplication(app.id))
+        .then(
+          (detail: { application?: { services?: InstalledApp['services'] } | null }) => {
+            const services = detail.application?.services;
+            return services && Object.keys(services).length ? services : undefined;
+          },
+          () => {
+            servicesByBlob.delete(key); // a failed fetch is retried, not remembered
+            return undefined;
+          },
+        );
+      servicesByBlob.set(key, known);
+    }
+    return known;
+  };
 
   async function installed(): Promise<InstalledApp[]> {
     try {
-      return ((await session.mero.admin.listApplications()) as { apps: InstalledApp[] }).apps;
+      const { apps } = (await session.mero.admin.listApplications()) as { apps: InstalledApp[] };
+      return await Promise.all(apps.map(async (app) => (app.services ? app : { ...app, services: await servicesOf(app) })));
     } catch (err) {
       throw abiError(err);
     }
@@ -131,6 +162,7 @@ export function createAbiLoader(session: NodeSession) {
     const services = Object.keys(app.services ?? {});
     const soleService = services.length === 1 ? services[0] : undefined;
     const serviceName = requested ?? soleService;
+    if (!serviceName && services.length > 1) throw new MultiServiceError([...services].sort());
     return {
       ...identity(app),
       name: metadataField(app.metadata, 'name'),
