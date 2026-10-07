@@ -144,7 +144,8 @@ Anything an agent does through this server (installing an application, creating 
 **Application** (always registered):
 `describe_app` shows an application's methods and guide and gives a planning handle.
 Call it before setting up contexts for an app you have not used before: its guide says how they should be laid out.
-`select_app` picks an application and a context and returns its guide and `app_handle`.
+`select_app` picks an application and a context and returns the `app_handle` and tool names.
+It shows the app's guide the first time a session meets that app version, then only the guide resource uri; `verbose: true` adds the methods and the guide again.
 `call` invokes a method with that handle.
 
 Handles are per application, so one instruction can span several apps by holding a handle for each.

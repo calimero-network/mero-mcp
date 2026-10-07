@@ -1034,3 +1034,44 @@ test('a generated tool serializes its result compactly in the text block', async
     await s.close();
   }
 });
+
+test('select_app leaves out the methods, shows the guide once per session and then points at its resource', async () => {
+  const s = await setup();
+  try {
+    const first = await s.call('select_app', { app: 'kv-store' });
+    const summary = JSON.parse(first.content[0].text!);
+    assert.equal(summary.methods, undefined);
+    assert.equal(summary.guide, 'calimero://apps/kv-id/1.0.0/guide');
+    assert.equal(first.content[2].resource?.text, GUIDE);
+    const again = await s.call('select_app', { app: 'kv-store' });
+    assert.equal(again.content.length, 1);
+    assert.equal(JSON.parse(again.content[0].text!).guide, 'calimero://apps/kv-id/1.0.0/guide');
+  } finally {
+    await s.close();
+  }
+});
+
+test('describe_app counts as the first guide exposure, for select_app and for itself', async () => {
+  const s = await setup();
+  try {
+    const described = await s.call('describe_app', { app: 'kv-store' });
+    assert.equal(described.content[2].resource?.text, GUIDE);
+    assert.equal(JSON.parse(described.content[0].text!).methods.length, 2);
+    assert.equal((await s.call('select_app', { app: 'kv-store' })).content.length, 1);
+    assert.equal((await s.call('describe_app', { app: 'kv-store' })).content.length, 1);
+  } finally {
+    await s.close();
+  }
+});
+
+test('select_app with verbose restores the methods and the guide', async () => {
+  const s = await setup();
+  try {
+    await s.call('select_app', { app: 'kv-store' });
+    const res = await s.call('select_app', { app: 'kv-store', verbose: true });
+    assert.equal(JSON.parse(res.content[0].text!).methods.length, 2);
+    assert.equal(res.content[2].resource?.text, GUIDE);
+  } finally {
+    await s.close();
+  }
+});

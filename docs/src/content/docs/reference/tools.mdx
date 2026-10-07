@@ -250,6 +250,7 @@ Show an application's methods and guide without choosing a context. Read-only.
 
 Returns, as JSON: `application`, `package`, `appVersion`, resolved `service`, `contextServices`, every method as a signature (with its doc and documented parameters when the ABI carries them; see [ABI mapping](/reference/abi-mapping/#docs-and-hints)), and an `app_handle` with no context.
 Then the guide as an embedded `text/markdown` resource after an author label, or the line `This app ships no guide.`
+A session shows each app version's guide once; later calls carry `guide`, its resource uri, instead.
 
 Omitting `service` on a multi-service app returns an error naming the available services.
 When no context exists to read a service name from, a `serviceNote` says so: nothing on the application record or in the ABI lists an app's services.
@@ -263,8 +264,10 @@ Choose an application and the context to act in. Read-only.
 | `app` | string | Id, package name, trailing segment, or display name |
 | `context` | string, optional | Context id or alias; defaults to the app's only context |
 | `service` | string, optional | Only when no context is chosen; a chosen context decides the service |
+| `verbose` | boolean, optional | Also return `methods` and the guide, as `describe_app` does |
 
-Returns everything `describe_app` does, plus the app's tool names (`tools`), the chosen `context`, and an `app_handle` bound to that context and its service.
+Returns what `describe_app` does without the methods: `application`, `package`, `appVersion`, `service`, `contextServices`, `guide` (the resource uri), the app's tool names (`tools`), the chosen `context`, and an `app_handle` bound to that context and its service.
+The guide itself follows only the first time a session meets that app version.
 `tools` lists exactly the tools of the app and service the handle binds.
 When a package name matches apps from several signers, `select_app` and `describe_app` refuse and list each application id with its signer; pass the application id.
 For a bundle with one named service, a context created without a service name binds that service.

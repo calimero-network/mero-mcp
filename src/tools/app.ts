@@ -4,7 +4,7 @@ import { AppNotFoundError, INIT_METHOD, packageKey, type AbiLoader, type Resolve
 import type { Catalog } from '../catalog.ts';
 import { errorResult, textResult } from '../errors.ts';
 import { advertisedObject, type Gate } from '../gate.ts';
-import { guideBlocks } from '../guide.ts';
+import { guideBlocks, guideUri } from '../guide.ts';
 import type { NodeSession } from '../node.ts';
 import { methodReference, parseArgs } from '../schema.ts';
 import { toolNamesByApp } from './generated.ts';
@@ -60,6 +60,17 @@ export function registerAppTools(
   reserved: ReadonlySet<string>,
 ): void {
   const aliases = new Map<string, string>();
+  const guidesShown = new Set<string>();
+
+  /** The guide the first time this session shows that app version's, nothing after: `guide` in the summary points at its resource. */
+  function guideOnce(app: ResolvedApp) {
+    const uri = guideUri(app);
+    if (uri) {
+      if (guidesShown.has(uri)) return [];
+      guidesShown.add(uri);
+    }
+    return guideBlocks(app);
+  }
 
   async function summarize(app: ResolvedApp, contextId: string | null) {
     const contexts = await gate.contextsOf(app.id);
@@ -72,7 +83,7 @@ export function registerAppTools(
       service: app.serviceName ?? (contextServices.length === 1 ? contextServices[0] : null),
       contextServices,
       ...(app.serviceName || contextServices.length ? {} : { serviceNote: SERVICE_UNKNOWN }),
-      methods: app.manifest.methods.map(methodReference),
+      ...(app.guide ? { guide: guideUri(app) } : {}),
       app_handle: gate.issue(app, contextId),
     };
   }
@@ -128,7 +139,7 @@ export function registerAppTools(
     return gate.refuse(named).refusal;
   }
 
-  const describeBlocks = (app: ResolvedApp) => (app.guide ? guideBlocks(app) : [{ type: 'text' as const, text: NO_GUIDE }]);
+  const describeBlocks = (app: ResolvedApp) => (app.guide ? guideOnce(app) : [{ type: 'text' as const, text: NO_GUIDE }]);
 
   server.registerTool(
     'describe_app',
@@ -147,7 +158,8 @@ export function registerAppTools(
       try {
         const resolved = await loader.load(app, service);
         await catalogued(sameUnit(resolved));
-        return withBlocks(await summarize(resolved, null), describeBlocks(resolved));
+        const methods = resolved.manifest.methods.map(methodReference);
+        return withBlocks({ ...(await summarize(resolved, null)), methods }, describeBlocks(resolved));
       } catch (err) {
         return errorResult(err);
       }
@@ -158,8 +170,9 @@ export function registerAppTools(
     'select_app',
     {
       description:
-        "Pick an application and the context to act in. Returns the app's guide and the app_handle " +
-        'every app tool and `call` require; the handle names the context, so pass it unchanged.',
+        "Pick an application and the context to act in. Returns the app_handle every app tool and `call` require; " +
+        "the handle names the context, so pass it unchanged. Shows the app's guide the first time only, then its resource uri; " +
+        'methods are in describe_app, or pass verbose to include them here.',
       inputSchema: {
         app: z.string().describe('Application id, package name, or display name.'),
         service: z
@@ -167,10 +180,11 @@ export function registerAppTools(
           .optional()
           .describe('Service name, for a multi-service app when no context is chosen; a chosen context decides it.'),
         context: z.string().optional().describe("Context id or alias; defaults to the application's only context."),
+        verbose: z.boolean().optional().describe('Also return the methods list and the guide, as describe_app does.'),
       },
       annotations: { readOnlyHint: true },
     },
-    async ({ app, service, context }) => {
+    async ({ app, service, context, verbose }) => {
       try {
         const { id } = await loader.identify(app);
         const contexts = await gate.contextsOf(id);
@@ -184,12 +198,13 @@ export function registerAppTools(
         return withBlocks(
           {
             ...(await summarize(resolved, contextId)),
+            ...(verbose ? { methods: resolved.manifest.methods.map(methodReference) } : {}),
             tools,
             toolsNote: TOOLS_NOTE,
             context: contextId,
             ...(contextId ? {} : { note: ids.length ? severalContexts(app, ids) : noContexts(app) }),
           },
-          resolved.guide ? guideBlocks(resolved) : [],
+          verbose && resolved.guide ? guideBlocks(resolved) : guideOnce(resolved),
         );
       } catch (err) {
         return errorResult(err);
