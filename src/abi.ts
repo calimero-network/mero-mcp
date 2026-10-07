@@ -9,6 +9,8 @@ const UPGRADE_MEROD =
 
 export const INIT_METHOD = 'init';
 
+const FAILURE_RETRY_MS = 30_000; // matches the catalog poll
+
 export interface ResolvedApp {
   id: string;
   package?: string;
@@ -51,7 +53,7 @@ interface InstalledApp {
 }
 
 /**
- * Core's own 4xx messages already name the fix (rebuild the app, pass service_name);
+ * Core's own 4xx messages already name the fix (rebuild the app);
  * only a bodyless 404 means the route itself is missing.
  */
 function abiError(err: unknown): unknown {
@@ -63,10 +65,41 @@ function abiError(err: unknown): unknown {
 
 export function createAbiLoader(session: NodeSession) {
   const cache = new Map<string, AbiManifest>();
+  // Core's listing omits services, so each blob's come from the application's detail, fetched once.
+  // A failed fetch is remembered for the poll interval and reported once, so a broken node is not hit per call.
+  const servicesByBlob = new Map<string, { services: Promise<InstalledApp['services']>; retryAt?: number }>();
+  const reported = new Set<string>();
+
+  const servicesOf = (app: InstalledApp) => {
+    const key = app.blob.bytecode;
+    const known = servicesByBlob.get(key);
+    if (known && !(known.retryAt !== undefined && Date.now() >= known.retryAt)) return known.services;
+    const entry: { services: Promise<InstalledApp['services']>; retryAt?: number } = {
+      services: Promise.resolve()
+        .then(() => session.mero.admin.getApplication(app.id))
+        .then(
+          (detail: { application?: { services?: InstalledApp['services'] } | null }) => {
+            const services = detail.application?.services;
+            return services && Object.keys(services).length ? services : undefined;
+          },
+          (err: unknown) => {
+            entry.retryAt = Date.now() + FAILURE_RETRY_MS;
+            if (!reported.has(key)) {
+              reported.add(key);
+              console.error(`[mero-mcp] could not read the services of ${packageKey(app)}: ${String(err)}`);
+            }
+            return undefined;
+          },
+        ),
+    };
+    servicesByBlob.set(key, entry);
+    return entry.services;
+  };
 
   async function installed(): Promise<InstalledApp[]> {
     try {
-      return ((await session.mero.admin.listApplications()) as { apps: InstalledApp[] }).apps;
+      const { apps } = (await session.mero.admin.listApplications()) as { apps: InstalledApp[] };
+      return await Promise.all(apps.map(async (app) => (app.services ? app : { ...app, services: await servicesOf(app) })));
     } catch (err) {
       throw abiError(err);
     }
@@ -131,6 +164,7 @@ export function createAbiLoader(session: NodeSession) {
     const services = Object.keys(app.services ?? {});
     const soleService = services.length === 1 ? services[0] : undefined;
     const serviceName = requested ?? soleService;
+    if (!serviceName && services.length > 1) throw new Error(`application has multiple services; pass service (available: ${[...services].sort().join(', ')})`);
     return {
       ...identity(app),
       name: metadataField(app.metadata, 'name'),
