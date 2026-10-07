@@ -20,7 +20,8 @@
               }
             },
             "crdt_type": "unordered_map"
-          }
+          },
+          "doc": "Public replicated KV map"
         },
         {
           "name": "handler_counter",
@@ -28,7 +29,8 @@
             "kind": "record",
             "fields": [],
             "crdt_type": "counter"
-          }
+          },
+          "doc": "Counter for handler executions (CRDT G-Counter - grow only)"
         },
         {
           "name": "user_items_simple",
@@ -45,7 +47,8 @@
                 "kind": "string"
               }
             }
-          }
+          },
+          "doc": "Simple user-owned data (e.g., profile name)"
         },
         {
           "name": "user_items_nested",
@@ -57,7 +60,8 @@
             "value": {
               "$ref": "NestedMap"
             }
-          }
+          },
+          "doc": "Nested user-owned data (e.g., user's private KV store)"
         },
         {
           "name": "frozen_items",
@@ -69,7 +73,8 @@
             "value": {
               "kind": "string"
             }
-          }
+          },
+          "doc": "Content-addressed immutable storage"
         },
         {
           "name": "games",
@@ -87,7 +92,8 @@
               }
             },
             "crdt_type": "unordered_map"
-          }
+          },
+          "doc": "Maps game_id -> SHA256(secret) hex"
         },
         {
           "name": "files",
@@ -100,7 +106,8 @@
               "$ref": "FileRecord"
             },
             "crdt_type": "unordered_map"
-          }
+          },
+          "doc": "File metadata records"
         },
         {
           "name": "file_counter",
@@ -111,7 +118,8 @@
             "inner_type": {
               "kind": "u64"
             }
-          }
+          },
+          "doc": "Counter for generating file IDs"
         },
         {
           "name": "file_owner",
@@ -122,7 +130,8 @@
             "inner_type": {
               "kind": "string"
             }
-          }
+          },
+          "doc": "Owner of the file share context"
         },
         {
           "name": "crdt_counters",
@@ -137,7 +146,8 @@
               "crdt_type": "counter"
             },
             "crdt_type": "unordered_map"
-          }
+          },
+          "doc": "Map of G-Counters (grow-only, concurrent increments should sum)\nCounter<false> = GCounter (default)"
         },
         {
           "name": "crdt_pn_counters",
@@ -152,7 +162,8 @@
               "crdt_type": "counter"
             },
             "crdt_type": "unordered_map"
-          }
+          },
+          "doc": "Map of PN-Counters (supports decrement, concurrent inc/dec should merge correctly)\nCounter<true> = PNCounter (allows decrement)"
         },
         {
           "name": "crdt_registers",
@@ -170,7 +181,8 @@
               }
             },
             "crdt_type": "unordered_map"
-          }
+          },
+          "doc": "Map of LWW registers (latest timestamp wins)"
         },
         {
           "name": "crdt_metadata",
@@ -195,7 +207,8 @@
               "crdt_type": "unordered_map"
             },
             "crdt_type": "unordered_map"
-          }
+          },
+          "doc": "Nested maps (field-level merge)"
         },
         {
           "name": "crdt_metrics",
@@ -207,7 +220,8 @@
               "crdt_type": "counter"
             },
             "crdt_type": "vector"
-          }
+          },
+          "doc": "Vector of G-Counters (element-wise merge)"
         },
         {
           "name": "crdt_tags",
@@ -224,7 +238,8 @@
               "crdt_type": "unordered_set"
             },
             "crdt_type": "unordered_map"
-          }
+          },
+          "doc": "Map of sets (union merge)"
         },
         {
           "name": "sorted_items",
@@ -242,7 +257,8 @@
               }
             },
             "crdt_type": "sorted_map"
-          }
+          },
+          "doc": "Key-ordered map exercised end-to-end through the WASM host index path."
         },
         {
           "name": "sorted_tags",
@@ -252,7 +268,8 @@
               "kind": "string"
             },
             "crdt_type": "sorted_set"
-          }
+          },
+          "doc": "Element-ordered set, exercised end-to-end through the same WASM host\nordered-index path as `sorted_items` (the `SortedSet` counterpart)."
         },
         {
           "name": "rga_document",
@@ -260,7 +277,8 @@
             "kind": "record",
             "fields": [],
             "crdt_type": "replicated_growable_array"
-          }
+          },
+          "doc": "Collaborative text document"
         },
         {
           "name": "rga_edit_count",
@@ -268,7 +286,8 @@
             "kind": "record",
             "fields": [],
             "crdt_type": "counter"
-          }
+          },
+          "doc": "Edit count for document (G-Counter)"
         },
         {
           "name": "rga_metadata",
@@ -286,7 +305,8 @@
               }
             },
             "crdt_type": "unordered_map"
-          }
+          },
+          "doc": "Document metadata (title, owner)"
         },
         {
           "name": "authored_items",
@@ -304,7 +324,27 @@
               }
             },
             "crdt_type": "authored_map"
-          }
+          },
+          "doc": "Shared keyspace map with per-entry ownership"
+        },
+        {
+          "name": "authored_sorted",
+          "type": {
+            "kind": "map",
+            "key": {
+              "kind": "string"
+            },
+            "value": {
+              "kind": "record",
+              "fields": [],
+              "crdt_type": "lww_register",
+              "inner_type": {
+                "kind": "string"
+              }
+            },
+            "crdt_type": "authored_sorted_map"
+          },
+          "doc": "Per-entry ownership AND a node-local ordered index — the only collection\nthat is both, which is why it is here rather than left to its own\nexample app.\n\nThe two properties intersect on the sync path: a remote apply mutates\nentries host-side WITHOUT going through `insert`, so it leaves the\nordered-index validity marker stale and the next ordered read has to\nnotice and rebuild (the shape of #3333, there for `SortedSet`). Nothing\nexercised that against User-signed entries until this field existed."
         },
         {
           "name": "authored_vec",
@@ -319,7 +359,8 @@
               }
             },
             "crdt_type": "authored_vector"
-          }
+          },
+          "doc": "Append-only vector with per-slot ownership; only the pusher can update/tombstone their slot"
         },
         {
           "name": "shared_data",
@@ -335,7 +376,8 @@
                 "kind": "string"
               }
             }
-          }
+          },
+          "doc": "Group-writable single value; writers rotate at runtime"
         }
       ]
     },
@@ -373,6 +415,40 @@
         }
       ]
     },
+    "Event_AuthoredSortedInserted": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "owner",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ]
+    },
+    "Event_AuthoredSortedRemoved": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ]
+    },
     "Event_AuthoredUpdated": {
       "kind": "record",
       "fields": [
@@ -394,9 +470,9 @@
       "kind": "record",
       "fields": [
         {
-          "name": "index",
+          "name": "entry_id",
           "type": {
-            "kind": "u32"
+            "kind": "string"
           }
         },
         {
@@ -431,6 +507,23 @@
           "name": "index",
           "type": {
             "kind": "u32"
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ]
+    },
+    "Event_AuthoredVecUpdatedById": {
+      "kind": "record",
+      "fields": [
+        {
+          "name": "entry_id",
+          "type": {
+            "kind": "string"
           }
         },
         {
@@ -850,6 +943,7 @@
     },
     "FileRecord": {
       "kind": "record",
+      "doc": "File record for blob metadata. Atomic whole-record LWW by `uploaded_at`\n(see `impl_atomic_lww_leaf!`); not a struct of CRDT fields, so no derive.",
       "fields": [
         {
           "name": "id",
@@ -866,8 +960,7 @@
         {
           "name": "blob_id",
           "type": {
-            "kind": "bytes",
-            "size": 32
+            "kind": "string"
           }
         },
         {
@@ -898,6 +991,7 @@
     },
     "NestedMap": {
       "kind": "record",
+      "doc": "Nested map type for user storage.",
       "fields": [
         {
           "name": "map",
@@ -933,7 +1027,8 @@
       ],
       "returns": {
         "kind": "string"
-      }
+      },
+      "intent": "mutating"
     },
     {
       "name": "add_guess",
@@ -953,7 +1048,8 @@
       ],
       "returns": {
         "kind": "bool"
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "add_secret",
@@ -973,7 +1069,8 @@
       ],
       "returns": {
         "kind": "unit"
-      }
+      },
+      "intent": "mutating"
     },
     {
       "name": "add_tag",
@@ -993,7 +1090,8 @@
       ],
       "returns": {
         "kind": "unit"
-      }
+      },
+      "intent": "mutating"
     },
     {
       "name": "authored_entries",
@@ -1006,10 +1104,12 @@
         "value": {
           "kind": "string"
         }
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "authored_get",
+      "doc": "The value at `key` held by whichever account holds it. Keys of an\nauthored map are per owner, and these scenarios give each key one\nholder, so the first (by entry id) is the one.",
       "params": [
         {
           "name": "key",
@@ -1020,10 +1120,12 @@
       ],
       "returns": {
         "kind": "string"
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "authored_get_owner",
+      "doc": "The account holding `key`. See `authored_get`.",
       "params": [
         {
           "name": "key",
@@ -1034,7 +1136,8 @@
       ],
       "returns": {
         "kind": "string"
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "authored_insert",
@@ -1054,14 +1157,16 @@
       ],
       "returns": {
         "kind": "unit"
-      }
+      },
+      "intent": "mutating"
     },
     {
       "name": "authored_len",
       "params": [],
       "returns": {
         "kind": "u32"
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "authored_remove",
@@ -1075,7 +1180,135 @@
       ],
       "returns": {
         "kind": "string"
-      }
+      },
+      "intent": "mutating"
+    },
+    {
+      "name": "authored_sorted_get",
+      "doc": "As `authored_get`, for the sorted map.",
+      "params": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "string"
+      },
+      "intent": "read_only"
+    },
+    {
+      "name": "authored_sorted_get_owner",
+      "doc": "As `authored_get_owner`, for the sorted map.",
+      "params": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "string"
+      },
+      "intent": "read_only"
+    },
+    {
+      "name": "authored_sorted_insert",
+      "params": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "unit"
+      },
+      "intent": "mutating"
+    },
+    {
+      "name": "authored_sorted_keys",
+      "params": [],
+      "returns": {
+        "kind": "list",
+        "items": {
+          "kind": "string"
+        }
+      },
+      "intent": "read_only"
+    },
+    {
+      "name": "authored_sorted_len",
+      "params": [],
+      "returns": {
+        "kind": "u32"
+      },
+      "intent": "read_only"
+    },
+    {
+      "name": "authored_sorted_prefix",
+      "doc": "Keys under `prefix`, ascending — an index seek, not a scan.\n\nThe read that separates this collection from `AuthoredMap`: entries\noutside the prefix are never loaded, which matters because on an\nauthored collection anyone may insert and only an entry's own owner may\never remove it, so the collection only grows.",
+      "params": [
+        {
+          "name": "prefix",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "list",
+        "items": {
+          "kind": "string"
+        }
+      },
+      "intent": "read_only"
+    },
+    {
+      "name": "authored_sorted_remove",
+      "params": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "string"
+      },
+      "intent": "mutating"
+    },
+    {
+      "name": "authored_sorted_update",
+      "params": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "unit"
+      },
+      "intent": "mutating"
     },
     {
       "name": "authored_update",
@@ -1095,7 +1328,8 @@
       ],
       "returns": {
         "kind": "unit"
-      }
+      },
+      "intent": "mutating"
     },
     {
       "name": "authored_vec_entries",
@@ -1105,7 +1339,8 @@
         "items": {
           "kind": "string"
         }
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "authored_vec_get",
@@ -1119,7 +1354,8 @@
       ],
       "returns": {
         "kind": "string"
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "authored_vec_get_owner",
@@ -1133,17 +1369,20 @@
       ],
       "returns": {
         "kind": "string"
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "authored_vec_len",
       "params": [],
       "returns": {
         "kind": "u32"
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "authored_vec_push",
+      "doc": "Returns the new entry's ID, not its index.\n\nAn index describes where the entry currently sits in a set every peer\ninserts into, so it goes stale as soon as anyone inserts ahead of it.\nThe id names the entry (core#3637).",
       "params": [
         {
           "name": "value",
@@ -1153,8 +1392,9 @@
         }
       ],
       "returns": {
-        "kind": "u32"
-      }
+        "kind": "string"
+      },
+      "intent": "mutating"
     },
     {
       "name": "authored_vec_remove",
@@ -1168,7 +1408,8 @@
       ],
       "returns": {
         "kind": "unit"
-      }
+      },
+      "intent": "mutating"
     },
     {
       "name": "authored_vec_update",
@@ -1188,28 +1429,56 @@
       ],
       "returns": {
         "kind": "unit"
-      }
+      },
+      "intent": "mutating"
+    },
+    {
+      "name": "authored_vec_update_by_id",
+      "doc": "Update by ID — the address that survives a concurrent insert.",
+      "params": [
+        {
+          "name": "entry_id",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "unit"
+      },
+      "intent": "mutating"
     },
     {
       "name": "clear",
       "params": [],
       "returns": {
         "kind": "unit"
-      }
+      },
+      "intent": "mutating"
     },
     {
       "name": "clear_handler",
       "params": [],
       "returns": {
         "kind": "unit"
-      }
+      },
+      "intent": "mutating",
+      "handler": true
     },
     {
       "name": "clear_with_handler",
+      "doc": "Clear with handler trigger (for testing event-driven handlers)",
       "params": [],
       "returns": {
         "kind": "unit"
-      }
+      },
+      "intent": "mutating"
     },
     {
       "name": "decrement_pn_counter",
@@ -1223,7 +1492,8 @@
       ],
       "returns": {
         "kind": "i64"
-      }
+      },
+      "intent": "mutating"
     },
     {
       "name": "delete_file",
@@ -1237,7 +1507,8 @@
       ],
       "returns": {
         "kind": "unit"
-      }
+      },
+      "intent": "mutating"
     },
     {
       "name": "entries",
@@ -1250,7 +1521,8 @@
         "value": {
           "kind": "string"
         }
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "games",
@@ -1263,7 +1535,8 @@
         "value": {
           "kind": "string"
         }
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "get",
@@ -1277,10 +1550,11 @@
       ],
       "returns": {
         "kind": "string"
-      }
+      },
+      "intent": "read_only"
     },
     {
-      "name": "get_blob_id_b58",
+      "name": "get_blob_id_hex",
       "params": [
         {
           "name": "file_id",
@@ -1291,7 +1565,8 @@
       ],
       "returns": {
         "kind": "string"
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "get_counter",
@@ -1305,7 +1580,8 @@
       ],
       "returns": {
         "kind": "u64"
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "get_file",
@@ -1319,7 +1595,8 @@
       ],
       "returns": {
         "$ref": "FileRecord"
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "get_frozen",
@@ -1333,7 +1610,8 @@
       ],
       "returns": {
         "kind": "string"
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "get_g_counter",
@@ -1347,14 +1625,16 @@
       ],
       "returns": {
         "kind": "u64"
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "get_handler_execution_count",
       "params": [],
       "returns": {
         "kind": "u64"
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "get_metadata",
@@ -1374,7 +1654,8 @@
       ],
       "returns": {
         "kind": "string"
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "get_metric",
@@ -1388,7 +1669,8 @@
       ],
       "returns": {
         "kind": "u64"
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "get_pn_counter",
@@ -1402,7 +1684,8 @@
       ],
       "returns": {
         "kind": "i64"
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "get_register",
@@ -1416,7 +1699,8 @@
       ],
       "returns": {
         "kind": "string"
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "get_result",
@@ -1430,7 +1714,8 @@
       ],
       "returns": {
         "kind": "string"
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "get_tag_count",
@@ -1444,7 +1729,8 @@
       ],
       "returns": {
         "kind": "u64"
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "get_user_nested",
@@ -1458,17 +1744,20 @@
       ],
       "returns": {
         "kind": "string"
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "get_user_simple",
       "params": [],
       "returns": {
         "kind": "string"
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "get_user_simple_for",
+      "doc": "Named by ACCOUNT: user storage is keyed per person, so this reaches the\none slot every device of theirs writes to.",
       "params": [
         {
           "name": "user_key",
@@ -1480,7 +1769,8 @@
       ],
       "returns": {
         "kind": "string"
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "has_tag",
@@ -1500,7 +1790,8 @@
       ],
       "returns": {
         "kind": "bool"
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "increment_counter",
@@ -1514,7 +1805,8 @@
       ],
       "returns": {
         "kind": "u64"
-      }
+      },
+      "intent": "mutating"
     },
     {
       "name": "increment_g_counter",
@@ -1528,7 +1820,8 @@
       ],
       "returns": {
         "kind": "u64"
-      }
+      },
+      "intent": "mutating"
     },
     {
       "name": "increment_pn_counter",
@@ -1542,7 +1835,8 @@
       ],
       "returns": {
         "kind": "i64"
-      }
+      },
+      "intent": "mutating"
     },
     {
       "name": "init",
@@ -1569,14 +1863,17 @@
       ],
       "returns": {
         "kind": "unit"
-      }
+      },
+      "intent": "mutating",
+      "handler": true
     },
     {
       "name": "len",
       "params": [],
       "returns": {
         "kind": "u32"
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "list_files",
@@ -1586,14 +1883,25 @@
         "items": {
           "$ref": "FileRecord"
         }
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "metrics_len",
       "params": [],
       "returns": {
         "kind": "u32"
-      }
+      },
+      "intent": "read_only"
+    },
+    {
+      "name": "my_account",
+      "doc": "This node's account, hex-encoded — what a writer set names.\n\nExists for the e2e: granting a writer needs an account id, and an account\nis derived from the node's root rather than carried on the wire, so a\nscenario has no other way to learn one. (Operators use\n`meroctl account show`; a workflow captures this call's output.)",
+      "params": [],
+      "returns": {
+        "kind": "string"
+      },
+      "intent": "read_only"
     },
     {
       "name": "my_secrets",
@@ -1606,7 +1914,8 @@
         "value": {
           "kind": "string"
         }
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "push_metric",
@@ -1620,7 +1929,8 @@
       ],
       "returns": {
         "kind": "u32"
-      }
+      },
+      "intent": "mutating"
     },
     {
       "name": "remove",
@@ -1634,7 +1944,8 @@
       ],
       "returns": {
         "kind": "string"
-      }
+      },
+      "intent": "mutating"
     },
     {
       "name": "remove_handler",
@@ -1648,10 +1959,13 @@
       ],
       "returns": {
         "kind": "unit"
-      }
+      },
+      "intent": "mutating",
+      "handler": true
     },
     {
       "name": "remove_with_handler",
+      "doc": "Remove with handler trigger (for testing event-driven handlers)",
       "params": [
         {
           "name": "key",
@@ -1662,7 +1976,8 @@
       ],
       "returns": {
         "kind": "string"
-      }
+      },
+      "intent": "mutating"
     },
     {
       "name": "rga_append_text",
@@ -1676,14 +1991,16 @@
       ],
       "returns": {
         "kind": "unit"
-      }
+      },
+      "intent": "mutating"
     },
     {
       "name": "rga_clear",
       "params": [],
       "returns": {
         "kind": "unit"
-      }
+      },
+      "intent": "mutating"
     },
     {
       "name": "rga_delete_text",
@@ -1703,28 +2020,32 @@
       ],
       "returns": {
         "kind": "unit"
-      }
+      },
+      "intent": "mutating"
     },
     {
       "name": "rga_get_length",
       "params": [],
       "returns": {
         "kind": "u32"
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "rga_get_text",
       "params": [],
       "returns": {
         "kind": "string"
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "rga_get_title",
       "params": [],
       "returns": {
         "kind": "string"
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "rga_insert_text",
@@ -1744,14 +2065,16 @@
       ],
       "returns": {
         "kind": "unit"
-      }
+      },
+      "intent": "mutating"
     },
     {
       "name": "rga_is_empty",
       "params": [],
       "returns": {
         "kind": "bool"
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "rga_set_title",
@@ -1765,7 +2088,8 @@
       ],
       "returns": {
         "kind": "unit"
-      }
+      },
+      "intent": "mutating"
     },
     {
       "name": "search_files",
@@ -1782,10 +2106,12 @@
         "items": {
           "$ref": "FileRecord"
         }
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "set",
+      "doc": "Basic KV set without handlers",
       "params": [
         {
           "name": "key",
@@ -1802,7 +2128,8 @@
       ],
       "returns": {
         "kind": "unit"
-      }
+      },
+      "intent": "mutating"
     },
     {
       "name": "set_metadata",
@@ -1828,7 +2155,8 @@
       ],
       "returns": {
         "kind": "unit"
-      }
+      },
+      "intent": "mutating"
     },
     {
       "name": "set_register",
@@ -1848,7 +2176,8 @@
       ],
       "returns": {
         "kind": "unit"
-      }
+      },
+      "intent": "mutating"
     },
     {
       "name": "set_user_nested",
@@ -1868,7 +2197,8 @@
       ],
       "returns": {
         "kind": "unit"
-      }
+      },
+      "intent": "mutating"
     },
     {
       "name": "set_user_simple",
@@ -1882,10 +2212,12 @@
       ],
       "returns": {
         "kind": "unit"
-      }
+      },
+      "intent": "mutating"
     },
     {
       "name": "set_with_handler",
+      "doc": "KV set with handler triggers (for testing event-driven handlers)",
       "params": [
         {
           "name": "key",
@@ -1902,28 +2234,33 @@
       ],
       "returns": {
         "kind": "unit"
-      }
+      },
+      "intent": "mutating"
     },
     {
       "name": "shared_add_writer",
+      "doc": "Add a writer, by ACCOUNT — the writer set grants people, so one grant\ncovers every device they hold.",
       "params": [
         {
-          "name": "writer_bs58",
+          "name": "writer",
           "type": {
-            "kind": "string"
+            "kind": "bytes",
+            "size": 32
           }
         }
       ],
       "returns": {
         "kind": "unit"
-      }
+      },
+      "intent": "mutating"
     },
     {
       "name": "shared_get",
       "params": [],
       "returns": {
         "kind": "string"
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "shared_get_writers",
@@ -1933,45 +2270,52 @@
         "items": {
           "kind": "string"
         }
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "shared_is_frozen",
       "params": [],
       "returns": {
         "kind": "bool"
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "shared_is_writer",
       "params": [
         {
-          "name": "key_bs58",
+          "name": "account",
           "type": {
-            "kind": "string"
+            "kind": "bytes",
+            "size": 32
           }
         }
       ],
       "returns": {
         "kind": "bool"
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "shared_rotate_writers",
+      "doc": "Replace the entire writer set in one rotation (unlike `shared_add_writer`,\nwhich only unions in a single key). Lets a test drop a writer — required\nto exercise concurrent rotations that diverge on membership and to assert\nretroactive revocation. The caller must be a current writer.",
       "params": [
         {
           "name": "writers",
           "type": {
             "kind": "list",
             "items": {
-              "kind": "string"
+              "kind": "bytes",
+              "size": 32
             }
           }
         }
       ],
       "returns": {
         "kind": "unit"
-      }
+      },
+      "intent": "mutating"
     },
     {
       "name": "shared_set",
@@ -1985,27 +2329,33 @@
       ],
       "returns": {
         "kind": "unit"
-      }
+      },
+      "intent": "mutating"
     },
     {
       "name": "sorted_keys",
+      "doc": "All keys in ascending order (index-backed).",
       "params": [],
       "returns": {
         "kind": "list",
         "items": {
           "kind": "string"
         }
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "sorted_last_key",
+      "doc": "The largest key (reverse-seek `last`, index-backed).",
       "params": [],
       "returns": {
         "kind": "string"
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "sorted_range",
+      "doc": "Entries whose keys fall within `[start, end)`, ascending (a range seek).",
       "params": [
         {
           "name": "start",
@@ -2028,7 +2378,8 @@
         "value": {
           "kind": "string"
         }
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "sorted_set",
@@ -2048,10 +2399,12 @@
       ],
       "returns": {
         "kind": "unit"
-      }
+      },
+      "intent": "mutating"
     },
     {
       "name": "sorted_tag_add",
+      "doc": "Insert `tag`; returns `true` if it was newly added.",
       "params": [
         {
           "name": "tag",
@@ -2062,10 +2415,12 @@
       ],
       "returns": {
         "kind": "bool"
-      }
+      },
+      "intent": "mutating"
     },
     {
       "name": "sorted_tag_contains",
+      "doc": "Whether `tag` is in the set.",
       "params": [
         {
           "name": "tag",
@@ -2076,10 +2431,12 @@
       ],
       "returns": {
         "kind": "bool"
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "sorted_tag_remove",
+      "doc": "Remove `tag`; returns `true` if it was present.",
       "params": [
         {
           "name": "tag",
@@ -2090,27 +2447,33 @@
       ],
       "returns": {
         "kind": "bool"
-      }
+      },
+      "intent": "mutating"
     },
     {
       "name": "sorted_tags_all",
+      "doc": "All elements in ascending order (index-backed).",
       "params": [],
       "returns": {
         "kind": "list",
         "items": {
           "kind": "string"
         }
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "sorted_tags_last",
+      "doc": "The largest element (reverse-seek `last`, index-backed).",
       "params": [],
       "returns": {
         "kind": "string"
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "sorted_tags_range",
+      "doc": "Elements within `[start, end)`, ascending (a range seek).",
       "params": [
         {
           "name": "start",
@@ -2130,10 +2493,12 @@
         "items": {
           "kind": "string"
         }
-      }
+      },
+      "intent": "read_only"
     },
     {
       "name": "tracing_probe",
+      "doc": "Test-only probe for the host-backed `tracing` subscriber.\n\nEmits one `tracing` event at each level and performs a KV insert so the\nstorage crate's *own* `tracing` output (e.g. `Interface::apply_action`,\n`commit_root`) is exercised through the same path. When `debug` is set,\nraises the level to DEBUG first so those lower-level lines pass the\nfilter. Driven by the runtime `tracing_logs` integration test; the\nconvergence tests never call it, keeping DEBUG spam out of them.",
       "params": [
         {
           "name": "debug",
@@ -2144,7 +2509,8 @@
       ],
       "returns": {
         "kind": "unit"
-      }
+      },
+      "intent": "mutating"
     },
     {
       "name": "update_handler",
@@ -2164,7 +2530,9 @@
       ],
       "returns": {
         "kind": "unit"
-      }
+      },
+      "intent": "mutating",
+      "handler": true
     },
     {
       "name": "upload_file",
@@ -2196,7 +2564,8 @@
       ],
       "returns": {
         "kind": "string"
-      }
+      },
+      "intent": "mutating"
     }
   ],
   "events": [
@@ -2210,6 +2579,18 @@
       "name": "AuthoredRemoved",
       "payload": {
         "$ref": "Event_AuthoredRemoved"
+      }
+    },
+    {
+      "name": "AuthoredSortedInserted",
+      "payload": {
+        "$ref": "Event_AuthoredSortedInserted"
+      }
+    },
+    {
+      "name": "AuthoredSortedRemoved",
+      "payload": {
+        "$ref": "Event_AuthoredSortedRemoved"
       }
     },
     {
@@ -2234,6 +2615,12 @@
       "name": "AuthoredVecUpdated",
       "payload": {
         "$ref": "Event_AuthoredVecUpdated"
+      }
+    },
+    {
+      "name": "AuthoredVecUpdatedById",
+      "payload": {
+        "$ref": "Event_AuthoredVecUpdatedById"
       }
     },
     {
