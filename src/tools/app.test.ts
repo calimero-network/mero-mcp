@@ -425,7 +425,7 @@ test('select_app resolves an alias to the context it pins in the handle', async 
   }
 });
 
-test('generated tools carry a title, explicit annotations, an icon only for a URL, and _meta', async () => {
+test('generated tools carry a title, explicit annotations, no icon, and _meta', async () => {
   const s = await setup();
   try {
     const tools = (await s.client.listTools()).tools;
@@ -434,7 +434,7 @@ test('generated tools carry a title, explicit annotations, an icon only for a UR
     assert.equal(get.title, 'Get (KV Store)');
     assert.deepEqual(get.annotations, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false });
     assert.deepEqual(add.annotations, { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false });
-    assert.deepEqual(get.icons, [{ src: 'https://example.com/kv.png' }]);
+    assert.equal(get.icons, undefined);
     assert.equal(add.icons, undefined);
     assert.deepEqual(get._meta, { package: 'com.calimero.kv-store', appVersion: '1.0.0', signerId: 'SignerKey1', intent: 'read_only' });
     // select_app only reads the node and mints a handle, so clients need not confirm it.
@@ -451,6 +451,28 @@ test('a long method name is cut to 49 characters with a hash of the full name', 
     const name = (await s.client.listTools()).tools.map((t) => t.name).find((n) => n.startsWith('a_very_long'))!;
     assert.equal(name.length, 49);
     assert.match(name, /^a_very_long_applicat_reconcile_every_pendi_[0-9a-f]{6}$/);
+  } finally {
+    await s.close();
+  }
+});
+
+test('a method returning unit advertises no outputSchema and sends no structuredContent', async () => {
+  const app: FakeApp = {
+    ...kv(),
+    abi: manifest(
+      [method('clear', [], { returns: { kind: 'unit' } }), method('wipe', [], { returns: { $ref: 'Done' } }), method('get', [], { returns: { kind: 'string' } })],
+      { Done: { kind: 'alias', target: { kind: 'unit' } } },
+    ),
+  };
+  const s = await setup([app]);
+  try {
+    const tools = (await s.client.listTools()).tools;
+    assert.equal(tools.find((t) => t.name === 'kv_store_clear')!.outputSchema, undefined);
+    assert.equal(tools.find((t) => t.name === 'kv_store_wipe')!.outputSchema, undefined);
+    assert.ok(tools.find((t) => t.name === 'kv_store_get')!.outputSchema);
+    const { app_handle } = await s.json('select_app', { app: 'kv-store' });
+    assert.equal((await s.call('kv_store_clear', { app_handle })).structuredContent, undefined);
+    assert.equal((await s.call('kv_store_wipe', { app_handle })).structuredContent, undefined);
   } finally {
     await s.close();
   }
@@ -997,6 +1019,17 @@ test('ABI docs and flags reach the tool: description, parameter doc, returns_doc
     assert.deepEqual(get.outputSchema, { type: 'string', description: 'The stored value.' });
     const described = await s.json('describe_app', { app: 'kv-store' });
     assert.deepEqual(described.methods, ['Delete every key.\n\n[mut] clear() -> unit', '[view] get(key: string) -> string\n  key: Up to 64 bytes.']);
+  } finally {
+    await s.close();
+  }
+});
+
+test('a generated tool serializes its result compactly in the text block', async () => {
+  const s = await setup([kv(), plain()], '2025-11-25', { execute: () => ({ id: 7, tags: ['a'] }) });
+  try {
+    const { app_handle } = await s.json('select_app', { app: 'notes' });
+    const added = await s.call('notes_add', { app_handle, body: 'x' });
+    assert.equal(added.content[0].text, '{"id":7,"tags":["a"]}');
   } finally {
     await s.close();
   }

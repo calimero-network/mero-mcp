@@ -176,7 +176,7 @@ test('list_applications decodes metadata for display: JSON object, plain string,
   };
   const { server, tools } = fakeServer();
   register(server, fakeSession(admin), loadConfig(env()), CATALOG);
-  const { apps } = jsonOf(await tools.get('list_applications')!({})) as unknown as { apps: Array<Record<string, unknown>> };
+  const { apps } = jsonOf(await tools.get('list_applications')!({ verbose: true })) as unknown as { apps: Array<Record<string, unknown>> };
 
   assert.deepEqual(apps[0].metadata, { name: 'kv-store' });
   assert.equal(apps[1].metadata, 'plain text');
@@ -197,7 +197,7 @@ test('list_applications adds appVersion, leaves the guide out and lists its proc
   };
   const { server, tools } = fakeServer();
   register(server, fakeSession(admin), loadConfig(env()), CATALOG);
-  const { apps } = jsonOf(await tools.get('list_applications')!({})) as unknown as { apps: Array<Record<string, unknown>> };
+  const { apps } = jsonOf(await tools.get('list_applications')!({ verbose: true })) as unknown as { apps: Array<Record<string, unknown>> };
 
   assert.deepEqual(apps[0].metadata, { name: 'kv-store' });
   assert.deepEqual(apps[0].procedures, ['Save a value', 'Read it back']);
@@ -208,26 +208,70 @@ test('list_applications adds appVersion, leaves the guide out and lists its proc
   assert.deepEqual(apps[2].procedures, []);
 });
 
-test('list_contexts renders dagHeads as hex, keeping every head a multi-head context carries', async () => {
+test('list_applications returns compact rows by default: no icon, blob or signer, a truncated description, hasGuide', async () => {
+  const guide = ['## Procedures', '### Save a value'].join('\n');
+  const icon = 'data:image/png;base64,' + 'A'.repeat(5000);
   const admin = {
-    getContexts: async () => ({
-      contexts: [
+    listApplications: async () => ({
+      apps: [
         {
-          id: 'Ctx111',
-          applicationId: 'AppId111',
-          contextStateHash: 'a'.repeat(64),
-          dagHeads: [
-            [1, 2, 3],
-            [255, 0, 128],
-          ],
+          id: 'AppId1',
+          package: 'pkg-guided',
+          version: '0.1.0',
+          blob: { bytecode: 'b' },
+          signer_id: 'sig',
+          metadata: utf8Bytes(JSON.stringify({ name: 'kv-store', description: 'd'.repeat(500), icon, guide })),
         },
+        { id: 'AppId2', package: 'pkg-plain', version: '0.2.0', metadata: [] },
       ],
     }),
   };
   const { server, tools } = fakeServer();
   register(server, fakeSession(admin), loadConfig(env()), CATALOG);
-  const { contexts } = jsonOf(await tools.get('list_contexts')!({})) as unknown as { contexts: Array<{ dagHeads: string[] }> };
+  const result = await tools.get('list_applications')!({});
+  const { apps } = jsonOf(result) as unknown as { apps: Array<Record<string, unknown>> };
+
+  assert.deepEqual(Object.keys(apps[0]).sort(), ['description', 'hasGuide', 'id', 'name', 'package', 'procedures', 'version']);
+  assert.equal(apps[0].name, 'kv-store');
+  assert.equal((apps[0].description as string).length, 200);
+  assert.equal(apps[0].hasGuide, true);
+  assert.deepEqual(apps[0].procedures, ['Save a value']);
+  assert.equal(apps[1].hasGuide, false);
+  assert.equal(apps[1].package, 'pkg-plain');
+  assert.ok(result.content[0].text.length < 1000);
+});
+
+const SYNCED_CONTEXT = {
+  id: 'Ctx111',
+  applicationId: 'AppId111',
+  serviceName: 'docs',
+  applicationVersion: '1.0.0',
+  name: 'wow',
+  groupId: 'Grp111',
+  contextStateHash: 'a'.repeat(64),
+  dagHeads: [
+    [1, 2, 3],
+    [255, 0, 128],
+  ],
+};
+
+test('list_contexts leaves out the sync internals by default', async () => {
+  const admin = { getContexts: async () => ({ contexts: [SYNCED_CONTEXT] }) };
+  const { server, tools } = fakeServer();
+  register(server, fakeSession(admin), loadConfig(env()), CATALOG);
+  const { contexts } = jsonOf(await tools.get('list_contexts')!({})) as unknown as { contexts: Array<Record<string, unknown>> };
+  assert.deepEqual(Object.keys(contexts[0]).sort(), ['applicationId', 'applicationVersion', 'groupId', 'id', 'name', 'serviceName']);
+});
+
+test('list_contexts verbose renders dagHeads as hex, keeping every head a multi-head context carries', async () => {
+  const admin = { getContexts: async () => ({ contexts: [SYNCED_CONTEXT] }) };
+  const { server, tools } = fakeServer();
+  register(server, fakeSession(admin), loadConfig(env()), CATALOG);
+  const { contexts } = jsonOf(await tools.get('list_contexts')!({ verbose: true })) as unknown as {
+    contexts: Array<{ dagHeads: string[]; contextStateHash: string }>;
+  };
   assert.deepEqual(contexts[0].dagHeads, ['010203', 'ff0080']);
+  assert.equal(contexts[0].contextStateHash, 'a'.repeat(64));
 });
 
 // The exact object invite_to_namespace hands back: core's wire keys are snake_case, and it carries
@@ -296,7 +340,7 @@ test('delete_context is destructive and deletes by id', async () => {
   assert.equal(configs.get('delete_context')?.annotations?.destructiveHint, true);
 
   const handler = tools.get('delete_context')!;
-  assert.match(textOf(await handler({ context: 'Ctx111' })), /"isDeleted": true/);
+  assert.match(textOf(await handler({ context: 'Ctx111' })), /"isDeleted":true/);
   assert.deepEqual(calls, [['Ctx111']]);
 });
 
@@ -312,7 +356,7 @@ test('install_application splits package@version, and rejects a coordinate missi
   register(server, fakeSession(admin), loadConfig(env()), CATALOG);
 
   const handler = tools.get('install_application')!;
-  assert.match(textOf(await handler({ coords: 'network.calimero.kv-store@1.0.0' })), /"applicationId": "AppId111"/);
+  assert.match(textOf(await handler({ coords: 'network.calimero.kv-store@1.0.0' })), /"applicationId":"AppId111"/);
   assert.deepEqual(calls, [[{ package: 'network.calimero.kv-store', version: '1.0.0' }]]);
 
   const bad = await handler({ coords: 'network.calimero.kv-store' });
@@ -340,8 +384,8 @@ test('install and uninstall refresh the app list after the node answers, and a f
   const installed = await tools.get('install_application')!({ coords: 'network.calimero.kv-store@1.0.0' });
   const removed = await tools.get('uninstall_application')!({ application: 'AppId111' });
   assert.equal(installed.isError, undefined);
-  assert.match(textOf(installed), /"applicationId": "AppId111"/);
-  assert.match(textOf(removed), /"applicationId": "AppId111"/);
+  assert.match(textOf(installed), /"applicationId":"AppId111"/);
+  assert.match(textOf(removed), /"applicationId":"AppId111"/);
   assert.deepEqual(order, ['install', 'sync', 'uninstall', 'sync']);
   assert.equal(logged.mock.callCount(), 2);
 });

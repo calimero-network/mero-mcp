@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { McpServer, RegisteredTool } from '@modelcontextprotocol/server';
-import type { AbiMethod } from '@calimero-network/abi-codegen';
+import type { AbiManifest, AbiMethod } from '@calimero-network/abi-codegen';
 import {
   AppNotFoundError,
   INIT_METHOD,
@@ -99,11 +99,24 @@ function documentReturn(json: Record<string, unknown>, method: AbiMethod): Recor
   return { ...json, description: hint ? `${method.returns_doc} (${hint})` : method.returns_doc };
 }
 
+/** A unit return, directly or through a chain of aliases, carries no value: no outputSchema and no structuredContent. */
+function returnsValue(manifest: AbiManifest, method: AbiMethod) {
+  let t = method.returns;
+  for (const seen = new Set<string>(); t && '$ref' in t && !seen.has(t.$ref); ) {
+    seen.add(t.$ref);
+    const def = manifest.types?.[t.$ref];
+    if (def?.kind !== 'alias') break;
+    t = def.target;
+  }
+  return t && 'kind' in t && t.kind === 'unit' ? undefined : method.returns;
+}
+
 function toolConfig(app: ResolvedApp, method: AbiMethod) {
   const input = schemaBuilder(app.manifest, 'input');
   const output = schemaBuilder(app.manifest, 'output');
   const readOnly = method.intent === 'read_only';
-  const returned = method.returns && output.type(method.returns);
+  const value = returnsValue(app.manifest, method);
+  const returned = value && output.type(value);
   const returns = returned && (method.returns_nullable ? returned.nullable() : returned);
   return {
     title: toolTitle(app, method.name),
@@ -118,7 +131,6 @@ function toolConfig(app: ResolvedApp, method: AbiMethod) {
       idempotentHint: method.idempotent === true || readOnly,
       openWorldHint: false,
     },
-    ...(app.icon && URL.canParse(app.icon) ? { icons: [{ src: app.icon }] } : {}),
     _meta: {
       package: packageKey(app),
       appVersion: app.version ?? null,
@@ -168,8 +180,8 @@ export function registerGeneratedTools(
     const argsJson = parseArgs(method, app.manifest, args);
     const result = await session.mero.rpc.execute({ contextId: admitted.contextId, method: method.name, argsJson });
     return {
-      content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) ?? 'null' }],
-      ...(method.returns ? { structuredContent: result as Record<string, unknown> } : {}),
+      content: [{ type: 'text' as const, text: JSON.stringify(result) ?? 'null' }],
+      ...(returnsValue(app.manifest, method) ? { structuredContent: result as Record<string, unknown> } : {}),
     };
   }
 

@@ -8,7 +8,7 @@ import type { NodeSession } from '../node.ts';
 import type { Catalog } from '../catalog.ts';
 import { INIT_METHOD, type AbiLoader } from '../abi.ts';
 import { errorResult, textResult, toMessage } from '../errors.ts';
-import { listing } from '../guide.ts';
+import { listing, metadataField } from '../guide.ts';
 import { inputShapeForMethod, methodReference } from '../schema.ts';
 
 /** Runs an admin call and folds its result or throw into the MCP text-result convention. */
@@ -30,6 +30,8 @@ const opaqueInvitation = z
 
 // Hex matches how this codebase already renders bytes for display (see schema.ts's bytesSchema).
 const toHex = (bytes: number[]) => Buffer.from(bytes).toString('hex');
+
+const DESCRIPTION_MAX = 200; // keeps a listing row small
 
 const VISIBILITY = z.enum(['open', 'restricted']).describe('open: namespace members can join; restricted: members must be added.');
 
@@ -114,10 +116,28 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
 
   server.registerTool(
     'list_applications',
-    { description: 'Applications installed on this node.', inputSchema: {}, annotations: { readOnlyHint: true } },
-    wrap(async (_args: Record<string, never>) => {
+    {
+      description: 'Applications installed on this node, as compact rows; describe_app has the rest. verbose returns the full records, icons included.',
+      inputSchema: { verbose: z.boolean().optional() },
+      annotations: { readOnlyHint: true },
+    },
+    wrap(async ({ verbose }: { verbose?: boolean }) => {
       const { apps } = await admin.listApplications();
-      return { apps: apps.map((app: Application) => ({ ...app, appVersion: app.version ?? null, ...listing(app.metadata) })) };
+      if (verbose) return { apps: apps.map((app: Application) => ({ ...app, appVersion: app.version ?? null, ...listing(app.metadata) })) };
+      return {
+        apps: apps.map((app: Application) => {
+          const description = metadataField(app.metadata, 'description');
+          return {
+            id: app.id,
+            package: app.package,
+            name: metadataField(app.metadata, 'name'),
+            version: app.version,
+            description: description && description.slice(0, DESCRIPTION_MAX),
+            hasGuide: metadataField(app.metadata, 'guide') !== undefined,
+            procedures: listing(app.metadata).procedures,
+          };
+        }),
+      };
     }),
   );
 
@@ -131,14 +151,21 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
     'list_contexts',
     {
       description: 'Contexts on this node, optionally filtered to one application.',
-      inputSchema: { application: z.string().optional().describe('Application id, package name, or display name.') },
+      inputSchema: {
+        application: z.string().optional().describe('Application id, package name, or display name.'),
+        verbose: z.boolean().optional().describe('Also return contextStateHash and dagHeads.'),
+      },
       annotations: { readOnlyHint: true },
     },
-    wrap(async ({ application }: { application?: string }) => {
+    wrap(async ({ application, verbose }: { application?: string; verbose?: boolean }) => {
       const { contexts } = application
         ? await admin.getContextsForApplication((await identify(application)).id)
         : await admin.getContexts();
-      return { contexts: contexts.map((ctx: ContextWithGroup) => ({ ...ctx, dagHeads: ctx.dagHeads?.map(toHex) })) };
+      return {
+        contexts: contexts.map(({ contextStateHash, dagHeads, ...ctx }: ContextWithGroup) =>
+          verbose ? { ...ctx, contextStateHash, dagHeads: dagHeads?.map(toHex) } : ctx,
+        ),
+      };
     }),
   );
 
