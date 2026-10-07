@@ -27,7 +27,7 @@ import {
   toolText,
 } from './e2e-lib.mjs';
 
-const PLANNED = 23;
+const PLANNED = 24;
 
 const { values: opts } = parseArgs({
   options: { node: { type: 'string' }, app: { type: 'string' } },
@@ -183,6 +183,7 @@ async function runChecks({ checks, mcp, api, kv, second }) {
       'create_context without args creates a callable context when the init the node serves takes none',
       "list_applications lists the guide's procedures and leaves the guide out",
       "describe_app returns the node's guide as an author-labelled embedded resource",
+      'a repeat select_app drops the guide and the methods but names the guide resource, and describe_app still has the guide',
       'generated tools and parameters carry the method docs the node serves',
     ]) {
       checks.skip(label, FOREIGN);
@@ -207,6 +208,22 @@ async function runChecks({ checks, mcp, api, kv, second }) {
       assertEqual(embedded.resource.text, guide, 'describe_app did not return the guide the node stores');
       assertEqual(embedded.resource.uri, `calimero://apps/${record.id}/${record.version}/guide`, 'the guide resource URI is wrong');
       return `${guide.length} characters of guide`;
+    });
+
+    await checks.check('a repeat select_app drops the guide and the methods but names the guide resource, and describe_app still has the guide', async () => {
+      const record = await api.application(kv.id);
+      const uri = `calimero://apps/${record.id}/${record.version}/guide`;
+      const msg = await mcp.callRaw('select_app', { app: kv.name });
+      const [summary, note, ...rest] = msg.result.content;
+      const body = JSON.parse(summary.text);
+      assertEqual(body.guide, uri, 'the repeat select_app does not name the guide resource');
+      assert(!('methods' in body), 'the repeat select_app still lists the methods');
+      assert(note.text.includes('shown earlier this session') && note.text.includes(uri), `the repeat note is wrong: ${note.text}`);
+      assertEqual(rest, [], 'the repeat select_app carried more than the summary and the note');
+      assert(msg.result.content.every((b) => b.type !== 'resource'), 'the repeat select_app embedded the guide again');
+      const again = await mcp.callRaw('describe_app', { app: kv.name });
+      assert(again.result.content.some((b) => b.type === 'resource' && b.resource.uri === uri), 'describe_app dropped the guide');
+      return `${uri} named, no embedded guide`;
     });
 
     await checks.check('generated tools and parameters carry the method docs the node serves', async () => {

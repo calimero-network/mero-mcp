@@ -1034,3 +1034,56 @@ test('a generated tool serializes its result compactly in the text block', async
     await s.close();
   }
 });
+
+test('select_app leaves out the methods, shows the guide once per session and then points at its resource', async () => {
+  const s = await setup();
+  try {
+    const first = await s.call('select_app', { app: 'kv-store' });
+    const summary = JSON.parse(first.content[0].text!);
+    assert.equal(summary.methods, undefined);
+    assert.equal(summary.guide, 'calimero://apps/kv-id/1.0.0/guide');
+    assert.equal(first.content[2].resource?.text, GUIDE);
+    const again = await s.call('select_app', { app: 'kv-store' });
+    assert.equal(again.content.length, 2);
+    assert.equal(JSON.parse(again.content[0].text!).guide, 'calimero://apps/kv-id/1.0.0/guide');
+  } finally {
+    await s.close();
+  }
+});
+
+test('describe_app always carries the guide, and select_app after a show says so and points at the resource', async () => {
+  const s = await setup();
+  try {
+    for (let i = 0; i < 2; i++) assert.equal((await s.call('describe_app', { app: 'kv-store' })).content[2].resource?.text, GUIDE);
+    const res = await s.call('select_app', { app: 'kv-store' });
+    assert.equal(res.content.length, 2);
+    assert.match(res.content[1].text!, /shown earlier this session.*calimero:\/\/apps\/kv-id\/1\.0\.0\/guide/);
+    assert.equal(JSON.parse((await s.call('describe_app', { app: 'kv-store' })).content[0].text!).methods.length, 2);
+  } finally {
+    await s.close();
+  }
+});
+
+test('a new app version shows its guide again, and verbose counts as a show', async () => {
+  const s = await setup();
+  try {
+    await s.call('select_app', { app: 'kv-store', verbose: true });
+    assert.equal((await s.call('select_app', { app: 'kv-store' })).content.length, 2);
+    s.apps[0].version = '1.1.0';
+    assert.equal((await s.call('select_app', { app: 'kv-store' })).content[2].resource?.text, GUIDE);
+  } finally {
+    await s.close();
+  }
+});
+
+test('select_app with verbose restores the methods and the guide', async () => {
+  const s = await setup();
+  try {
+    await s.call('select_app', { app: 'kv-store' });
+    const res = await s.call('select_app', { app: 'kv-store', verbose: true });
+    assert.equal(JSON.parse(res.content[0].text!).methods.length, 2);
+    assert.equal(res.content[2].resource?.text, GUIDE);
+  } finally {
+    await s.close();
+  }
+});
