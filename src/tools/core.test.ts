@@ -717,6 +717,12 @@ test('create_group with a parent nests under it for the parent application, then
   ]);
 });
 
+test('create_group states the visibility each path defaults to, since core differs between them', () => {
+  const { server, configs } = fakeServer();
+  register(server, fakeSession({}), loadConfig(env()), CATALOG);
+  assert.match(configs.get('create_group')!.description!, /open by default.*with `parent`.*restricted by default/);
+});
+
 test('create_group with a parent and no visibility creates the group and sets nothing', async () => {
   const { tools, calls } = groupAdmin();
   assert.deepEqual(jsonOf(await tools.get('create_group')!({ namespace: 'Ns111', parent: 'Grp111' })), { groupId: 'Grp222' });

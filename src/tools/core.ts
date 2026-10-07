@@ -376,7 +376,9 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
     server.registerTool(
       'create_group',
       {
-        description: 'Create a group (subgroup) inside a namespace, or nested under another group with `parent`. Returns its groupId.',
+        description:
+          'Create a group (subgroup) inside a namespace, or nested under another group with `parent`. Returns its groupId. ' +
+          'Without `parent` the group is open by default; with `parent` it is restricted by default. Pass `visibility` to choose.',
         inputSchema: {
           namespace: z.string(),
           name: z.string().optional(),

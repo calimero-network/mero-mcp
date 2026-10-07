@@ -210,10 +210,10 @@ Create a group (a subgroup) inside a namespace, or nested under another group. R
 | --- | --- | --- |
 | `namespace` | string | |
 | `name` | string, optional | |
-| `visibility` | `open` or `restricted`, optional | Defaults to `restricted` |
+| `visibility` | `open` or `restricted`, optional | Without `parent` defaults to `open`; with `parent` defaults to `restricted` |
 | `parent` | string, optional | Group id to nest under |
 
-With `parent`, the group is created for the parent's application and the visibility is applied as a second step; if that step fails, the error names the created group so `set_group_visibility` can finish the job.
+With `parent`, the group is created for the parent's application, restricted, and an explicit visibility is applied as a second step because core's nested create takes none; if that step fails, the error names the created group so `set_group_visibility` can finish the job.
 
 ### `set_group_visibility`
 
