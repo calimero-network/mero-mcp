@@ -15,7 +15,6 @@ export interface ResolvedApp {
   version?: string;
   /** metadata.name from the bundle, the human name of the app. */
   name?: string;
-  icon?: string;
   signerId?: string;
   guide?: string;
   manifest: AbiManifest;
@@ -135,7 +134,6 @@ export function createAbiLoader(session: NodeSession) {
     return {
       ...identity(app),
       name: metadataField(app.metadata, 'name'),
-      icon: metadataField(app.metadata, 'icon'),
       serviceName,
       soleService,
       blobId,
