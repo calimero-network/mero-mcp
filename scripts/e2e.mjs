@@ -192,7 +192,7 @@ async function runChecks({ checks, mcp, api, kv, second }) {
       const { apps } = await mcp.call('list_applications');
       const listed = apps.find((a) => a.id === kv.id);
       assert(listed, `${kv.id} is missing from list_applications`);
-      assert(!('guide' in (listed.metadata ?? {})), 'the full guide leaked into the listing');
+      assert(listed.hasGuide === true && !('guide' in listed), `the listing row should carry hasGuide and no guide: ${Object.keys(listed)}`);
       assert(Array.isArray(listed.procedures) && listed.procedures.length > 0, `no procedures listed: ${JSON.stringify(listed.procedures)}`);
       return JSON.stringify(listed.procedures);
     });
