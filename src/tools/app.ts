@@ -43,6 +43,8 @@ const MAX_CALLS = 32;
 const CALL_MANY_INPUT = z.object({
   calls: z
     .array(CALL_INPUT)
+    .min(1)
+    .max(MAX_CALLS)
     .describe('Calls to run; each takes what `call` takes: method, args, and an app_handle or app with context.'),
 });
 
@@ -265,9 +267,12 @@ export function registerAppTools(
       inputSchema: advertisedObject(CALL_MANY_INPUT),
     },
     async (raw: unknown) => {
-      const { calls } = (raw ?? {}) as { calls?: unknown };
-      if (!Array.isArray(calls) || calls.length === 0 || calls.length > MAX_CALLS) {
-        return refusal(`Pass calls: an array of 1 to ${MAX_CALLS} calls.`);
+      let calls: unknown[];
+      try {
+        // Items are checked one by one below, so a bad one fails alone; only the batch size is enforced here.
+        ({ calls } = CALL_MANY_INPUT.extend({ calls: z.array(z.unknown()).min(1).max(MAX_CALLS) }).parse(raw));
+      } catch (err) {
+        return errorResult(err);
       }
       const results = await Promise.all(
         calls.map(async (item: unknown) => {
