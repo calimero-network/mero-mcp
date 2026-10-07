@@ -26,7 +26,7 @@ import {
 
 const PLANNED = 8;
 
-/** Client keys are filed under the `sub` of the tokens they mint. */
+/** Client keys are filed under the `key_id` of the tokens they mint. */
 const clientIdOf = (accessToken) => JSON.parse(Buffer.from(accessToken.split('.')[1], 'base64url')).key_id;
 
 // Everything the server could authenticate or locate a node with. It must succeed on the handoff alone.

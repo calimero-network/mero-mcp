@@ -29,6 +29,7 @@
     "test:bin": "npm run build && node scripts/bin-smoke.mjs",
     "e2e": "npm run build && node scripts/e2e.mjs",
     "e2e:cycle": "npm run build && node scripts/e2e-cycle.mjs",
+    "fixtures:rebuild": "scripts/rebuild-fixtures.sh",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
