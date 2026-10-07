@@ -151,14 +151,21 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
     'list_contexts',
     {
       description: 'Contexts on this node, optionally filtered to one application.',
-      inputSchema: { application: z.string().optional().describe('Application id, package name, or display name.') },
+      inputSchema: {
+        application: z.string().optional().describe('Application id, package name, or display name.'),
+        verbose: z.boolean().optional().describe('Also return contextStateHash and dagHeads.'),
+      },
       annotations: { readOnlyHint: true },
     },
-    wrap(async ({ application }: { application?: string }) => {
+    wrap(async ({ application, verbose }: { application?: string; verbose?: boolean }) => {
       const { contexts } = application
         ? await admin.getContextsForApplication((await identify(application)).id)
         : await admin.getContexts();
-      return { contexts: contexts.map((ctx: ContextWithGroup) => ({ ...ctx, dagHeads: ctx.dagHeads?.map(toHex) })) };
+      return {
+        contexts: contexts.map(({ contextStateHash, dagHeads, ...ctx }: ContextWithGroup) =>
+          verbose ? { ...ctx, contextStateHash, dagHeads: dagHeads?.map(toHex) } : ctx,
+        ),
+      };
     }),
   );
 

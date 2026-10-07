@@ -241,26 +241,37 @@ test('list_applications returns compact rows by default: no icon, blob or signer
   assert.ok(result.content[0].text.length < 1000);
 });
 
-test('list_contexts renders dagHeads as hex, keeping every head a multi-head context carries', async () => {
-  const admin = {
-    getContexts: async () => ({
-      contexts: [
-        {
-          id: 'Ctx111',
-          applicationId: 'AppId111',
-          contextStateHash: 'a'.repeat(64),
-          dagHeads: [
-            [1, 2, 3],
-            [255, 0, 128],
-          ],
-        },
-      ],
-    }),
-  };
+const SYNCED_CONTEXT = {
+  id: 'Ctx111',
+  applicationId: 'AppId111',
+  serviceName: 'docs',
+  applicationVersion: '1.0.0',
+  name: 'wow',
+  groupId: 'Grp111',
+  contextStateHash: 'a'.repeat(64),
+  dagHeads: [
+    [1, 2, 3],
+    [255, 0, 128],
+  ],
+};
+
+test('list_contexts leaves out the sync internals by default', async () => {
+  const admin = { getContexts: async () => ({ contexts: [SYNCED_CONTEXT] }) };
   const { server, tools } = fakeServer();
   register(server, fakeSession(admin), loadConfig(env()), CATALOG);
-  const { contexts } = jsonOf(await tools.get('list_contexts')!({})) as unknown as { contexts: Array<{ dagHeads: string[] }> };
+  const { contexts } = jsonOf(await tools.get('list_contexts')!({})) as unknown as { contexts: Array<Record<string, unknown>> };
+  assert.deepEqual(Object.keys(contexts[0]).sort(), ['applicationId', 'applicationVersion', 'groupId', 'id', 'name', 'serviceName']);
+});
+
+test('list_contexts verbose renders dagHeads as hex, keeping every head a multi-head context carries', async () => {
+  const admin = { getContexts: async () => ({ contexts: [SYNCED_CONTEXT] }) };
+  const { server, tools } = fakeServer();
+  register(server, fakeSession(admin), loadConfig(env()), CATALOG);
+  const { contexts } = jsonOf(await tools.get('list_contexts')!({ verbose: true })) as unknown as {
+    contexts: Array<{ dagHeads: string[]; contextStateHash: string }>;
+  };
   assert.deepEqual(contexts[0].dagHeads, ['010203', 'ff0080']);
+  assert.equal(contexts[0].contextStateHash, 'a'.repeat(64));
 });
 
 // The exact object invite_to_namespace hands back: core's wire keys are snake_case, and it carries
