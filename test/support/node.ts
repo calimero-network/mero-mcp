@@ -24,6 +24,7 @@ export function fakeNode(apps: FakeApp[], opts: { aliases?: Record<string, strin
     authMode: 'none',
     mero: {
       admin: {
+        getApplication: async () => ({ application: {} }),
         listApplications: async () => ({
           apps: apps.map((a) => ({
             id: a.id,

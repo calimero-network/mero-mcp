@@ -368,6 +368,7 @@ test('install and uninstall refresh the app list after the node answers, and a f
   const logged = t.mock.method(console, 'error', () => {});
   const order: string[] = [];
   const admin = {
+    getApplication: async () => ({ application: {} }),
     listApplications,
     installApplication: async () => (order.push('install'), { applicationId: 'AppId111' }),
     uninstallApplication: async () => (order.push('uninstall'), { applicationId: 'AppId111' }),

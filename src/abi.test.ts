@@ -272,13 +272,21 @@ test('load without a service on a multi-service app names the argument service a
   assert.equal(calls.abi, 0);
 });
 
-test('a failed detail fetch leaves the app unqualified and is retried on the next listing', async () => {
-  let fail = true;
-  const { loader, calls } = fake({ detail: () => { if (fail) throw new Error('down'); return { application: baseApp() }; } });
-  await loader.loadAll();
-  fail = false;
-  await loader.loadAll();
-  assert.equal(calls.detail, 2);
+test('a failed detail fetch leaves the app unqualified, is logged once, and is retried only after the poll interval', async () => {
+  mock.timers.enable({ apis: ['Date'], now: 0 });
+  try {
+    const logged = mock.method(console, 'error', () => {});
+    const { loader, calls } = fake({ detail: () => { throw new Error('down'); } });
+    await loader.loadAll();
+    await loader.loadAll();
+    assert.equal(calls.detail, 1, 'a second call within the interval makes no new request');
+    mock.timers.tick(30_000);
+    await loader.loadAll();
+    assert.equal(calls.detail, 2);
+    assert.equal(logged.mock.calls.filter((c) => /services/.test(String(c.arguments[0]))).length, 1, 'logged once per blob');
+  } finally {
+    mock.timers.reset();
+  }
 });
 
 test('a network failure is rethrown as-is, not as a merod upgrade prompt', async () => {
