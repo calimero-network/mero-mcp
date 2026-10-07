@@ -211,10 +211,10 @@ Create a group (a subgroup) inside a namespace, or nested under another group. R
 | --- | --- | --- |
 | `namespace` | string | |
 | `name` | string, optional | |
-| `visibility` | `open` or `restricted`, optional | Defaults to `restricted` |
+| `visibility` | `open` or `restricted`, optional | Without `parent` defaults to `open`; with `parent` defaults to `restricted` |
 | `parent` | string, optional | Group id to nest under |
 
-With `parent`, the group is created for the parent's application and the visibility is applied as a second step; if that step fails, the error names the created group so `set_group_visibility` can finish the job.
+With `parent`, the group is created for the parent's application, restricted, and an explicit visibility is applied as a second step because core's nested create takes none; if that step fails, the error names the created group so `set_group_visibility` can finish the job.
 
 ### `set_group_visibility`
 
@@ -301,7 +301,7 @@ Each tool carries a `title` (`Set blocks (Mero Blocks)`), a `description` (the m
 `readOnlyHint` follows the method's intent; `destructiveHint` and `idempotentHint` follow the ABI's `destructive` and `idempotent` flags, and `idempotentHint` is also `true` for every read-only method.
 A tool's description is the method's doc followed by its signature, or the signature alone; see [ABI mapping](/reference/abi-mapping/#docs-and-hints).
 It also carries `_meta` with the `package`, `appVersion`, `signerId` and method `intent`.
-Results carry `structuredContent` next to the JSON text.
+Results carry `structuredContent` next to the JSON text, except for methods that return unit, which return the text only.
 A contract call that fails returns `isError: true` with the node's message.
 
 ## Resources

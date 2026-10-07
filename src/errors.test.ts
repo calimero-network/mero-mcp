@@ -123,3 +123,7 @@ test('toMessage surfaces a ParseError with the explanation core stranded in `dat
 test('textResult(undefined) yields the string "null", not the literal undefined', () => {
   assert.equal(textResult(undefined).content[0].text, 'null');
 });
+
+test('textResult serializes objects compactly', () => {
+  assert.equal(textResult({ a: [1, 2], b: { c: 'x' } }).content[0].text, '{"a":[1,2],"b":{"c":"x"}}');
+});

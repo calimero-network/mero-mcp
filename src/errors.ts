@@ -102,7 +102,7 @@ export function toMessage(err: unknown): string {
 }
 
 export function textResult(data: unknown) {
-  const text = typeof data === 'string' ? data : (JSON.stringify(data, null, 2) ?? 'null');
+  const text = typeof data === 'string' ? data : (JSON.stringify(data) ?? 'null');
   return { content: [{ type: 'text' as const, text }] };
 }
 

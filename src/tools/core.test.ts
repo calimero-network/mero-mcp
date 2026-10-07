@@ -340,7 +340,7 @@ test('delete_context is destructive and deletes by id', async () => {
   assert.equal(configs.get('delete_context')?.annotations?.destructiveHint, true);
 
   const handler = tools.get('delete_context')!;
-  assert.match(textOf(await handler({ context: 'Ctx111' })), /"isDeleted": true/);
+  assert.match(textOf(await handler({ context: 'Ctx111' })), /"isDeleted":true/);
   assert.deepEqual(calls, [['Ctx111']]);
 });
 
@@ -356,7 +356,7 @@ test('install_application splits package@version, and rejects a coordinate missi
   register(server, fakeSession(admin), loadConfig(env()), CATALOG);
 
   const handler = tools.get('install_application')!;
-  assert.match(textOf(await handler({ coords: 'network.calimero.kv-store@1.0.0' })), /"applicationId": "AppId111"/);
+  assert.match(textOf(await handler({ coords: 'network.calimero.kv-store@1.0.0' })), /"applicationId":"AppId111"/);
   assert.deepEqual(calls, [[{ package: 'network.calimero.kv-store', version: '1.0.0' }]]);
 
   const bad = await handler({ coords: 'network.calimero.kv-store' });
@@ -385,8 +385,8 @@ test('install and uninstall refresh the app list after the node answers, and a f
   const installed = await tools.get('install_application')!({ coords: 'network.calimero.kv-store@1.0.0' });
   const removed = await tools.get('uninstall_application')!({ application: 'AppId111' });
   assert.equal(installed.isError, undefined);
-  assert.match(textOf(installed), /"applicationId": "AppId111"/);
-  assert.match(textOf(removed), /"applicationId": "AppId111"/);
+  assert.match(textOf(installed), /"applicationId":"AppId111"/);
+  assert.match(textOf(removed), /"applicationId":"AppId111"/);
   assert.deepEqual(order, ['install', 'sync', 'uninstall', 'sync']);
   assert.equal(logged.mock.callCount(), 2);
 });
@@ -760,6 +760,12 @@ test('create_group with a parent nests under it for the parent application, then
     ['createGroup', { applicationId: 'AppId111', name: 'Specs', parentGroupId: 'Grp111' }],
     ['setSubgroupVisibility', 'Grp222', { subgroupVisibility: 'open' }],
   ]);
+});
+
+test('create_group states the visibility each path defaults to, since core differs between them', () => {
+  const { server, configs } = fakeServer();
+  register(server, fakeSession({}), loadConfig(env()), CATALOG);
+  assert.match(configs.get('create_group')!.description!, /open by default.*with `parent`.*restricted by default/);
 });
 
 test('create_group with a parent and no visibility creates the group and sets nothing', async () => {
