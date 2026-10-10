@@ -5,6 +5,7 @@ import { MeroJs, type TokenStore, type TokenData } from '@calimero-network/mero-
 import type { Config, DiscoveredNode, Handoff } from './config.ts';
 import { resolveNode, readHandoff, listConfiguredNodes } from './config.ts';
 import { tracedFetch } from './trace.ts';
+import { withFileLock } from './file-lock.ts';
 
 export type AuthMode = 'handoff' | 'token' | 'credentials' | 'none';
 
@@ -65,6 +66,15 @@ export class FileTokenStore implements TokenStore {
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
     }
+  }
+
+  /**
+   * Held by mero-js around a refresh (mero-js >= the release with `TokenStore.withLock`), so
+   * another process on this file - mero-bot shares it - waits and adopts the rotated bundle
+   * instead of replaying the consumed refresh token, which revokes the whole family.
+   */
+  withLock<T>(fn: () => Promise<T>): Promise<T> {
+    return withFileLock(this.path, fn);
   }
 }
 
