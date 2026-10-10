@@ -13,6 +13,17 @@ const SCALARS: Record<string, () => z.ZodType> = {
   f64: () => z.number(),
 };
 
+/**
+ * What the node returns for a 64-bit integer. zod's `.int()` stops at 2^53, but a contract's u64 goes past it
+ * (a nanosecond timestamp is ~1.8e18) and arrives as a JSON number all the same: refusing it fails the whole
+ * call over one field. The value is what JSON.parse made of it; the text content carries the node's digits.
+ */
+const OUTPUT_SCALARS: Record<string, () => z.ZodType> = {
+  ...SCALARS,
+  i64: () => z.number(),
+  u64: () => z.number().nonnegative(),
+};
+
 type Meta = { id?: string; description?: string };
 type Tagged = z.ZodType & z.core.$ZodTypeDiscriminable;
 
@@ -60,7 +71,7 @@ export function schemaBuilder(m: AbiManifest, mode: SchemaMode = 'input') {
 
     function type(t: AbiTypeRef): z.ZodType {
       if ('$ref' in t) return ref(t.$ref);
-      const scalar = SCALARS[t.kind];
+      const scalar = (mode === 'output' ? OUTPUT_SCALARS : SCALARS)[t.kind];
       if (scalar) return scalar();
       switch (t.kind) {
         case 'bytes':
@@ -129,7 +140,10 @@ export function schemaBuilder(m: AbiManifest, mode: SchemaMode = 'input') {
       const shape: Record<string, z.ZodType> = {};
       for (const f of fields) {
         const base = type(f.type);
-        shape[f.name] = withDoc(f.nullable ? base.nullable() : base, f.doc, base);
+        // A contract's `Option` field is often left out rather than sent as null (serde's
+        // skip_serializing_if): in what the node returns, a nullable field may be absent.
+        const nullable = mode === 'output' ? base.nullable().optional() : base.nullable();
+        shape[f.name] = withDoc(f.nullable ? nullable : base, f.doc, base);
       }
       return z.object(shape);
     }

@@ -244,6 +244,39 @@ test('output schemas describe bytes as the array the node returns, without the h
   });
 });
 
+test('output: a nullable field the node leaves out is accepted, a required one is not', () => {
+  // MeroDesign's Element: `cornerRadius: Option<u32>` is skipped when None, so some elements have no such key.
+  const m = manifest({
+    types: {
+      Element: {
+        kind: 'record',
+        fields: [
+          { name: 'id', type: { kind: 'string' } },
+          { name: 'cornerRadius', type: { kind: 'u32' }, nullable: true },
+        ],
+      },
+    },
+  } as Partial<AbiManifest>);
+  const out = schemaBuilder(m, 'output').type({ $ref: 'Element' });
+  assert.equal(out.safeParse({ id: 'a', cornerRadius: 0 }).success, true);
+  assert.equal(out.safeParse({ id: 'b', cornerRadius: null }).success, true);
+  assert.equal(out.safeParse({ id: 'c' }).success, true, 'an absent Option is None');
+  assert.equal(out.safeParse({ cornerRadius: 0 }).success, false, 'a required field still is');
+  const json = schemaBuilder(m, 'output');
+  assert.deepEqual((json.jsonSchema(json.type({ $ref: 'Element' })) as { required?: string[] }).required, ['id']);
+});
+
+test('output: a u64 past 2^53 (a nanosecond timestamp) is accepted, as the node sends it', () => {
+  const out = schemaBuilder(manifest(), 'output');
+  const u64 = out.type({ kind: 'u64' });
+  assert.equal(u64.safeParse(1791569710015214000).success, true);
+  assert.equal(u64.safeParse(-1).success, false);
+  assert.equal(out.type({ kind: 'i64' }).safeParse(-1791569710015214000).success, true);
+  assert.equal((out.jsonSchema(u64) as { maximum?: number }).maximum, undefined, 'no 2^53 cap is advertised');
+  // What an agent sends is still checked as an exact integer.
+  assert.equal(schemaBuilder(manifest()).type({ kind: 'u64' }).safeParse(1.5).success, false);
+});
+
 test('renderMethodSignature unwraps a crdt record the same way the schema does', () => {
   assert.equal(
     renderMethodSignature({
