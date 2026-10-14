@@ -121,6 +121,7 @@ Only the last-resort probe in step 5 guesses at conventional ports.
 
 The server picks the first of these that applies:
 
+0. **An account of its own** - with `CALIMERO_ACCOUNT_DIR` set, none of the below: no node and no login. mero-mcp acts as that account (mero-bot's, when it runs as a cloud agent), signing each request with a device of its own that the account's root certified, through the relay that admitted the account. Everything it does carries that account's name, and its role in each context caps what it can do; `node_status` reports `authMode: "account"`.
 1. **Handoff** - a token written by the desktop app's "Connect AI agent" action.
 2. **Token** - `CALIMERO_AUTH_TOKEN` (with an optional `CALIMERO_REFRESH_TOKEN`).
 3. **Credentials** - `CALIMERO_USERNAME` and `CALIMERO_PASSWORD` (or `CALIMERO_PASSWORD_FILE`).
@@ -128,7 +129,7 @@ The server picks the first of these that applies:
 
 Tokens are cached per node and identity under `CALIMERO_MCP_STATE_DIR`, so re-authentication only happens once.
 
-**The agent credential carries `admin` permission on the node.**
+**On a node, the agent credential carries `admin` permission on the node.**
 It is a separate, revocable credential - not the same one the desktop app uses - but it is not scoped down, and every action it takes is attributed to the node's own identity exactly the way the desktop app's actions are.
 Anything an agent does through this server (installing an application, creating a context, calling a mutating method) is indistinguishable, on the node, from you having done it yourself.
 
