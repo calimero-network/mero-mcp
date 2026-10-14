@@ -101,6 +101,7 @@ All optional; the server tries to discover a node and an identity on its own.
 | `CALIMERO_PASSWORD_FILE` | File to read the password from, used when `CALIMERO_PASSWORD` is unset | - |
 | `CALIMERO_MCP_STATE_DIR` | Where the token cache and the desktop app's handoff file live | `~/.config/calimero/mcp` |
 | `CALIMERO_MCP_TOOLSETS` | Comma-separated toolsets to enable (`core`, `blobs`, `governance`); `core` is always on | all three |
+| `CALIMERO_REGISTRY_URL` | App registry that `search_registry` and `list_registry_versions` browse; set it to the node's `[registry] base_url` if that is not the public one | `https://apps.calimero.network` |
 
 ## Node discovery
 
@@ -136,7 +137,7 @@ Anything an agent does through this server (installing an application, creating 
 `node_status`, `list_nodes`, `list_applications`, `list_namespaces`, `list_contexts`, `create_context`, `join_context`, `delete_context`, `create_alias`, `lookup_alias`.
 
 **Blobs** (in `CALIMERO_MCP_TOOLSETS` by default):
-`install_application`, `uninstall_application`, `upload_blob`, `list_blobs`, `delete_blob`.
+`search_registry`, `list_registry_versions`, `install_application`, `uninstall_application`, `upload_blob`, `list_blobs`, `delete_blob`.
 
 **Governance** (in `CALIMERO_MCP_TOOLSETS` by default):
 `create_namespace`, `delete_namespace`, `invite_to_namespace`, `join_namespace`, `leave_namespace`, `list_group_members`, `add_group_members`, `create_group`, `set_group_visibility`, `set_group_metadata`, `join_open_group`.

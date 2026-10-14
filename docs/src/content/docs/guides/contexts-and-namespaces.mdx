@@ -36,7 +36,7 @@ This is the step people miss, and it is why the app's tools are listed while `se
    Call list_applications.
    ```
 
-   To add one, `install_application` takes `coords` as `package@version`.
+   To add one, `search_registry` finds it in the app registry and `install_application` takes its `coords` (`package@version`).
 
    For an app you have not used before, call `describe_app` next.
    Its guide can ask for a particular layout, such as a context in an open subgroup rather than straight in the namespace.
@@ -132,8 +132,9 @@ can prompt before running them.
 
 The `blobs` toolset covers node storage: `upload_blob` (base64 bytes, optional
 `hash`, optional `context` to scope it), `list_blobs`, `delete_blob`, plus
-`install_application` / `uninstall_application`. Application bytecode is a blob,
-which is why they share a toolset.
+`install_application` / `uninstall_application` and the `search_registry` /
+`list_registry_versions` lookups that find what to install. Application bytecode
+is a blob, which is why they share a toolset.
 
 Both `blobs` and `governance` are on by default and can be trimmed with
 [`CALIMERO_MCP_TOOLSETS`](/reference/configuration/#toolsets) when you want a

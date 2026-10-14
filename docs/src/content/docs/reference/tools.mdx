@@ -121,12 +121,37 @@ A miss returns `No alias named "…" on this node.` as a **result**, not an erro
 ## Blobs
 
 In `CALIMERO_MCP_TOOLSETS` by default. Application bytecode is a blob, which is why
-install/uninstall live here.
+install/uninstall live here, and the registry search that feeds install with them.
+
+### `search_registry`
+
+**Read-only.** Search the app registry for published applications, to find the coordinates
+`install_application` takes. Reads `CALIMERO_REGISTRY_URL`'s `GET /api/v2/bundles`, which lists
+the latest unyanked version of every package.
+
+| Argument | Type | Notes |
+| --- | --- | --- |
+| `query` | string, optional | Every word must appear in the package, name, description, author or a tag; case is ignored. Omit to list everything. |
+| `limit` | integer, optional | Rows to return, 1–100, default 20 |
+
+Returns `{ registry, total, apps }`, most downloaded first. Each row carries `coords`
+(`package@version`), `name`, `description`, `author`, `tags`, `downloads`, `verified`,
+`minRuntimeVersion` and, when the node can list its packages, `installed`. No match is
+a **result** saying so, not an error.
+
+### `list_registry_versions`
+
+**Read-only.** Every published version of one package, newest first, each with `coords`
+and `yanked`. Install a non-yanked one.
+
+| Argument | Type |
+| --- | --- |
+| `package` | string |
 
 ### `install_application`
 
 Install a published application from the node's own configured registry, by
-`package@version` coordinates.
+`package@version` coordinates. `search_registry` finds them.
 
 | Argument | Type | Notes |
 | --- | --- | --- |
