@@ -24,7 +24,7 @@ const CORE = [
   'create_alias',
   'lookup_alias',
 ];
-const BLOBS = ['install_application', 'uninstall_application', 'upload_blob', 'list_blobs', 'delete_blob'];
+const BLOBS = ['search_registry', 'list_registry_versions', 'install_application', 'uninstall_application', 'upload_blob', 'list_blobs', 'delete_blob'];
 const GOVERNANCE = [
   'create_namespace',
   'delete_namespace',
@@ -389,6 +389,111 @@ test('install and uninstall refresh the app list after the node answers, and a f
   assert.match(textOf(removed), /"applicationId":"AppId111"/);
   assert.deepEqual(order, ['install', 'sync', 'uninstall', 'sync']);
   assert.equal(logged.mock.callCount(), 2);
+});
+
+/** Stands in for the registry's GET /api/v2/bundles, recording each URL asked for. */
+function fakeRegistry(t: import('node:test').TestContext, answer: (url: URL) => Response) {
+  const asked: URL[] = [];
+  t.mock.method(globalThis, 'fetch', async (input: URL) => {
+    asked.push(new URL(input));
+    return answer(new URL(input));
+  });
+  return asked;
+}
+
+const bundle = (pkg: string, version: string, over: Record<string, unknown> = {}) => ({
+  package: pkg,
+  appVersion: version,
+  metadata: { name: pkg.split('.').pop(), description: `The ${pkg} app`, tags: [] },
+  downloads: 0,
+  ...over,
+});
+
+test('search_registry matches every word against the listing, most downloaded first, and marks what the node has', async (t) => {
+  const asked = fakeRegistry(t, () =>
+    Response.json([
+      bundle('com.calimero.kv-store', '1.2.0', { downloads: 5 }),
+      bundle('com.calimero.chat', '3.1.1', { downloads: 40, metadata: { name: 'Chat', description: 'Group chat', tags: ['communication'] } }),
+      bundle('com.acme.chatbot', '0.1.0', { downloads: 2 }),
+      { package: 'com.broken' },
+    ]),
+  );
+  const admin = { listPackages: async () => ({ packages: ['com.calimero.chat'] }) };
+  const { server, tools } = fakeServer();
+  register(server, fakeSession(admin), loadConfig(env({ CALIMERO_REGISTRY_URL: 'https://mirror.example/' })), CATALOG);
+
+  const hits = JSON.parse(textOf(await tools.get('search_registry')!({ query: 'CHAT' })));
+  assert.equal(asked[0].href, 'https://mirror.example/api/v2/bundles');
+  assert.equal(hits.registry, 'https://mirror.example');
+  assert.equal(hits.total, 2);
+  assert.deepEqual(
+    hits.apps.map((a: { coords: string; installed: boolean }) => [a.coords, a.installed]),
+    [['com.calimero.chat@3.1.1', true], ['com.acme.chatbot@0.1.0', false]],
+  );
+
+  const narrowed = JSON.parse(textOf(await tools.get('search_registry')!({ query: 'chat communication' })));
+  assert.deepEqual(narrowed.apps.map((a: { package: string }) => a.package), ['com.calimero.chat']);
+
+  const all = JSON.parse(textOf(await tools.get('search_registry')!({ limit: 1 })));
+  assert.equal(all.total, 3, 'a bundle without package or version is not a row');
+  assert.equal(all.apps.length, 1);
+
+  const miss = await tools.get('search_registry')!({ query: 'spreadsheet' });
+  assert.equal(miss.isError, undefined);
+  assert.match(textOf(miss), /No application in the registry at https:\/\/mirror\.example matches "spreadsheet"/);
+});
+
+test('search_registry still answers when the node cannot list its packages, leaving installed out', async (t) => {
+  fakeRegistry(t, () => Response.json([bundle('com.calimero.chat', '3.1.1')]));
+  const admin = { listPackages: async () => { throw new Error('node down'); } };
+  const { server, tools } = fakeServer();
+  register(server, fakeSession(admin), loadConfig(env()), CATALOG);
+
+  const result = JSON.parse(textOf(await tools.get('search_registry')!({})));
+  assert.equal(result.registry, 'https://apps.calimero.network');
+  assert.equal('installed' in result.apps[0], false);
+});
+
+test('search_registry names the registry and its status when the registry refuses or is unreachable', async (t) => {
+  const { server, tools } = fakeServer();
+  register(server, fakeSession({ listPackages: async () => ({ packages: [] }) }), loadConfig(env()), CATALOG);
+
+  fakeRegistry(t, () => new Response('nope', { status: 503 }));
+  const refused = await tools.get('search_registry')!({});
+  assert.equal(refused.isError, true);
+  assert.match(textOf(refused), /registry at https:\/\/apps\.calimero\.network answered 503/);
+
+  t.mock.restoreAll();
+  t.mock.method(globalThis, 'fetch', async () => { throw new TypeError('fetch failed'); });
+  const down = await tools.get('search_registry')!({});
+  assert.equal(down.isError, true);
+  assert.match(textOf(down), /Could not reach the app registry at https:\/\/apps\.calimero\.network: fetch failed/);
+});
+
+test('list_registry_versions asks for every version of the package, keeps the registry order, dedupes and marks yanked', async (t) => {
+  const asked = fakeRegistry(t, () =>
+    Response.json([
+      bundle('com.calimero.chat', '3.1.1'),
+      bundle('com.calimero.chat', '3.1.1'),
+      bundle('com.calimero.chat', '3.1.0', { yanked: true }),
+      bundle('com.calimero.chat', '2.0.0'),
+    ]),
+  );
+  const { server, tools } = fakeServer();
+  register(server, fakeSession(), loadConfig(env()), CATALOG);
+
+  const result = JSON.parse(textOf(await tools.get('list_registry_versions')!({ package: 'com.calimero.chat' })));
+  assert.equal(asked[0].searchParams.get('package'), 'com.calimero.chat');
+  assert.equal(asked[0].searchParams.get('all_versions'), 'true');
+  assert.deepEqual(result.versions, [
+    { version: '3.1.1', coords: 'com.calimero.chat@3.1.1', yanked: false },
+    { version: '3.1.0', coords: 'com.calimero.chat@3.1.0', yanked: true },
+    { version: '2.0.0', coords: 'com.calimero.chat@2.0.0', yanked: false },
+  ]);
+
+  t.mock.restoreAll();
+  fakeRegistry(t, () => Response.json([]));
+  assert.match(textOf(await tools.get('list_registry_versions')!({ package: 'com.nope' })), /has no package "com\.nope"/);
 });
 
 test('create_namespace and create_context resolve an application the way describe_app does', async () => {

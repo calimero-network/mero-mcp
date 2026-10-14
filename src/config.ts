@@ -5,6 +5,8 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 /** Probe order preference: the desktop app serves on 2528, merod's CLI convention is 2428. */
 const PORT_PREFERENCE = [2528, 2428, 2529, 2429];
 const ALL_TOOLSETS = ['core', 'blobs', 'governance'];
+/** What `merod init` writes into a fresh node's `[registry] base_url`. */
+export const DEFAULT_REGISTRY_URL = 'https://apps.calimero.network';
 
 export interface Config {
   nodeUrl?: string;
@@ -16,6 +18,8 @@ export interface Config {
   password?: string;
   stateDir: string;
   toolsets: Set<string>;
+  /** The registry search_registry browses; the node installs from its own, which it does not expose. */
+  registryUrl: string;
 }
 
 const trimmed = (v?: string) => v?.trim() || undefined;
@@ -41,6 +45,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     password,
     stateDir: trimmed(env.CALIMERO_MCP_STATE_DIR) ?? join(home, '.config', 'calimero', 'mcp'),
     toolsets,
+    registryUrl: (trimmed(env.CALIMERO_REGISTRY_URL) ?? DEFAULT_REGISTRY_URL).replace(/\/+$/, ''),
   };
 }
 

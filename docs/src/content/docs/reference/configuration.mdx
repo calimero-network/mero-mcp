@@ -90,6 +90,17 @@ Trimming toolsets is not a read-only mode. `core` still includes `create_context
 declares. See [blast radius](/understand/authentication/#blast-radius).
 </Aside>
 
+## Registry
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `CALIMERO_REGISTRY_URL` | App registry that `search_registry` and `list_registry_versions` browse | `https://apps.calimero.network` |
+
+`install_application` does not use this: the node installs from its own `[registry] base_url`
+in `config.toml`, which it does not expose over the admin API. The default matches what
+`merod init` writes, so the two agree unless the node was pointed at a mirror; then set
+this to the same URL, or search will offer coordinates the node cannot install.
+
 ## Setting them
 
 In an MCP client config, under `env`:

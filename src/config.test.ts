@@ -414,3 +414,8 @@ test('resolveNode: zero configured nodes and no live node throws, naming CALIMER
     rmSync(stateDir, { recursive: true, force: true });
   }
 });
+
+test('registryUrl defaults to the public registry merod init writes, and CALIMERO_REGISTRY_URL overrides it without a trailing slash', () => {
+  assert.equal(loadConfig({ HOME: '/x' }).registryUrl, 'https://apps.calimero.network');
+  assert.equal(loadConfig({ HOME: '/x', CALIMERO_REGISTRY_URL: ' https://mirror.example/// ' }).registryUrl, 'https://mirror.example');
+});

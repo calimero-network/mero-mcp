@@ -10,6 +10,7 @@ import { INIT_METHOD, type AbiLoader } from '../abi.ts';
 import { errorResult, textResult, toMessage } from '../errors.ts';
 import { listing, metadataField } from '../guide.ts';
 import { inputShapeForMethod, methodReference } from '../schema.ts';
+import { createRegistry } from '../registry.ts';
 
 /** Runs an admin call and folds its result or throw into the MCP text-result convention. */
 function wrap<Args>(fn: (args: Args) => Promise<unknown>) {
@@ -32,6 +33,9 @@ const opaqueInvitation = z
 const toHex = (bytes: number[]) => Buffer.from(bytes).toString('hex');
 
 const DESCRIPTION_MAX = 200; // keeps a listing row small
+
+const REGISTRY_LIMIT = 20;
+const REGISTRY_LIMIT_MAX = 100;
 
 const VISIBILITY = z.enum(['open', 'restricted']).describe('open: namespace members can join; restricted: members must be added.');
 
@@ -268,10 +272,58 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
   );
 
   if (cfg.toolsets.has('blobs')) {
+    const registry = createRegistry(cfg.registryUrl);
+
+    server.registerTool(
+      'search_registry',
+      {
+        description:
+          'Search the app registry for published applications, to find the package@version coordinates install_application takes. ' +
+          'Matches every word of query against package, name, description, author and tags; no query lists everything. ' +
+          'Each row is the latest version, marked installed when this node already has the package.',
+        inputSchema: {
+          query: z.string().optional().describe('Words to match, e.g. "chat" or "kv store".'),
+          limit: z.number().int().min(1).max(REGISTRY_LIMIT_MAX).optional().describe(`Rows to return, default ${REGISTRY_LIMIT}.`),
+        },
+        annotations: { readOnlyHint: true, openWorldHint: true },
+      },
+      wrap(async ({ query, limit = REGISTRY_LIMIT }: { query?: string; limit?: number }) => {
+        // The installed mark is a convenience: a node that cannot list its packages still gets the search.
+        const [apps, installed] = await Promise.all([
+          registry.search(query),
+          admin.listPackages().then(({ packages }) => new Set(packages), () => undefined),
+        ]);
+        // An empty search is a true answer, so it is a result rather than an error - but it has to say so.
+        if (!apps.length) {
+          return query?.trim()
+            ? `No application in the registry at ${registry.url} matches "${query.trim()}".`
+            : `The registry at ${registry.url} lists no applications.`;
+        }
+        const rows = apps.slice(0, limit).map((app) => (installed ? { ...app, installed: installed.has(app.package) } : app));
+        return { registry: registry.url, total: apps.length, apps: rows };
+      }),
+    );
+
+    server.registerTool(
+      'list_registry_versions',
+      {
+        description: 'Every published version of one registry package, newest first; yanked versions are marked and should not be installed.',
+        inputSchema: { package: z.string().describe('Package name as search_registry returns it, e.g. com.example.myapp.') },
+        annotations: { readOnlyHint: true, openWorldHint: true },
+      },
+      wrap(async ({ package: pkg }: { package: string }) => {
+        const versions = await registry.versions(pkg);
+        if (!versions.length) return `The registry at ${registry.url} has no package "${pkg}".`;
+        return { registry: registry.url, package: pkg, versions };
+      }),
+    );
+
     server.registerTool(
       'install_application',
       {
-        description: "Install a published application from the node's registry, by package@version coordinates (e.g. com.example.myapp@1.0.0).",
+        description:
+          "Install a published application from the node's registry, by package@version coordinates (e.g. com.example.myapp@1.0.0). " +
+          'search_registry finds the coordinates.',
         inputSchema: { coords: z.string().describe('Coordinates of a published application: package@version.') },
       },
       wrap(async ({ coords }: { coords: string }) => {
