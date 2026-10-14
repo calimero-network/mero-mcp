@@ -20,6 +20,11 @@ export interface Config {
   toolsets: Set<string>;
   /** The registry search_registry browses; the node installs from its own, which it does not expose. */
   registryUrl: string;
+  /**
+   * An account of its own to act as, instead of a node and its login: mero-bot's account
+   * directory when it runs as a cloud agent. See `account.ts`.
+   */
+  accountDir?: string;
 }
 
 const trimmed = (v?: string) => v?.trim() || undefined;
@@ -46,6 +51,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     stateDir: trimmed(env.CALIMERO_MCP_STATE_DIR) ?? join(home, '.config', 'calimero', 'mcp'),
     toolsets,
     registryUrl: (trimmed(env.CALIMERO_REGISTRY_URL) ?? DEFAULT_REGISTRY_URL).replace(/\/+$/, ''),
+    accountDir: trimmed(env.CALIMERO_ACCOUNT_DIR),
   };
 }
 

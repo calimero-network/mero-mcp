@@ -6,8 +6,10 @@ import type { Config, DiscoveredNode, Handoff } from './config.ts';
 import { resolveNode, readHandoff, listConfiguredNodes } from './config.ts';
 import { tracedFetch } from './trace.ts';
 import { withFileLock } from './file-lock.ts';
+import { connectAccount } from './account.ts';
 
-export type AuthMode = 'handoff' | 'token' | 'credentials' | 'none';
+/** `account`: no node login at all, but an account of its own whose device signs each request. */
+export type AuthMode = 'handoff' | 'token' | 'credentials' | 'none' | 'account';
 
 export interface NodeSession {
   url: string;
@@ -111,6 +113,10 @@ export function pickAuthMode(cfg: Config, handoff: Handoff | null): AuthMode {
 }
 
 export async function createSession(cfg: Config): Promise<NodeSession> {
+  if (cfg.accountDir) {
+    const { url, mero } = await connectAccount(cfg.accountDir);
+    return { url, authMode: 'account', mero };
+  }
   const node = await resolveNode(cfg);
   const handoff = readHandoff(cfg);
   const authMode = pickAuthMode(cfg, handoff);

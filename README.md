@@ -102,6 +102,7 @@ All optional; the server tries to discover a node and an identity on its own.
 | `CALIMERO_MCP_STATE_DIR` | Where the token cache and the desktop app's handoff file live | `~/.config/calimero/mcp` |
 | `CALIMERO_MCP_TOOLSETS` | Comma-separated toolsets to enable (`core`, `blobs`, `governance`); `core` is always on | all three |
 | `CALIMERO_REGISTRY_URL` | App registry that `search_registry` and `list_registry_versions` browse; set it to the node's `[registry] base_url` if that is not the public one | `https://apps.calimero.network` |
+| `CALIMERO_ACCOUNT_DIR` | Act as an account of its own instead of a node and its login: mero-bot's account directory when it runs as a cloud agent. mero-mcp signs with a device of its own, certified by that account's root, and works through the relay that admitted the account. The node and login variables are then ignored | unset |
 
 ## Node discovery
 

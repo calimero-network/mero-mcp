@@ -91,7 +91,11 @@ export function registerCoreTools(server: McpServer, session: NodeSession, cfg: 
       annotations: { readOnlyHint: true },
     },
     wrap(async (_args: Record<string, never>) => {
-      const [health, discovered] = await Promise.all([admin.healthCheck(), resolveNode(cfg)]);
+      // An account of its own has a relay, not a node found on this machine.
+      const [health, discovered] = await Promise.all([
+        admin.healthCheck(),
+        cfg.accountDir ? Promise.resolve({ source: 'account' }) : resolveNode(cfg),
+      ]);
       return {
         health,
         url: session.url,
