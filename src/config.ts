@@ -117,6 +117,23 @@ function nonLoopbackOrigin(url: string): string | null {
   return parsed.origin === 'null' ? parsed.protocol : parsed.origin;
 }
 
+/**
+ * One spelling per node: a loopback host becomes `localhost`, and a trailing slash goes. The token file is
+ * keyed on the url and mero-js binds stored tokens to it, so `127.0.0.1` and `localhost` for one node would
+ * otherwise hold two copies of one login, and the second to refresh spends a used token and revokes the family.
+ * `nodeUrlFromConfigToml` already names a node `localhost`; mero-bot spells its urls the same way.
+ */
+export function canonicalNodeUrl(url: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return url.replace(/\/+$/, '');
+  }
+  if (nonLoopbackOrigin(url) === null) parsed.hostname = 'localhost';
+  return (parsed.origin === 'null' ? url : parsed.origin + parsed.pathname).replace(/\/+$/, '');
+}
+
 /** The desktop app's "Connect AI agent" output. Absent or malformed is not an error - the next auth rung applies. */
 export function readHandoff(cfg: Config): Handoff | null {
   const path = join(cfg.stateDir, 'agent.json');

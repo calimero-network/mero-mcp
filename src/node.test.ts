@@ -220,3 +220,35 @@ test('createSession keeps a cached token rotated past the handoff', async () => 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('a session on 127.0.0.1 and one on localhost share one login for the same node', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mcp-tok-'));
+  const on = (url: string) => loadConfig({ HOME: '/x', CALIMERO_MCP_STATE_DIR: dir, CALIMERO_NODE_URL: url } as NodeJS.ProcessEnv);
+  try {
+    writeFileSync(join(dir, 'agent.json'), JSON.stringify({ accessToken: at(1000), refreshToken: 'handoff' }));
+    const first = await createSession(on('http://127.0.0.1:2528'));
+    // What a refresh leaves behind: a newer pair, and the handoff's refresh token spent.
+    first.mero.setTokenData(stored(at(2000)));
+
+    const second = await createSession(on('http://localhost:2528'));
+
+    // A copy of its own would re-inject the handoff and spend 'handoff' again, which revokes the whole family.
+    assert.equal(second.mero.getTokenData()?.refresh_token, stored(at(2000)).refresh_token);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a session reports its loopback node as localhost however it was given', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mcp-tok-'));
+  try {
+    for (const url of ['http://127.0.0.1:2528', 'http://[::1]:2528/', 'http://localhost:2528']) {
+      const cfg = loadConfig({ HOME: '/x', CALIMERO_MCP_STATE_DIR: dir, CALIMERO_NODE_URL: url } as NodeJS.ProcessEnv);
+      assert.equal((await createSession(cfg)).url, 'http://localhost:2528', url);
+    }
+    const remote = loadConfig({ HOME: '/x', CALIMERO_MCP_STATE_DIR: dir, CALIMERO_NODE_URL: 'https://node.example.com:2528' } as NodeJS.ProcessEnv);
+    assert.equal((await createSession(remote)).url, 'https://node.example.com:2528');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
