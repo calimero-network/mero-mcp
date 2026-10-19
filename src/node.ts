@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync, readFileSync, unlinkSync, renameSync } from '
 import { join } from 'node:path';
 import { MeroJs, type TokenStore, type TokenData } from '@calimero-network/mero-js';
 import type { Config, DiscoveredNode, Handoff } from './config.ts';
-import { resolveNode, readHandoff, listConfiguredNodes } from './config.ts';
+import { canonicalNodeUrl, resolveNode, readHandoff, listConfiguredNodes } from './config.ts';
 import { tracedFetch } from './trace.ts';
 import { withFileLock } from './file-lock.ts';
 import { connectAccount } from './account.ts';
@@ -118,12 +118,13 @@ export async function createSession(cfg: Config): Promise<NodeSession> {
     return { url, authMode: 'account', mero };
   }
   const node = await resolveNode(cfg);
+  const url = canonicalNodeUrl(node.url);
   const handoff = readHandoff(cfg);
   const authMode = pickAuthMode(cfg, handoff);
-  const store = new FileTokenStore(cfg.stateDir, node.url, cfg.username);
+  const store = new FileTokenStore(cfg.stateDir, url, cfg.username);
 
   const mero = new MeroJs({
-    baseUrl: node.url,
+    baseUrl: url,
     tokenStore: store,
     fetch: tracedFetch,
     ...(authMode === 'credentials' ? { credentials: { username: cfg.username!, password: cfg.password! } } : {}),
@@ -138,5 +139,5 @@ export async function createSession(cfg: Config): Promise<NodeSession> {
   }
   if (authMode === 'credentials' && !mero.isAuthenticated()) await mero.authenticate();
 
-  return { url: node.url, nodeName: nodeNameFor(cfg, node), authMode, mero };
+  return { url, nodeName: nodeNameFor(cfg, node), authMode, mero };
 }
